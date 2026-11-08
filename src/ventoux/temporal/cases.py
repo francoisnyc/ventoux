@@ -40,7 +40,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.admission import ProposalRefused, RetryRefused
     from ventoux.case.advising import AdvisorView, advisor_view
     from ventoux.case.answers import AnswerRefused
-    from ventoux.case.audit import AuditRecord
+    from ventoux.case.audit import AuditRecord, Decision
     from ventoux.case.called import unbound
     from ventoux.case.claims import ClaimRefused, assignees
     from ventoux.case.closing import CloseRefused, needs_attention
@@ -111,7 +111,12 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.temporal.activities import OUTCOME
     from ventoux.temporal.audit import ExportSent, restricted_fields, sensitive_fields
     from ventoux.temporal.bindings import Binding
-    from ventoux.temporal.carried import record_as_data, state_as_data, state_from_data
+    from ventoux.temporal.carried import (
+        decision_from_data,
+        record_as_data,
+        state_as_data,
+        state_from_data,
+    )
     from ventoux.temporal.children import (
         SETTLE,
         ChildAsked,
@@ -1148,19 +1153,34 @@ class CaseWorkflow:
             return
         finally:
             self.children.pop(command.entry, None)
+        # What the plan decided, for the record of the step's end (brief, D77).
+        decided = tuple(self.plan_ran(command.entry, ran))
         if ran.status == "cancelled":
             # Ended by the close, with what finished or failed in it after the close (brief, D28).
-            self.inbox.append(PlanCancelled(command.entry, tuple(ran.after_stop), at=now()))
+            self.inbox.append(
+                PlanCancelled(command.entry, tuple(ran.after_stop), at=now(), ran=decided)
+            )
         elif ran.status == "succeeded":
-            self.inbox.append(Completed(command.entry, {}, at=now()))
+            self.inbox.append(Completed(command.entry, {}, at=now(), ran=decided))
         elif ran.status == "failed":
             self.inbox.append(
-                Completed(command.entry, {}, "failed", at=now())
+                Completed(command.entry, {}, "failed", at=now(), ran=decided)
             )  # a failed final state
         else:
             self.inbox.append(
-                Failed(command.entry, f"{command.plan} stopped: {ran.reason}", at=now())
+                Failed(
+                    command.entry, f"{command.plan} stopped: {ran.reason}", at=now(), ran=decided
+                )
             )
+
+    def plan_ran(self, entry: str, ran: RunReport) -> list[Decision]:
+        """What the plan run `entry` decided, as its report gives it, each naming its step and
+        run."""
+        step = entry.split("#")[0]
+        # A plan's inputs aren't the case's fields: each comes back as it crossed.
+        return [
+            replace(decision_from_data(each, {}), step=step, entry=entry) for each in ran.decisions
+        ]
 
     async def run_workflow(self, command: StartWorkflow) -> None:
         """Run the workflow step as a child workflow, `<case ID>/<entry>`, of the type and on the

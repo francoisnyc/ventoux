@@ -143,6 +143,8 @@ def decision_as_written(decision: Decision, sealer: "Sealer", place: str) -> dic
         "wrote": None if wrote is None else fact_as_written(wrote, sealer, f"{place}/wrote"),
         "target": decision.target,
         "reason": decision.reason,
+        "by": decision.by,
+        "outcome": decision.outcome,
     }
 
 

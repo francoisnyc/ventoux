@@ -1,6 +1,7 @@
 """Run cases in memory, in tests: no Temporal server, scripted answers, fake activities."""
 
 import asyncio
+import dataclasses
 import json
 import shutil
 import tempfile
@@ -34,6 +35,7 @@ from ventoux.case.memory import (
 )
 from ventoux.case.migrations import migration_of
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
+from ventoux.case.recording import plan_decisions
 from ventoux.case.releases import Record, digest, package
 from ventoux.case.requests import ChangeRefused
 from ventoux.case.runtime import CaseRefused, EventRefused, decide
@@ -780,12 +782,20 @@ def plan_runner(
             )
         except RunRefused as refused:
             return Failed(command.entry, f"{command.plan} can't start: {refused}", at=at)
+        # What the plan decided, for the record of the step's end, as on Temporal (brief, D77).
+        step = command.entry.split("#")[0]
+        decided = tuple(
+            dataclasses.replace(each, step=step, entry=command.entry)
+            for each in plan_decisions(ran.history)
+        )
         if ran.status == "succeeded":
-            return Completed(command.entry, {}, at=at)
+            return Completed(command.entry, {}, at=at, ran=decided)
         if ran.status == "failed":
-            return Completed(command.entry, {}, "failed", at=at)  # a failed final state: an outcome
+            # A failed final state: an outcome.
+            return Completed(command.entry, {}, "failed", at=at, ran=decided)
         if ran.status == "stopped":
-            return Failed(command.entry, f"{command.plan} stopped: {ran.reason}", at=at)
+            reason = f"{command.plan} stopped: {ran.reason}"
+            return Failed(command.entry, reason, at=at, ran=decided)
         return None  # waiting for an answer the script doesn't give: the step runs on
 
     return run

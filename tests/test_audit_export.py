@@ -25,10 +25,14 @@ from test_child_cases import repair
 from test_sensitive import FILE, NATIONAL_ID, claim
 from test_temporal_case import (
     LARGE,
+    PEOPLE,
     QUEUE,
     REVIEW_FORM,
+    CasesWithPlans,
     SwitchingCases,
+    child_waiting_at,
     on_temporal,
+    proposed_settle,
     reported,
 )
 from test_temporal_children import CLOSING, VIN, sensitive, started
@@ -41,6 +45,7 @@ from ventoux.case.audit import AuditRecord
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import ExportRetried
+from ventoux.temporal import client as plans
 from ventoux.temporal.audit import ExportRefused, exported, restricted_fields, sensitive_fields
 from ventoux.temporal.cases import (
     CaseReport,
@@ -48,6 +53,7 @@ from ventoux.temporal.cases import (
     CaseWorkflow,
     answer,
     close,
+    propose,
     retry_export,
     shown,
     start_case,
@@ -570,3 +576,48 @@ def test_with_the_store_down_a_parent_closing_its_child_ends_once_both_exports_a
     for case, ended in (("claim-42", parent), ("claim-42/repair#1", child)):
         written = store.stream(case)
         assert [line for each in written for line in each["lines"]] == ended.history, case
+
+
+def test_a_plan_steps_events_are_in_the_record_of_its_end(tmp_path: Path) -> None:
+    # A plan run writes nothing itself: what it decided rides in the record of its step's end,
+    # each event a decision (choice 28): the payment started on its inputs, with their sources;
+    # Sam's refused answer, by him, saying why; Lee's answer; the payment completed; then the
+    # step's own end (brief, D28) (brief, D77).
+    store = FileAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, CasesWithPlans, proposed_settle(), LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await propose(case, "settle", "sam", PEOPLE["sam"])
+        plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        await plans.answer(plan, "approve_refund#1", "approve", "sam", PEOPLE["sam"])
+        await plans.answer(plan, "approve_refund#1", "approve", "lee", PEOPLE["lee"])
+        return await reported(
+            case, lambda now: "settle#1 done" in now.history and not now.unwritten
+        )
+
+    on_temporal(scenario, cases=CasesWithPlans, audit=store)
+    [ended] = [
+        each
+        for each in store.stream("refund-1")
+        if (each["act"]["kind"], each["act"]["entry"]) == ("completed", "settle#1")
+    ]
+    decided = [
+        (d["kind"], d["step"], d["entry"], d["target"], d["by"], d["outcome"])
+        for d in ended["decisions"]
+    ]
+    assert decided[-1] == ("completed", "settle", "settle#1", None, None, None)
+    ran = [each for each in decided[:-1] if each[0] != "started" or each[3] == "payments.refund@2"]
+    assert ran[-4:] == [
+        ("refused", "settle", "settle#1", "approve_refund#1", "sam", "approve"),
+        ("answered", "settle", "settle#1", "approve_refund#1", "lee", "approve"),
+        ("started", "settle", "settle#1", "payments.refund@2", None, None),
+        ("completed", "settle", "settle#1", "payments.refund@2", None, "done"),
+    ]
+    [refused] = [d for d in ended["decisions"] if d["kind"] == "refused"]
+    assert refused["reason"] == "sam proposed settle, so cannot approve it"
+    [paying] = [d for d in ended["decisions"] if d["target"] == "payments.refund@2"][:1]
+    assert {fact["field"]: fact["sources"] for fact in paying["read"]} == {
+        "order_id": ["system:opener"],
+        "amount": ["person:ana"],
+    }

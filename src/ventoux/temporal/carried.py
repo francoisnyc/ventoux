@@ -195,6 +195,8 @@ def decision_as_data(decision: Decision) -> dict[str, Any]:
         "reason": decision.reason,
         "wrote": None if decision.wrote is None else fact_as_data(decision.wrote),
         "target": decision.target,
+        "by": decision.by,
+        "outcome": decision.outcome,
     }
 
 
@@ -425,6 +427,9 @@ def decision_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> 
         reason=data["reason"],
         wrote=None if data["wrote"] is None else fact_from_data(data["wrote"], types),
         target=data["target"],
+        # Carried from 19b: a decision carried before has neither, and had neither.
+        by=data.get("by"),
+        outcome=data.get("outcome"),
     )
 
 

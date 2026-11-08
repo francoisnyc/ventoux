@@ -402,6 +402,8 @@ class Completed:
     output: Mapping[str, object]
     outcome: str = "done"
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # What a plan step's plan decided, recorded with the step's end (brief, D77); else nothing.
+    ran: tuple[Decision, ...] = field(default=(), kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -411,6 +413,8 @@ class Failed:
     entry: str
     reason: str
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # What a plan step's plan decided, recorded with the step's end (brief, D77); else nothing.
+    ran: tuple[Decision, ...] = field(default=(), kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -443,6 +447,8 @@ class PlanCancelled:
     # flags: `payments.refund@2 completed after the close was requested` (brief, D10).
     after_stop: tuple[str, ...] = ()
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # What its plan decided, recorded with the step's end (brief, D77).
+    ran: tuple[Decision, ...] = field(default=(), kw_only=True)
 
 
 @dataclass(frozen=True)
