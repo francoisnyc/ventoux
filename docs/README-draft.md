@@ -398,7 +398,8 @@ A ticked item is built. An open one says what is built of it so far, if anything
 
 Beyond v1.0, tracked as issues: stages, advanced joins (such as an inclusive join, waiting for
 every branch that started), timers anchored to a date on the case, absolute and recurring timers,
-suspend and reactivate, declared compensation (sagas), inbound event adapters, signed approvals (the
+suspend and reactivate, the Ventoux API and a reference inbox (in v1.0 the trusted caller is your
+own service), declared compensation (sagas), inbound event adapters, signed approvals (the
 production default for high-risk steps), plans drafted by a model for a single case at runtime,
 tamper-evident history, capture of model inputs and outputs, revising drafts in conversation, and
 tool search during authoring.

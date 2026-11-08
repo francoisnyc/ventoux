@@ -1,10 +1,16 @@
 # Layer 20: Deployment and the published package
 
-Status: 2026-11-08, questions asked, none answered. This note starts from `main` at `cd6e24f`, with
+Status: 2026-11-08, questions answered; 20a being built. This note starts from `main` at `cd6e24f`, with
 layers 0 to 19 merged. The warm-up was asked and recorded (learning question 9). The guide was
 written first (curriculum step 2): `docs/guides/deployment.md` describes the layer as if it
 worked, following the recommendations below, each place marked *(open: question N)*; it changes
 with the answers.
+
+**Answered 2026-11-08: A, B and 1 to 9 as recommended; 5a `ventoux`; 5b `0.1.0`.** D79 (the
+trusted caller, with dated amendments under D19 and "Out of scope for v1.0") and D80 (the
+conformance suite, with a dated amendment under D4) are written before 20a is built; D81 before
+20b, D82 before 20c. `README.md` and `README-draft.md` follow D79. The branch is renamed
+`layer-20a-conformance`.
 
 Prior art: none in the prototype (the curriculum names none).
 

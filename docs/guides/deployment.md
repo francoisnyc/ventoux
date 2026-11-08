@@ -4,9 +4,8 @@ For the platform team: what a production deployment of Ventoux is made of, what 
 down, and how `ventoux doctor` checks it. The other guides say what each part does; this one says
 how they are put together, and which of the deployment's promises hold only because you keep them.
 
-> **Draft, layer 20 step 2:** written as if the layer were built. Where it rests on a design
-> question still open (the layer's note, `docs/layers/20-deployment.md`), it follows the
-> recommendation and says *(open: question N)*. It is revised with the answers.
+> Written first (layer 20, step 2) and changed with the answers in `docs/layers/20-deployment.md`;
+> each section is true once the part that builds it (20a, 20b, 20c) is merged.
 
 ## What you deploy
 
@@ -15,7 +14,7 @@ Ventoux adds no server of its own to Temporal. A production deployment is:
 | Part | What it is | Who runs it |
 |---|---|---|
 | **Temporal** | your namespace, self-hosted or Temporal Cloud; cases are its workflows | you, as today |
-| **The trusted caller** | the one service that starts cases and sends every answer, stating who answered and their roles (D19, D22) | you *(open: question 1)* |
+| **The trusted caller** | your service: the one that starts cases and sends every answer, stating who answered and their roles (D19, D22, D79) | you |
 | **Case workers** | your processes running `environment_worker`, with your catalog's activities | you |
 | **The registry worker** | `registry_worker(client)`, one per namespace; it may share a process with a case worker | you |
 | **The key service** | Vault's transit engine, a key per case (D78) | you |
@@ -25,7 +24,7 @@ Ventoux adds no server of its own to Temporal. A production deployment is:
 Install the package where your workers and your caller run:
 
 ```
-pip install "ventoux==0.20.0"
+pip install "ventoux==0.1.0"
 ```
 
 Pin the version. `ventoux version` says the package's version, the engine version new cases open
@@ -33,7 +32,7 @@ on (D51), and the schema's `$id`:
 
 ```
 $ ventoux version
-ventoux 0.20.0, engine 3, schema https://ventoux.dev/schema/engine-3/case.schema.json
+ventoux 0.1.0, engine 3, schema https://ventoux.dev/schema/engine-3/case.schema.json
 ```
 
 The live step advisor needs `ventoux[anthropic]`; nothing else is an extra. Vault is reached with
@@ -44,6 +43,19 @@ the standard library.
 The engine believes the identity the caller states: `answer(person="sam", roles=["support-lead"],
 ...)` is Sam's answer, as a support lead, whoever sent it. So whoever can send a signal to a case
 can approve a payment as anyone. The engine can't tell; only Temporal's access control can.
+
+**The caller is your service** (D79): Ventoux ships no API in v1.0. Your service calls Ventoux's
+client functions (`start_case`, `answer`, `close`, `propose_change` and the others in
+`ventoux.temporal.cases`; `propose_forget` and `answer_forget`), and is the one identity that
+writes on behalf of people. No code of Ventoux's can check how it does that, so it must:
+
+- **authenticate each person** before acting for them;
+- **write their identifier one way,** lowercase, as D22 says (`ana.lee@example.com`, never
+  `Ana.Lee@Example.com`): the engine refuses any other spelling, since "someone else" compares
+  identifiers exactly;
+- **take their roles from your identity provider,** as they are when the person acts;
+- **never let a person name who answered, or their roles:** a form field saying `person` is how
+  anyone becomes Sam.
 
 **Give each identity only what it needs:**
 
@@ -91,7 +103,8 @@ them. Prefer a Ventoux operation where one exists: `retry`, `close`, a change re
   ```
 
   `ventoux activate`, `retire`, `environment` and `manifest publish` connect as `operator`;
-  `--identity NAME` chooses another. *(open: question 2)*
+  `--identity NAME` chooses another. Without `[tool.ventoux.temporal]`, commands connect to
+  `localhost:7233` without TLS, as in development.
 
 ## Workers
 
@@ -114,7 +127,7 @@ them. Prefer a Ventoux operation where one exists: `retry`, `close`, a change re
   The keys reach the worker through its client's converter, the audit store as an argument. The
   manifest says which kind of key provider and audit store the worker was built with (never
   their settings). In a production environment, the registry refuses a worker built with
-  `FileKeys` or `FileAudit`. *(open: question 2)*
+  `FileKeys` or `FileAudit`, so it never polls.
 - **Task queues:** a release is activated on its case queue; every poller there must serve the
   release's contracts with their released hashes (D54). One stray worker is enough to run other
   code, so `ventoux environment check production` belongs in your monitoring.
@@ -217,27 +230,29 @@ Doctor checks what can be seen from outside. These can't be, and stay your promi
 ## Another implementation: the conformance suite
 
 The JSON Schema says what a definition looks like (D60); the **conformance suite** says what the
-engine decides about it. It ships in the package and in the repository, as data:
+engine decides about it. It ships in the package, as data, in `ventoux/conformance/`:
 
 ```
-conformance/
-  catalogs/refunds.json         a catalog: its contracts as `ventoux promises` writes them, roles, sources
-  cases/unknown-field.json      a definition
-  plans/...
-  suite.json                    each entry: a definition, its catalog, and the issues it must give
+catalogs/development.json     a catalog: its contracts as `ventoux promises` writes them, roles,
+                              systems, labels, option checks, document stores
+cases/unknown-field.json      a definition
+plans/...
+suite.json                    the engine version; each entry: a definition, its catalog, and what
+                              it must give; and the changes made to results, each saying why
 ```
 
 ```json
 {
   "name": "a condition reads a field the case doesn't declare",
   "definition": "cases/unknown-field.json",
-  "catalog": "catalogs/refunds.json",
+  "catalog": "catalogs/development.json",
   "expected": [{ "path": "steps.pay.when", "code": "UNKNOWN_FIELD", "severity": "error" }]
 }
 ```
 
 An implementation conforms when, for every entry, it gives exactly the expected issues: the same
 paths, codes and severities, in any order, and none more. Messages are wording and are never
-compared. `ventoux conformance` runs the suite against this engine; CI runs it on every change, so
-a change that alters a result fails until the suite is changed with it, in the same pull request.
-*(open: question 3)*
+compared. A definition refused when read is expected as `{"read": "refused", "at": [paths]}`, by
+path alone. Run results (what a case does, not only whether it is valid) come after v1.0. `ventoux conformance --export DIR` writes the suite out; CI runs it on every change, so
+a change that alters a result fails until the suite is changed with it, in the same pull request,
+with a line in its `changes` list saying why.
