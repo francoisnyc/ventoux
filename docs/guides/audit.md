@@ -132,9 +132,10 @@ its place in the export (`audit/claim-7/41/national_id`). Sealed for that place,
 into another record, another case or Temporal's history, it doesn't open.
 
 A value a person typed into a form is in the export as the case file holds it: sealed if its
-field is sensitive, in clear otherwise. A failure is exported by its type alone
-(`failed with ConnectionError`), never its message: no one knows what an activity's error says, so
-it stays in Temporal's failure, under the case's key, for operators.
+field is sensitive, in clear otherwise. A failure is exported by its type alone, its reason reading
+`payments.refund@2 failed with ConnectionError: ‹sensitive›`, never its message: no one knows what
+an activity's error says, so it stays in Temporal's failure, under the case's key, for
+operators.
 
 A record holding a sensitive field's value in clear is never written, whatever let it through:
 

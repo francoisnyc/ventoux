@@ -1,7 +1,7 @@
 # Layer 19: Audit export and a production key provider
 
-Status: 2026-11-07, answered; 19a's seams proposed. This note starts from `main` at `ff37fb9`,
-with layers 0 to 18 merged. The warm-up was asked and recorded (learning question 37). The guide
+Status: 2026-11-08, answered; 19a built (its promises and routes next). This note starts
+from `main` at `ff37fb9`, with layers 0 to 18 merged. The warm-up was asked and recorded (learning question 37). The guide
 was written first (curriculum step 2): `docs/guides/audit.md` describes the layer as if it worked;
 it was changed with the answers (listed at the end).
 
@@ -325,7 +325,9 @@ C. **No new dependency:** Vault through the standard library's HTTP (choice 17).
    the state holds it: an exact decimal, a text, a `Sensitive`.
 3. **`record_refused(state, act, refusal)`** (`ventoux.case.audit`): the state with the refused
    act's record added, and nothing else changed. The Temporal driver calls it where it records a
-   refusal today (19b); a test calls it with the refusal `decide` raised.
+   refusal today (19b); a test calls it with the refusal `decide` raised. *(Changed while
+   building: `record_refused(case, state, act, refusal)`, in `ventoux.case.recording`; see
+   below.)*
 4. **The existing scripts:** answers, proposals, events, `later(…)`, change requests, retries,
    closes, child cases' scripts, plan answers, as `run_case` takes them today.
 
@@ -357,6 +359,45 @@ failure's own text, which never quotes a value (D30), and a failure's is its typ
    what came before was not recorded.
 9. Every record's `lines` are exactly the lines its act added to the history, so the history is
    unchanged: every existing test stays green.
+
+### Decided while building 19a
+
+- **`ENGINE` stays 2 until 19b.** Version 3 is known (`KNOWN = (3, 2, 1)`) and makes records, but
+  a new case on Temporal opens only at a version up to `ENGINE` (`OPENING`): opened at 3 before
+  the export exists, its records would pile up unwritten. 19b moves `ENGINE`, and `run_case`'s
+  default, to 3. Three tests that used 3 as a version this code doesn't know now use 4.
+- **Two seams moved.** `record_refused` is in `ventoux.case.recording`, beside the code that makes
+  records; the record types stay in `ventoux.case.audit`, data only, so the state holds them
+  without an import cycle. And it takes the case, `record_refused(case, state, act, refusal)`: an
+  act's values are kept as the case file keeps them, which only the definition says.
+- **A refusal names the entry as it was asked,** never a step guessed from it: a refused act may
+  name an entry that doesn't exist (`review#9`). A refused proposal names its step, which it gives.
+- **`admitted` is an approval asked;** a start needing none is `started` alone. A start reads its
+  condition, then its approval's condition (which decided no person had to approve), then its
+  inputs. An approval answered reads its condition, then the inputs the approver saw (D11).
+- **A decision gains two fields:** `wrote`, a fact for what it wrote (a rule's `set`, an applied
+  edit), and `target`, what it reached or stopped (a milestone, a run, an approval). Both cross
+  continue-as-new.
+- **A failure's reason is its run's reason,** `payments.refund@2 failed with ConnectionError:
+  ‹sensitive›`: the message was replaced where the failure was caught (D31), so none is there to
+  leave out, and cutting the text to the type would be parsing a line.
+- **A change request rejected is `rejected`; approved but no longer applicable, `refused`,** with
+  the reason. A migration to engine 3 says `what came before engine 3 was not recorded`.
+- **A start's rule is read before its proposal is spent** (found by the timer's test): a task a
+  rule started was recorded as its own step's start, since who proposed a run is forgotten as it
+  starts.
+- **Two small moves, no behaviour changed:** `asked` (a refused act's words) from the Temporal
+  driver into `ventoux.case.recording`; `kept` (how the case file keeps a given value) from
+  `runtime.py` into `ventoux.case.keeping`, so recording can use it.
+- **In memory, a child case opens at its parent's engine,** as on Temporal the same code opens
+  both.
+- **A record is never renamed:** a migration renaming `pay` to `payment` changes the case; the
+  records before it keep `pay`.
+- **Experiment, not committed:** with `ENGINE` at 3, every in-memory test of the suite ran with
+  records made, and none failed because of them (only wording that names the engine version
+  changed). That is how the routes were found; each has its own test.
+- **For 19b:** the Temporal driver still writes a refused act's bare line; it calls
+  `record_refused` once cases open at 3 there.
 
 ## What changed in the guide with the answers
 

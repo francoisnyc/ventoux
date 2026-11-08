@@ -3228,6 +3228,13 @@ D15, D27, D30, D31 and D51, whose text is kept.*
 - **From engine version 3** (D51). A case opened before exports nothing and says so; a migration
   that moves a case to version 3 starts its records there, the first saying that what came
   before was not recorded. Never a partial trail passed off as whole.
+- *Changed while building 19a, before D76 was merged:* new cases open at version 3 only once the
+  export that writes their records exists (19b): until then this code knows 3, and opens new cases
+  at 2. A decision also says what it wrote (a field, its new value and sources) and what it
+  reached or stopped. A refused act names the entry as it was asked, never a step guessed from it.
+  `admitted` is an approval asked; a start reads its condition, its approval's condition, then its
+  inputs. A failure's reason is its run's own, the message already replaced by `‹sensitive›`. A
+  record is never renamed by a later migration.
 
 ## Concepts
 
