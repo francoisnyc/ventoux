@@ -206,6 +206,10 @@ def test_each_case_id_has_one_name_no_url_reads_as_a_path() -> None:
     for name in names:
         assert set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789-_"), name
     assert vault_name("..") == "ventoux-_2e_2e"
+    # The hinge: `_` is never kept, so an ID spelling an escape can't take another's name. Kept,
+    # `_43laim-7` would be `Claim-7`'s key (tutor review of #92).
+    assert vault_name("Claim-7") == "ventoux-_43laim-7"
+    assert vault_name("_43laim-7") == "ventoux-_5f43laim-7"
     # Refused, saying why: no name at all, or one past what the provider names (128 characters).
     with pytest.raises(KeyRefused) as refused:
         vault_name("")
