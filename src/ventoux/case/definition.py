@@ -1183,20 +1183,33 @@ def reaching(path: str, names: tuple[str, ...], case: CaseDefinition) -> list[st
 class CaseInvalid(Exception):
     """A case definition that can't be accepted: one line per problem, each with its path."""
 
+    def __init__(self, problems: list[tuple[str, str]]) -> None:
+        super().__init__("\n".join(line(path, said) for path, said in problems))
+        # Where each problem is, as its line says it: what the conformance suite compares, since
+        # reading gives no code and wording is never compared (brief, D80). "" is the root.
+        self.paths = tuple(path for path, _ in problems)
+
+
+def line(path: str, said: str) -> str:
+    """A problem as the author reads it: `steps.pay.activity: required`, or what is wrong alone at
+    the root."""
+    return f"{path}: {said}" if path else said
+
 
 def parse_case(data: object) -> CaseDefinition:
     """The case definition stored as `data`, or `CaseInvalid` listing every problem."""
     try:
         return CaseDefinition.model_validate(data)
     except ValidationError as error:
-        raise CaseInvalid("\n".join(problem(e) for e in error.errors())) from None
+        raise CaseInvalid([problem(e) for e in error.errors()]) from None
 
 
 STEP_KINDS = "a task, an activity, a plan, a case, a workflow or a wait"
 
 
-def problem(error: Any) -> str:
-    """One of Pydantic's errors as a line for the author: `steps.pay.activity: required`."""
+def problem(error: Any) -> tuple[str, str]:
+    """One of Pydantic's errors for the author: its path and what is wrong, `("steps.pay.activity",
+    "required")`."""
     loc = [str(part) for part in error["loc"]]
     # Pydantic's own markers aren't in the definition: the shape it picked (`task step`), `[key]`,
     # and a field's type gathered under `declared` with the type it picked.
@@ -1214,18 +1227,18 @@ def problem(error: Any) -> str:
     kind = error["type"]
     if kind == "union_tag_not_found" and loc[:1] == ["rules"] and len(loc) == 2:
         # An entry of `rules` that is neither a raw rule nor a pattern (brief, D46).
-        return f"{path}: {RULE_SHAPES}"
+        return path, RULE_SHAPES
     if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["rules"]:
         # A timer's own moment takes the five others; a rule's `on`, a timer too.
-        return f"{path}: a moment is {MOMENTS if loc[-1] == 'since' else RULE_MOMENTS}"
+        return path, f"a moment is {MOMENTS if loc[-1] == 'since' else RULE_MOMENTS}"
     if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["steps"]:
         tag = error.get("ctx", {}).get("tag", "").removesuffix(" step")
         found = f", and this one is {tag!r}" if tag else ", and this one says none"
-        return f"{path}.kind: a step is {STEP_KINDS}{found}"
+        return f"{path}.kind", f"a step is {STEP_KINDS}{found}"
     if kind == "missing":
         message = "required"
     elif kind == "extra_forbidden":
         message = "not a field here"
     else:
         message = str(error["msg"]).removeprefix("Value error, ")
-    return f"{path}: {message}" if path else message
+    return path, message
