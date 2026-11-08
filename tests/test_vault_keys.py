@@ -9,8 +9,11 @@ import base64
 import inspect
 import json
 import logging
+import shutil
 import socket
+import subprocess
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -28,6 +31,7 @@ from ventoux.tooling.keys import FileKeys, KeyRefused, KeyUnavailable
 from ventoux.tooling.vault import (
     Answer,
     Exchange,
+    Https,
     Recording,
     RecordingRefused,
     TimedOut,
@@ -543,3 +547,98 @@ def test_read_audit_with_vault_down_fails_never_saying_forgotten(tmp_path: Path)
         f"the key service at {ADDRESS} can't be reached: claim-7's sensitive values can't be read "
         "or written now"
     )
+
+
+DEVELOPMENT_TOKEN = "ventoux-development-root"  # the development server's own root token
+VAULT = shutil.which("vault")
+
+
+@contextmanager
+def development_vault(folder: Path) -> Iterator[str]:
+    """A development Vault (`vault server -dev`) on this machine, in memory, with a transit
+    engine, for the length of the block: its address. Asked a bounded number of times."""
+    assert VAULT is not None
+    listening = socket.socket()
+    listening.bind(("127.0.0.1", 0))
+    port = listening.getsockname()[1]
+    listening.close()
+    address = f"http://127.0.0.1:{port}"
+    with (folder / "vault.log").open("w") as log:
+        server = subprocess.Popen(
+            [
+                VAULT,
+                "server",
+                "-dev",
+                f"-dev-listen-address=127.0.0.1:{port}",
+                f"-dev-root-token-id={DEVELOPMENT_TOKEN}",
+                "-dev-no-store-token",
+            ],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            ask = Https(address, 2)
+            for _ in range(100):
+                try:
+                    if ask("GET", "/v1/sys/health", None)[0] == 200:
+                        break
+                except (Unreachable, TimedOut):
+                    pass
+                time.sleep(0.1)
+            else:
+                raise AssertionError(f"the development Vault never answered: {address}")
+            status, _ = ask("POST", "/v1/sys/mounts/transit", {"type": "transit"})
+            assert status in (200, 204), status
+            yield address
+        finally:
+            server.terminate()
+            server.wait(timeout=10)
+
+
+@pytest.mark.skipif(
+    VAULT is None, reason="runs only where vault is installed (a development Vault)"
+)
+def test_against_a_development_vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # What only a real Vault shows: a value sealed for one place doesn't open at another (the
+    # part bound as associated data), a key made exportable is refused from then on, and the mark
+    # outlives the deleted key, whatever Vault would let be made again. The recordings' answers
+    # are checked here against Vault's own (brief, D78).
+    monkeypatch.setenv("VAULT_TOKEN", DEVELOPMENT_TOKEN)
+    with development_vault(tmp_path) as address:
+        keys = VaultKeys(address, "transit", "secret")
+        case = "Claim-7.a"  # a capital and a dot: the name escapes them
+        assert keys.state(case) == "never made"
+        keys.create(case)
+        assert keys.state(case) == "kept"
+        with pytest.raises(KeyRefused, match="a key was already made for Claim-7.a"):
+            keys.create(case)
+        sealed = keys.seal(case, VALUE.encode(), "sensitive/0")
+        assert sealed.startswith(b"vault:v1:")
+        assert VALUE.encode() not in sealed
+        assert keys.open(case, sealed, "sensitive/0") == VALUE.encode()
+        with pytest.raises(KeyRefused, match="doesn't open"):
+            keys.open(case, sealed, "sensitive/1")  # moved to another place
+        keys.create("claim-8")
+        with pytest.raises(KeyRefused, match="doesn't open"):
+            keys.open("claim-8", sealed, "sensitive/0")  # another case's key
+        # Made exportable outside Ventoux: never used again.
+        ask = Https(address, 2)
+        status, _ = ask("POST", f"/v1/transit/keys/{vault_name(case)}/config", {"exportable": True})
+        assert status in (200, 204), status
+        with pytest.raises(KeyRefused, match=r"can leave the key service \(exportable\)"):
+            keys.seal(case, VALUE.encode(), "sensitive/0")
+        # Destroyed: the mark, then the key; destroying again does nothing more.
+        keys.destroy("claim-8")
+        assert keys.state("claim-8") == "destroyed"
+        assert ask("GET", f"/v1/transit/keys/{vault_name('claim-8')}", None)[0] == 404
+        keys.destroy("claim-8")
+        with pytest.raises(KeyRefused, match="was destroyed when it was forgotten"):
+            keys.open("claim-8", sealed, "sensitive/0")
+        # Vault would make a key of that name again; the mark keeps it unused.
+        made_again = {"type": "aes256-gcm96", "exportable": False, "allow_plaintext_backup": False}
+        assert ask("POST", f"/v1/transit/keys/{vault_name('claim-8')}", made_again)[0] in (200, 204)
+        assert keys.state("claim-8") == "destroyed"
+        with pytest.raises(KeyRefused, match="was destroyed when it was forgotten"):
+            keys.seal("claim-8", VALUE.encode(), "sensitive/0")
+        with pytest.raises(KeyRefused, match="a key was already made for claim-8"):
+            keys.create("claim-8")
