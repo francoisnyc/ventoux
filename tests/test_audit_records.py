@@ -19,7 +19,7 @@ from test_child_cases import PEOPLE as REPAIRERS
 from test_child_cases import claim as claim_with_repair
 from test_child_cases import repair
 from test_events import RECEIPT, waiting_for_a_receipt
-from test_migrations import REFUND_1, on_refund_1
+from test_migrations import REFUND_1, REFUND_3, RENAMES, on_refund_1
 from test_migrations import REVIEWED as REVIEWED_250
 from test_plan_step import refund_order, refund_with_plan
 from test_rules import DUPLICATE, WITHDRAWS, withdrawable
@@ -545,6 +545,31 @@ def test_records_cross_continue_as_new_as_they_were() -> None:
 
 
 REVIEWED_40 = [("review", "approve", "ana", {"approved_amount": 40})]
+
+
+def test_records_keep_the_names_a_migration_later_changes() -> None:
+    # A record is what happened, under the names the case had then: a migration renaming pay to
+    # payment changes the case, never the records before it (brief, D53) (brief, D76).
+    paid = on_refund_1(
+        [
+            REVIEWED_250,
+            migrate(REFUND_3, RENAMES, "pia", 3),
+            ("case.change#1", "approve", "lee"),
+            ("fraud_check", "clear", "fay"),
+            ("payment.approval#2", "approve", "sam"),
+        ],
+        engine=3,
+    )
+    review = paid.audit[1]
+    assert review.decisions[-1].step == "pay"  # its approval asked, as pay
+    assert review.act.values == {"approved_amount": Decimal(250)}
+    approval = next(each for each in paid.audit if each.act.entry == "payment.approval#2")
+    assert [(d.kind, d.step) for d in approval.decisions][:2] == [
+        ("approved", "payment"),
+        ("started", "payment"),
+    ]
+    assert approval.decisions[0].read[0].field == "amount_approved"
+
 
 # Each route's scenario, at engine 3: what the other tests here run.
 SCENARIOS: dict[str, Callable[[], CaseRun]] = {
