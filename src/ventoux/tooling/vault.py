@@ -8,9 +8,11 @@ Vault's answers in tests.
 See docs/layers/19-audit-keys.md (19c) and docs/guides/audit.md.
 """
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from ventoux.tooling.keys import FORGOTTEN, KeyRefused
 
@@ -23,9 +25,26 @@ type Transport = Callable[[str, str, dict[str, Any] | None], Answer]
 PREFIX = "ventoux-"  # every key and mark Ventoux makes is named so, for the token's policy
 
 
+# What a name keeps as it is: lowercase letters, digits and `-`. Everything else is escaped.
+KEPT = frozenset(b"abcdefghijklmnopqrstuvwxyz0123456789-")
+LONGEST = 128  # characters in a name, the prefix included
+
+
 def vault_name(case: str) -> str:
-    """The name of `case`'s key in Vault, and of its mark."""
-    return PREFIX + case
+    """The name of `case`'s key in Vault, and of its mark: lowercase letters, digits and `-` as
+    they are, every other byte of its UTF-8 as `_` and two hex digits (`refund-A-1001` is
+    `ventoux-refund-_41-1001`). `_` only ever starts an escape, so no two IDs share a name, even
+    with capitals folded; and no name holds what a URL reads as a path, a query or a fragment
+    (`.`, `/`, `%`, `?`, `#`) (brief, D78)."""
+    if not case:
+        raise KeyRefused("a case ID can't be empty")
+    name = PREFIX + "".join(chr(byte) if byte in KEPT else f"_{byte:02x}" for byte in case.encode())
+    if len(name) > LONGEST:
+        raise KeyRefused(
+            f"a case ID names a key in the key service, and its name can't pass {LONGEST} "
+            "characters"
+        )
+    return name
 
 
 @dataclass(frozen=True)
@@ -69,12 +88,47 @@ class VaultKeys:
     engine (version 2)."""
 
     def __init__(
-        self, address: str, transit_mount: str, marks_mount: str, *, transport: Transport
+        self,
+        address: str,
+        transit_mount: str,
+        marks_mount: str,
+        *,
+        timeout: float = 10,
+        transport: Transport | None = None,
     ) -> None:
+        # Fail closed: each is named by the platform team; none has a default (brief, D78).
+        for name, value in (
+            ("address", address),
+            ("transit_mount", transit_mount),
+            ("marks_mount", marks_mount),
+        ):
+            if not value:
+                raise ValueError(
+                    f"VaultKeys needs an address, a transit mount and a marks mount: {name} is "
+                    "empty"
+                )
+        refuse_plain_http(address)
         self.address = address  # where Vault answers: `https://vault.internal:8200`
         self.transit_mount = transit_mount  # the transit engine's mount: `transit`
         self.marks_mount = marks_mount  # the key-value engine's mount: `secret`
-        self.transport = transport
+        self.timeout = timeout  # how long one call may take, in seconds
+        # How Vault is asked: over HTTPS, with the token, unless a test gives a recording.
+        self.transport = transport or Https(address, timeout)
+
+    def create(self, case: str) -> None:
+        """Make `case`'s key, each setting stated: never exportable, no plaintext backup, AES-256
+        in GCM. Never made again: refused for a case with a key, or with a mark, so a reused ID
+        never inherits or remakes a key (brief, D31)."""
+        name = vault_name(case)
+        made_already = f"a key was already made for {case}: open the case under a new ID"
+        status, _ = self.transport("GET", self.mark_path(name), None)
+        if status == 200:
+            raise KeyRefused(made_already)
+        status, _ = self.transport("GET", self.key_path(name), None)
+        if status == 200:
+            raise KeyRefused(made_already)
+        settings = {"type": KEY_TYPE, "exportable": False, "allow_plaintext_backup": False}
+        self.transport("POST", self.key_path(name), settings)
 
     def seal(self, case: str, data: bytes, part: str) -> bytes:
         self.usable(case)
@@ -123,3 +177,35 @@ def refuse_leaving(case: str, config: dict[str, Any]) -> None:
 
 
 PLAINTEXT = "plaintext backup allowed"
+
+
+# The hosts an `http://` address may name: a development server on this machine.
+LOCAL = ("localhost", "127.0.0.1")
+
+
+def refuse_plain_http(address: str) -> None:
+    """Refuse an address the token would cross in clear: only `https`, or `http` to this machine."""
+    parts = urlsplit(address)
+    if parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOCAL):
+        return
+    raise ValueError(
+        f"the key service is reached over https: {address} is only for a development server on "
+        "localhost"
+    )
+
+
+NO_TOKEN = "VAULT_TOKEN is not set: the key service can't be asked"
+
+
+class Https:
+    """Asks Vault over HTTPS, with the standard library, adding Ventoux's token. The token is read
+    from `VAULT_TOKEN` as each call is made, never kept here, so it is in no repr (brief, D62)."""
+
+    def __init__(self, address: str, timeout: float) -> None:
+        if not os.environ.get("VAULT_TOKEN"):
+            raise ValueError(NO_TOKEN)  # never another place a token may be kept
+        self.address = address
+        self.timeout = timeout
+
+    def __call__(self, method: str, path: str, body: dict[str, Any] | None) -> Answer:
+        raise NotImplementedError
