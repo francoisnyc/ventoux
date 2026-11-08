@@ -1,0 +1,67 @@
+"""The audit export: what is written, sealed, and where it is kept (layer 19b).
+
+Through `exported`, the store, the case on Temporal and `read_audit`. See
+docs/layers/19-audit-keys.md (19b), docs/guides/audit.md and brief, D77.
+"""
+
+import base64
+import dataclasses
+from pathlib import Path
+from typing import Any
+
+import pytest
+from test_audit_records import checked_claim, known
+from test_sensitive import FILE, NATIONAL_ID
+
+from ventoux.case.audit import AuditRecord
+from ventoux.case.definition import parse_case
+from ventoux.temporal.audit import ExportRefused, exported, sensitive_fields
+from ventoux.testing import run_case
+from ventoux.tooling.keys import FileKeys, KeyRefused
+
+
+def claim_records() -> tuple[dict[str, Any], list[AuditRecord]]:
+    """The sensitive claim's definition, and its records at engine 3: the national ID read by a
+    step's condition and computed into its input."""
+    definition = checked_claim()
+    run = run_case(
+        definition,
+        FILE,
+        [],
+        {"ana": ["adjuster"]},
+        activities={"orders.lookup@1": known},
+        engine=3,
+    )
+    return definition, run.audit
+
+
+def unwrapped(record: AuditRecord) -> AuditRecord:
+    """`record` with the national ID its act gave in clear: what a bug unwrapping it would give."""
+    values = {**record.act.values, "national_id": NATIONAL_ID}
+    return dataclasses.replace(record, act=dataclasses.replace(record.act, values=values))
+
+
+def test_a_sensitive_value_in_clear_fails_the_export(tmp_path: Path) -> None:
+    # The curriculum's negative test: a record holding a sensitive field's value in clear is never
+    # written, whatever let it through. Read from the definition, never from the wrapper, so a
+    # value unwrapped by mistake is still caught (brief, D31) (brief, D77).
+    definition, records = claim_records()
+    keys = FileKeys(tmp_path / "keys.json")
+    keys.create("claim-7")
+    sensitive = sensitive_fields(parse_case(definition))
+    with pytest.raises(ExportRefused) as refused:
+        exported("claim-7", [unwrapped(records[0]), *records[1:]], sensitive, keys)
+    assert str(refused.value) == (
+        "audit record claim-7/1 holds national_id, a sensitive field, in clear: nothing was written"
+    )
+    assert NATIONAL_ID not in str(refused.value)
+    # Wrapped, it is sealed under the case's key, for its own place, where alone it opens.
+    [opening, *_] = exported("claim-7", records, sensitive, keys)
+    sealed = opening["act"]["values"]["national_id"]
+    assert NATIONAL_ID not in str(opening)
+    assert sealed["part"] == "audit/claim-7/1/act/values/national_id"
+    assert sealed["visible_to"] == ["claims-sensitive"]
+    ciphertext = base64.b64decode(sealed["sealed"])
+    assert keys.open("claim-7", ciphertext, sealed["part"]) == f'"{NATIONAL_ID}"'.encode()
+    with pytest.raises(KeyRefused):
+        keys.open("claim-7", ciphertext, "audit/claim-7/2/act/values/national_id")
