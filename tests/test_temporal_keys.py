@@ -11,15 +11,19 @@ import threading
 from pathlib import Path
 
 from temporalio.client import Client
+from temporalio.testing import WorkflowEnvironment
 from test_audit_export import QuicklyFailingExports, open_claim
 from test_temporal_advisor import ENDS_AT_ONCE
 from test_temporal_case import reported
 from test_temporal_forget import on_temporal as forgetting_on_temporal
+from test_temporal_workflow_step import KYC_CANCELLABLE, CasesWithKyc
+from test_temporal_workflow_step import on_temporal as contract_on_temporal
 
 from ventoux.case.state import CaseState
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import CaseReport, retry_export
 from ventoux.temporal.client import start_plan
+from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.converter import data_converter
 from ventoux.temporal.forget import ForgetReport, answer_forget, forget_report, propose_forget
 from ventoux.testing import DevelopmentCases, DevelopmentForget, DevelopmentPlans
@@ -225,3 +229,23 @@ def test_with_the_key_service_down_an_approved_request_waits_then_forgets(tmp_pa
     assert keys.failed.count("destroy") >= 2
     assert (waiting.status, kept) == ("closing the case", "kept")
     assert (ended.status, ended.history[-1]) == ("forgotten", "the key of claim-7 was destroyed")
+
+
+def test_the_contract_test_makes_its_runs_keys_off_the_event_loop(tmp_path: Path) -> None:
+    # A contract test's runs have keys, as every run Ventoux starts: made on a thread, as a case's
+    # are, both the run checked and the one asked to cancel (brief, D78) (tutor review of #92).
+    keys = NotingThreads(tmp_path / "keys.json")
+
+    async def scenario(environment: WorkflowEnvironment) -> tuple[list[str], int]:
+        loop = threading.get_ident()
+        binding = CasesWithKyc.workflows["kyc.check@1"]  # the same workflow, bound once
+        said = await check_workflow_contract(
+            environment.client, KYC_CANCELLABLE, binding, {"customer_id": "c-sleeps"}
+        )
+        return said, loop
+
+    said, loop = contract_on_temporal(scenario, converter=data_converter(keys))
+    assert said == []
+    made = [thread for call, thread in keys.calls if call == "create"]
+    assert len(made) == 2  # the run checked, and the run asked to cancel
+    assert loop not in made

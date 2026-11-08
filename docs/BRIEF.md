@@ -3306,13 +3306,15 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   allowing no plaintext backup. Before each seal or open its configuration is read, and a key of
   another type, or one that could leave Vault, is refused, never used. The part a value is sealed
   for is sent as its associated data, so a value moved elsewhere doesn't open, as with `FileKeys`.
-- **Destroyed at once:** the mark is written, then the key's deletion allowed, then the key
-  deleted. The mark, `ventoux/forgotten/<name>` in a key-value engine (version 2), outlives the key:
-  from it on, the case reads as destroyed, `create` refuses its ID, and no seal or open uses a key
-  of that name, whatever Vault would let be made again. A failure between the steps leaves the case
-  destroyed, and destroying again finishes. A cloud KMS, which only schedules a deletion weeks
-  ahead, would have the case say `forgetting, key deletion scheduled for …` and be forgotten only
-  then: kept for an adapter after v1.0.
+- **Destroyed at once:** the mark is written, then the key's deletion allowed, then the key deleted.
+  The mark, `ventoux/forgotten/<name>` in a key-value engine (version 2), outlives the key: from it
+  on, the case reads as destroyed, `create` refuses its ID, and no seal or open uses a key of that
+  name, whatever Vault would let be made again. It is read from its metadata: any version ever
+  written means forgotten, deleted since or not; no metadata means never marked, and Ventoux's
+  policy can't delete it. A failure between the steps leaves the case destroyed, and destroying
+  again finishes. A cloud KMS, which only schedules a deletion weeks ahead, would have the case say
+  `forgetting, key deletion scheduled for …` and be forgotten only then: kept for an adapter after
+  v1.0.
 - **A case ID as a name:** lowercase letters, digits and `-` stay; every other byte of its UTF-8,
   capitals and `_` included, is `_` and two hex digits (`refund-A-1001` is
   `ventoux-refund-_41-1001`). Two IDs never share a name, and no name holds a character a URL path
@@ -3320,9 +3322,10 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
 - **The client is the standard library** (`urllib.request`), no new dependency. Every call has a
   timeout (10 seconds by default). The token is read from `VAULT_TOKEN` as each call is made, never
   kept on the object, never said in a message, a log, a `repr` or a recording (D62); an `http://`
-  address is refused unless it is `localhost` or `127.0.0.1`; a redirect is never followed, so the
-  token goes nowhere but the address named. The guide gives the token's policy, checked against a
-  development Vault: `ventoux-*` keys and the marks, never deleting a mark.
+  address is refused unless it is `localhost` or `127.0.0.1`; neither a redirect nor a proxy the
+  environment names is followed, so the token goes nowhere but the address named. The guide gives
+  the token's policy, checked against a development Vault: `ventoux-*` keys and the marks, never
+  deleting a mark.
 - **Off the event loop:** every provider call made from async code (the codec, the forget
   request's activities, the client opening a case or a run) goes through `asyncio.to_thread`,
   whichever provider: a call waiting on Vault never stalls a worker.

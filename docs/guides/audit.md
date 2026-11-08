@@ -251,8 +251,18 @@ or `127.0.0.1`, for a development server.
   engine, `ventoux/forgotten/claim-7`. A case ID with a mark can never open a case again, and its
   key is never used, even if Vault would let a key of that name be made again. If Vault fails
   after the mark, the case is forgotten already, and the request, retrying, finishes the deletion.
+  The mark is read from its metadata, so a version of it deleted (`vault kv delete`, or the
+  mount's `delete_version_after`) changes nothing. Never delete a mark's metadata (`vault kv
+  metadata delete`): the case would read as never opened, and its ID could open a case again.
+  Ventoux's own token can't.
 - **Every call has a timeout,** 10 seconds unless you give another, and runs off the worker's
   event loop: Vault slow or down never stalls the other cases on that worker.
+- **Each value sealed or opened costs three calls to Vault, one after another:** the mark, the
+  key's configuration, then the seal or open. A worker replaying a case's history (after a restart,
+  or to read its state) opens every sensitive value in it, inside one workflow task: a case with
+  many, replayed, waits on Vault that many times over. Keep Vault near your workers.
+- **A contract test's runs each get a key,** as every run Ventoux starts does, and keep it: with
+  Vault, one key per run. Run contract tests against the development provider.
 - **Vault is reached directly,** never through a proxy the environment names (`https_proxy`,
   `http_proxy`): a proxy would carry the token, and one that inspects TLS would read it. A redirect
   is never followed either. A proxy to Vault, if your network needs one, would be a setting of its
