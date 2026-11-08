@@ -6,6 +6,7 @@ as `VaultKeys` would: the provider protocol is what the codec, the export and th
 use. See docs/layers/19-audit-keys.md (19c) and brief, D78.
 """
 
+import asyncio
 import threading
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import CaseReport, retry_export
 from ventoux.temporal.client import start_plan
 from ventoux.temporal.converter import data_converter
-from ventoux.temporal.forget import ForgetReport, answer_forget, propose_forget
+from ventoux.temporal.forget import ForgetReport, answer_forget, forget_report, propose_forget
 from ventoux.testing import DevelopmentCases, DevelopmentForget, DevelopmentPlans
 from ventoux.tooling.keys import FileKeys, KeyRefused, KeyState, KeyUnavailable
 
@@ -153,3 +154,74 @@ def test_which_service_failed_crosses_continue_as_new() -> None:
     before = state_as_data(CaseState("claim-7", export_failed="the store failed"))
     del before["export_service"]
     assert state_from_data(before, {}).export_service == "the store"
+
+
+class DownFor(FileKeys):
+    """A development provider unavailable for the calls named in `down`, as `VaultKeys` is when
+    Vault doesn't answer: a test's own."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.down: set[str] = set()  # the calls that fail, while they do
+        self.failed: list[str] = []  # each call that failed, in order
+
+    def failing(self, call: str) -> None:
+        if call in self.down:
+            self.failed.append(call)
+            raise KeyUnavailable(DOWN)
+
+    def state(self, case: str) -> KeyState:
+        self.failing("state")
+        return super().state(case)
+
+    def destroy(self, case: str) -> None:
+        self.failing("destroy")
+        super().destroy(case)
+
+
+def test_with_the_key_service_down_a_proposal_to_forget_is_refused_saying_so(
+    tmp_path: Path,
+) -> None:
+    # Before anyone answers, nothing was decided: the proposal is refused, saying why and what to
+    # do, never "there is no case" or "already forgotten", which an unreachable Vault would be if
+    # its silence were read as an answer (brief, D32) (brief, D78).
+    keys = DownFor(tmp_path / "keys.json")
+
+    async def scenario(client: Client) -> ForgetReport:
+        await open_claim(client, DevelopmentCases)
+        keys.down = {"state"}
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        return await request.result()
+
+    refused = forgetting_on_temporal(scenario, converter=data_converter(keys))
+    assert refused.status == "refused"
+    assert refused.history == [f"refused pia's proposal: {DOWN}: propose again once it answers"]
+
+
+def test_with_the_key_service_down_an_approved_request_waits_then_forgets(tmp_path: Path) -> None:
+    # After the approval, the request waits for the key service, closing the case, and never ends
+    # without destroying the key: once the service answers, the key goes (brief, D17) (brief, D78).
+    keys = DownFor(tmp_path / "keys.json")
+
+    async def scenario(client: Client) -> tuple[ForgetReport, ForgetReport, str]:
+        await open_claim(client, DevelopmentCases)
+        keys.down = {"destroy"}
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        for _ in range(200):  # bounded: until the destroy has failed twice, so was retried
+            if keys.failed.count("destroy") >= 2:
+                break
+            await asyncio.sleep(0.05)
+        waiting = await forget_report(request)
+        kept = keys.state("claim-7")
+        keys.down = set()
+        return waiting, await request.result(), kept
+
+    waiting, ended, kept = forgetting_on_temporal(scenario, converter=data_converter(keys))
+    assert keys.failed.count("destroy") >= 2
+    assert (waiting.status, kept) == ("closing the case", "kept")
+    assert (ended.status, ended.history[-1]) == ("forgotten", "the key of claim-7 was destroyed")

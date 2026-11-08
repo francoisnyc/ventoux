@@ -19,8 +19,12 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from test_audit_export import claim_records
 
-from ventoux.tooling.keys import KeyRefused, KeyUnavailable
+from ventoux.case.definition import parse_case
+from ventoux.temporal.audit import exported, sensitive_fields
+from ventoux.tooling.audit import FileAudit, read_audit
+from ventoux.tooling.keys import FileKeys, KeyRefused, KeyUnavailable
 from ventoux.tooling.vault import (
     Answer,
     Exchange,
@@ -518,4 +522,24 @@ def test_destroying_marks_the_case_first_and_destroying_again_finishes() -> None
         vault(no_mark(), no_key()).destroy("claim-7")
     assert str(refused.value) == (
         "there is no key for claim-7 to destroy: no case was opened with its ID"
+    )
+
+
+def test_read_audit_with_vault_down_fails_never_saying_forgotten(tmp_path: Path) -> None:
+    # A reader who may see the national ID asks while Vault doesn't answer: an error saying so,
+    # never `‹forgotten›`, which would tell an auditor the case was forgotten when it wasn't
+    # (brief, D32) (brief, D78).
+    definition, records = claim_records()
+    sealing = FileKeys(tmp_path / "keys.json")
+    sealing.create("claim-7")
+    store = FileAudit(tmp_path / "audit")
+    store.append(
+        exported("claim-7", records, sensitive_fields(parse_case(definition)), {}, sealing)
+    )
+    down = vault(replace(no_mark(), answer=Unreachable("connection refused")))
+    with pytest.raises(KeyUnavailable) as failed:
+        read_audit(store, "claim-7", ["claims-sensitive"], down)
+    assert str(failed.value) == (
+        f"the key service at {ADDRESS} can't be reached: claim-7's sensitive values can't be read "
+        "or written now"
     )
