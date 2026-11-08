@@ -17,6 +17,7 @@ from ventoux.case.audit import AuditRecord
 from ventoux.case.definition import parse_case
 from ventoux.temporal.audit import ExportRefused, exported, sensitive_fields
 from ventoux.testing import run_case
+from ventoux.tooling.audit import AuditRefused, FileAudit
 from ventoux.tooling.keys import FileKeys, KeyRefused
 
 
@@ -65,3 +66,33 @@ def test_a_sensitive_value_in_clear_fails_the_export(tmp_path: Path) -> None:
     assert keys.open("claim-7", ciphertext, sealed["part"]) == f'"{NATIONAL_ID}"'.encode()
     with pytest.raises(KeyRefused):
         keys.open("claim-7", ciphertext, "audit/claim-7/2/act/values/national_id")
+
+
+def numbered(stream: str, number: int, said: str = "") -> dict[str, Any]:
+    """A record as the export writes it, reduced to what the store reads: its stream and number."""
+    return {"stream": stream, "number": number, "lines": [said]}
+
+
+def test_the_store_keeps_each_record_once_in_order(tmp_path: Path) -> None:
+    store = FileAudit(tmp_path / "audit")
+    store.append([numbered("claim-7", 1, "opened"), numbered("claim-7", 2, "answered")])
+    # The same record again is kept once: a write retried after a crash duplicates nothing.
+    store.append([numbered("claim-7", 2, "answered"), numbered("claim-7", 3, "closed")])
+    # A gap, or a record kept with other content, is refused, and nothing of the call is kept.
+    with pytest.raises(AuditRefused) as gap:
+        store.append([numbered("claim-7", 4), numbered("claim-7", 6)])
+    assert str(gap.value) == "audit record claim-7/6 can't be kept: claim-7/5 is missing"
+    with pytest.raises(AuditRefused) as changed:
+        store.append([numbered("claim-7", 3, "reopened")])
+    assert str(changed.value) == "audit record claim-7/3 is already kept, with other content"
+    # A case's records, its children's and its requests', each stream in order.
+    store.append([numbered("claim-7/repair#1", 1), numbered("claim-7/forget", 1)])
+    store.append([numbered("claim-70", 1)])  # another case, whose ID begins the same
+    kept = [(each["stream"], each["number"]) for each in store.read("claim-7")]
+    assert kept == [
+        ("claim-7", 1),
+        ("claim-7", 2),
+        ("claim-7", 3),
+        ("claim-7/forget", 1),
+        ("claim-7/repair#1", 1),
+    ]
