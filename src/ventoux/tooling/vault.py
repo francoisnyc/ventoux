@@ -10,6 +10,7 @@ See docs/layers/19-audit-keys.md (19c) and docs/guides/audit.md.
 
 import base64
 import binascii
+import http.client
 import json
 import os
 import urllib.error
@@ -173,15 +174,16 @@ class VaultKeys:
     def open(self, case: str, data: bytes, part: str) -> bytes:
         """What `seal` encrypted for `case` at `part`; refused for anything else."""
         name = self.usable(case)
-        sent = {"ciphertext": data.decode(), "associated_data": as_base64(place(case, part))}
+        try:
+            ciphertext = data.decode("ascii")  # Vault's is text: `vault:v1:…`
+        except UnicodeDecodeError:
+            raise KeyRefused(DOESNT_OPEN.format(case=case)) from None  # sealed elsewhere
+        sent = {"ciphertext": ciphertext, "associated_data": as_base64(place(case, part))}
         path = f"/v1/{self.transit_mount}/decrypt/{name}"
         status, body = self.ask(case, "POST", path, sent, {200, 400})
         if status == 400:
             # Vault couldn't open it for this place: fail closed, never a guess at what it held.
-            raise KeyRefused(
-                f"a sealed part of {case} doesn't open: it was damaged, or sealed for another "
-                "case or place"
-            )
+            raise KeyRefused(DOESNT_OPEN.format(case=case))
         try:
             return base64.b64decode(self.text(case, body, "data", "plaintext"), validate=True)
         except binascii.Error:
@@ -310,6 +312,10 @@ def refuse_leaving(case: str, config: dict[str, Any]) -> None:
 
 
 PLAINTEXT = "plaintext backup allowed"
+# As FileKeys says it: never a guess at what the part held.
+DOESNT_OPEN = (
+    "a sealed part of {case} doesn't open: it was damaged, or sealed for another case or place"
+)
 
 
 # The hosts an `http://` address may name: a development server on this machine.
@@ -362,8 +368,11 @@ class Https:
             raise Unreachable(type(error.reason).__name__) from None
         except TimeoutError:
             raise TimedOut() from None  # connected, and no answer in time
-        except OSError as error:  # a connection reset as Vault answered
+        except OSError as error:  # hung up on, or reset, before Vault answered
             raise Unreachable(type(error).__name__) from None
+        except http.client.HTTPException:
+            # Something answered that isn't HTTP: an answer Ventoux can't read, said so.
+            return UNREADABLE, {}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -373,6 +382,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args: Any) -> None:
         return None
 
+
+UNREADABLE = 0  # the status given to an answer that wasn't HTTP: Ventoux expects none such
 
 # The standard library's opener, following no redirect.
 NEVER_REDIRECTED = urllib.request.build_opener(NoRedirect())

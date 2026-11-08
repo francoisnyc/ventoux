@@ -692,3 +692,59 @@ def test_the_guides_policy_is_all_ventoux_needs(
         # Deleting a mark, its latest version or all of them: refused.
         for path in (f"{MARKS}/{NAME}", f"/v1/secret/metadata/ventoux/forgotten/{NAME}"):
             assert ventoux("DELETE", path, None)[0] == 403, path
+
+
+@contextmanager
+def answering(reply: bytes) -> Iterator[str]:
+    """A port that accepts one connection, sends `reply` (or nothing) and hangs up, for the length
+    of the block: its address."""
+    listening = socket.socket()
+    listening.bind(("127.0.0.1", 0))
+    listening.listen()
+
+    def serve() -> None:
+        connection, _ = listening.accept()
+        connection.recv(65536)
+        connection.sendall(reply)
+        connection.close()
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listening.getsockname()[1]}"
+    finally:
+        thread.join(timeout=5)
+        listening.close()
+
+
+def test_a_connection_dropped_or_an_answer_not_http_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Hung up on before answering, Vault couldn't be reached; answering something that isn't
+    # HTTP, it answered what Ventoux can't read. Either is unavailable, never an exception of the
+    # standard library's escaping as something else (brief, D78).
+    monkeypatch.setenv("VAULT_TOKEN", TOKEN)
+    with answering(b"") as address, pytest.raises(KeyUnavailable) as failed:
+        VaultKeys(address, "transit", "secret").state("claim-7")
+    assert str(failed.value) == (
+        f"the key service at {address} can't be reached: claim-7's sensitive values can't be read "
+        "or written now"
+    )
+    with answering(b"SSH-2.0-OpenSSH_9.6\r\n") as address, pytest.raises(KeyUnavailable) as failed:
+        VaultKeys(address, "transit", "secret").state("claim-7")
+    assert str(failed.value) == (
+        f"the key service at {address} gave an answer Ventoux can't read for claim-7"
+    )
+
+
+def test_a_value_sealed_by_another_provider_doesnt_open(tmp_path: Path) -> None:
+    # A value FileKeys sealed (raw bytes, not Vault's text) given to VaultKeys: refused as a part
+    # that doesn't open, never an error of another kind (brief, D78).
+    keys = FileKeys(tmp_path / "keys.json")
+    keys.create("claim-7")
+    sealed = keys.seal("claim-7", VALUE.encode(), "sensitive/0")
+    with pytest.raises(KeyRefused) as refused:
+        vault(no_mark(), key()).open("claim-7", sealed, "sensitive/0")
+    assert str(refused.value) == (
+        "a sealed part of claim-7 doesn't open: it was damaged, or sealed for another case or place"
+    )
