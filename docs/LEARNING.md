@@ -54,6 +54,8 @@ and record the key points. A question is closed once you can explain the answer 
 | 47 | Layer 17a: is an assignment a permission? | open |
 | 48 | Layer 18a: an owed step that can never start | open |
 | 49 | Layer 18b: how a repeated run is named, retried and migrated | open |
+| 50 | Layer 18: what a child case can never do to its parent | open |
+| 51 | Layer 19a: one act, the decisions it caused, the facts they read | open |
 
 ---
 
@@ -2096,3 +2098,34 @@ and record the key points. A question is closed once you can explain the answer 
     the parent reads as outputs, so nothing it does reaches the parent except what the parent
     chooses to read, with its sources and who decided it.
 - Status: open, until it comes back from memory.
+
+## 51. Layer 19a: one act, the decisions it caused, the facts they read
+
+> Sam's approval of `pay.approval#1` starts `pay#1`. a) Why is that one record with two
+> decisions, not two records? b) Why does the `approved` decision read only `approved_amount` and
+> `order_id`, while `started` also reads `review.outcome`? c) Had Ana typed the customer's national
+> ID (a sensitive field) into her review form, how would it appear in her answer's record, and why
+> neither as she typed it nor as the client sent it?
+
+- Asked at the end of layer 19a's walk-through (2026-11-08), in place of the layer's own question,
+  which needs the export and waits for 19b.
+- Your answer: asked to be told. Given:
+  - **a) A record is one act; a decision is what the engine decided because of it.** Only Sam's
+    answer reached the case; the approval given and the run started both followed from it, in one
+    `decide`. One record keeps "why did the payment start then?" answered by its own act; two
+    would need joining, and the second would have no act of its own (the engine doesn't act by
+    itself). Who caused a decision is always the act's (brief, D76).
+  - **b) Each decision reads what it rested on.** `approved` is Sam's judgement of what the sheet
+    showed him: the approval's condition and the inputs his approval is tied to (D11).
+    `started` is admission's: the step's own condition (`review.outcome == "approve"`), the
+    approval's condition, then the inputs. The one fact apart, `review.outcome` from
+    `person:ana`, is what decided that pay may run at all, which Sam never judged.
+  - **c) As the case file keeps it: wrapped, `‹sensitive›`,** sealed under the case's key once
+    exported (19b). Never in clear: a record in clear would be the copy forgetting can't reach
+    (D15, D31). Not as the client sent it either: the client wraps every form value, since it
+    can't tell which are sensitive; the record passes each through `kept`, so the national ID
+    stays wrapped and an ordinary amount is plain, kept after forgetting as D32 says.
+  - In one line: a record is one act and everything it caused; each decision lists the facts it
+    rested on; a value is kept exactly as the case file keeps it, wrapped if and only if its field
+    is sensitive.
+- Status: open, until the three parts come back from memory.
