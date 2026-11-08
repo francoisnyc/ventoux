@@ -83,7 +83,7 @@ from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, sta
 from ventoux.case.keeping import kept
 from ventoux.case.migrations import Moved, apply, problems_of, released
 from ventoux.case.owed import owed
-from ventoux.case.recording import decided_start, facts, recorded
+from ventoux.case.recording import decided_failure, decided_start, facts, recorded
 from ventoux.case.requests import answer_change, propose_change
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
@@ -1271,6 +1271,7 @@ def failed(state: CaseState, event: Failed) -> None:
     # it did, and a later run would get a new key (brief, D17) (brief, D40).
     after = f" after its stop was requested by {run.stop_requested}" if run.stop_requested else ""
     state.history.append(f"{run.entry} failed{after}: {event.reason}")
+    decided_failure(state, run.step, run.entry, event.reason)
     if state.phase == "closing":
         run.status = "cancelled"
         flag(state, f"{run.entry} failed after the close was requested: {event.reason}")
@@ -1343,6 +1344,7 @@ def fail(state: CaseState, name: str, reason: str) -> None:
     if given is not None:
         run.approved = given
     state.history.append(f"{run.entry} failed: {reason}")
+    decided_failure(state, name, run.entry, reason)
 
 
 def operating_role(catalog: Catalog, event: Retried) -> str:
@@ -1441,6 +1443,7 @@ def retry(
         verb = "were" if len(case.closes_when) > 1 else "was"
         run.held_retry = f"{event.by}'s retry, after {names} {verb} reached"
     state.history.append(f"{event.by} retried {event.entry} as {counted[0]}")
+    state.deciding.append(Decision("retried", step=run.step, entry=run.entry))
     # A person decided to try again: a fact the step needs fresh may be fetched again, unless a
     # refresh of it is still on its way (brief, D33). A stopped refresh counts for nothing, even
     # while it runs on (brief, D40).
@@ -1569,6 +1572,7 @@ def retry_fails(state: CaseState, run: StepRun, why: str, then: str) -> None:
     run.status = "failed"
     run.reason = f"its retry can't start: {why}: {then}, or close the case"
     state.history.append(f"{run.entry} failed again: its retry can't start: {why}")
+    decided_failure(state, run.step, run.entry, run.reason)
 
 
 def refresh_stale(
@@ -1919,12 +1923,14 @@ def start_items(
             if retried is not None:  # the same run fails again, keeping its key (brief, D26)
                 retried.status, retried.reason = "failed", str(error)
                 state.history.append(f"{retried.entry} failed again: {error}")
+                decided_failure(state, name, retried.entry, str(error))
             else:
                 entry = f"{name}.{number}#1"
                 run = StepRun(entry, name, "failed", reason=str(error), item=number)
                 run.started = False
                 state.runs.append(run)
                 state.history.append(f"{run.entry} failed: {error}")
+                decided_failure(state, name, run.entry, str(error))
         started = True
     return started
 

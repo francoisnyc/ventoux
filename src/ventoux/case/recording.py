@@ -17,6 +17,7 @@ from ventoux.case.state import (
     CloseAsked,
     Completed,
     Event,
+    Failed,
     ForgetApproved,
     GivenBack,
     Opened,
@@ -52,6 +53,13 @@ def decided_start(state: CaseState, name: str, step: Step, entry: str) -> None:
     approval = step.approval.when if isinstance(step, CallStep) and step.approval else None
     read = facts(state, [step.when, approval, *inputs_of(step)])
     state.deciding.append(Decision("started", step=name, entry=entry, rule=rule, read=read))
+
+
+def decided_failure(state: CaseState, step: str, entry: str, reason: str) -> None:
+    """Say that `step`'s run `entry` failed, and why: the run's own reason, which names what
+    failed and the type of what it raised, never what it said (brief, D31) (brief, D76)."""
+    decision = Decision("failed", step=step, entry=entry, rule=f"steps.{step}", reason=reason)
+    state.deciding.append(decision)
 
 
 def inputs_of(step: Step) -> list[Expression]:
@@ -130,6 +138,11 @@ def act_of(case: CaseDefinition, event: Event) -> Act:
             outcome=event.outcome,
             values=values,
         )
+    if isinstance(event, Failed):
+        # Its reason is the failed decision's: the act itself gives nothing.
+        return Act("failed", entry=event.entry)
+    if isinstance(event, Retried):
+        return Act("retried", by=event.by, roles=tuple(sorted(event.roles)), entry=event.entry)
     if isinstance(event, Completed):
         # What the run gave, as it gave it: its contract says where each value came from.
         return Act("completed", entry=event.entry, outcome=event.outcome, values=event.output)

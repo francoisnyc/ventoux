@@ -18,7 +18,7 @@ from ventoux.case.state import Answered
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
-from ventoux.testing import CATALOG, AnswerRefused, run_case
+from ventoux.testing import CATALOG, AnswerRefused, retry, run_case
 
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 LARGE = {"order_id": "ord-2", "amount": 250}
@@ -145,6 +145,48 @@ def test_an_approval_that_starts_its_step_is_one_record() -> None:
                 Fact("order_id", ("system:opener",), "ord-2"),
             ),
         ),
+    ]
+
+
+def down_then_up() -> Any:
+    """A payment provider that fails once, with a message quoting the order, then pays."""
+    calls: list[object] = []
+
+    def pay(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs)
+        if len(calls) == 1:
+            raise ConnectionError(f"provider unreachable while refunding {inputs['order_id']}")
+        return {"refund_id": "ref-1"}
+
+    return pay
+
+
+def test_a_failure_is_recorded_by_its_type_and_a_retry_says_so() -> None:
+    run = run_case(
+        refund,
+        {"order_id": "ord-1", "amount": 40},
+        [("review", "approve", "ana", {"approved_amount": 40}), retry("pay#1", "omar")],
+        {**PEOPLE, "omar": ["operations"]},
+        activities={"payments.refund@2": down_then_up()},
+        engine=3,
+    )
+    _, _, failure, retried, _ = run.audit
+    assert failure.act == Act("failed", entry="pay#1")
+    # Its type, never what it said: the message may quote anything (brief, D31) (brief, D76).
+    assert failure.decisions == [
+        Decision(
+            "failed",
+            step="pay",
+            entry="pay#1",
+            rule="steps.pay",
+            reason="payments.refund@2 failed with ConnectionError: ‹sensitive›",
+        )
+    ]
+    assert "provider unreachable" not in repr(run.audit)
+    assert retried.act == Act("retried", by="omar", roles=("operations",), entry="pay#1")
+    assert [(each.kind, each.entry) for each in retried.decisions] == [
+        ("retried", "pay#1"),
+        ("started", "pay#1"),
     ]
 
 
