@@ -93,6 +93,7 @@ from ventoux.testing import (
     DevelopmentForget,
     DevelopmentPlans,
     as_text,
+    development_audit,
     development_converter,
     fixture_converter,
     release_of,
@@ -240,6 +241,7 @@ def on_dev_server[T](scenario: Callable[[Client], Awaitable[T]]) -> T:
                 DevelopmentPlans,
                 FAKES,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             # Bounded: a case that hangs fails the test.

@@ -61,6 +61,7 @@ with workflow.unsafe.imports_passed_through():
         FAKES,
         DevelopmentPlans,
         as_json,
+        development_audit,
         development_converter,
         run_case,
     )
@@ -309,6 +310,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 activities,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
@@ -448,6 +450,7 @@ def test_a_client_without_the_codec_is_refused() -> None:
                     DevelopmentPlans,
                     FAKES,
                     activity_executor=threads,
+                    audit=development_audit(),
                 )
             with pytest.raises(ValueError, match=refused):
                 await start_case(environment.client, SensitiveCases, claim(), FILE, "c-1", QUEUE)
@@ -655,6 +658,7 @@ def test_the_workers_log_keeps_only_an_exceptions_type(caplog: pytest.LogCapture
                 DevelopmentPlans,
                 FAKES,
                 activity_executor=threads,
+                audit=development_audit(),
             )
 
     asyncio.run(go())

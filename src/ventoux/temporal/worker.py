@@ -16,6 +16,7 @@ from ventoux.temporal.logs import keep_only_exception_types
 from ventoux.temporal.registry import RegistryActivities
 from ventoux.temporal.sandbox import SANDBOX
 from ventoux.temporal.workflow import PlanWorkflow
+from ventoux.tooling.audit import AuditStore
 
 
 def plan_worker(
@@ -54,13 +55,18 @@ def case_worker(
     identity: str | None = None,
     *,
     activity_executor: Executor,
+    audit: AuditStore | None,
 ) -> Worker:
     """A worker on `task_queue` for `cases`, the plan workflow its plan steps run as, and the code
     behind its catalog's contracts; and, given `forget`, the requests to forget a case
     (brief, D32). A case workflow in an environment also asks its registry, through this worker
     (brief, D5); `identity` names the worker among a queue's pollers. `activity_executor` runs the
-    activities that are plain functions; the caller owns it, as with `plan_worker`."""
+    activities that are plain functions; the caller owns it, as with `plan_worker`. `audit` is the
+    store the cases' records are written to (brief, D77)."""
     require_ventoux_converter(client)
+    if audit is None:
+        # Fail closed: a case would run with no trail.
+        raise ValueError("a case worker needs an audit store: give case_worker audit=…")
     keep_only_exception_types()  # a failure's text never reaches the log (brief, D31)
     forgetting = [] if forget is None else ForgetActivities(client).all()
     registry = [] if cases.environment is None else RegistryActivities(client).for_cases()

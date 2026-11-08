@@ -136,7 +136,7 @@ class Sealer:
     """Writes a value as JSON, sealing a sensitive one with the case's key for its place."""
 
     def __init__(self, case: str, sensitive: SensitiveFields, keys: KeyProvider) -> None:
-        self.case = case  # whose key seals: a child's and a plan run's are its case's (D75)
+        self.case = case  # whose key seals: a child's and a plan run's are its case's (brief, D75)
         self.sensitive = sensitive
         self.keys = keys
 

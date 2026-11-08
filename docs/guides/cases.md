@@ -1871,15 +1871,19 @@ guide), and the code behind each contract:
 from concurrent.futures import ThreadPoolExecutor
 
 from ventoux.temporal.worker import case_worker
+from ventoux.tooling.audit import FileAudit
 
 with ThreadPoolExecutor() as activity_executor:
     worker = case_worker(client, "refunds", RefundCases, RefundPlans,
-                         {"payments.refund@2": refund, ...}, activity_executor=activity_executor)
+                         {"payments.refund@2": refund, ...}, activity_executor=activity_executor,
+                         audit=FileAudit("audit/"))
     await worker.run()
 ```
 
 The executor is yours, as with a plan worker (the plans guide): the `with` block shuts its threads
-down once the worker has stopped.
+down once the worker has stopped. `audit` is where the cases' records are written, apart from
+Temporal; `FileAudit` is for development, and the audit guide (`docs/guides/audit.md`) says what
+goes there and what a production store is.
 
 The client opens a case with its first values, answers it, and reads how it is going. The case's
 ID is the case: `refund-A-1001` names it for as long as it lives, and opening a second case with

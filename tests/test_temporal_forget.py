@@ -86,6 +86,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentForget,
         DevelopmentPlans,
         as_json,
+        development_audit,
         development_converter,
         load_definition,
     )
@@ -115,6 +116,7 @@ def on_temporal[T](
                 activities,
                 forget=DevelopmentForget,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
             Worker(
                 environment.client,
@@ -863,6 +865,7 @@ def test_the_guides_forget_example_runs_as_written() -> None:
             "ClaimPlans": DevelopmentPlans,
             "ClaimForget": DevelopmentForget,
             "implementations": FAKES,
+            "store": development_audit(),  # the guide's audit store (brief, D77)
         }
         # The guide's worker uses the executor its cases guide's `with` block opens: here, the
         # tests' own, shut down once the worker has stopped (fix-worker-executors).

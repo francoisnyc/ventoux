@@ -78,6 +78,7 @@ from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.forget import ForgetReport, ForgetStart, ForgetWorkflow
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
+from ventoux.tooling.audit import FileAudit
 from ventoux.tooling.builder.case import Case
 from ventoux.tooling.builder.written import written
 
@@ -467,6 +468,11 @@ class DevelopmentForget(ForgetWorkflow):
     @workflow.run
     async def run(self, start: ForgetStart) -> ForgetReport:
         return await self.drive(start)
+
+
+def development_audit() -> FileAudit:
+    """An audit store in a fresh temporary folder, for a test's case worker (brief, D77)."""
+    return FileAudit(tempfile.mkdtemp(prefix="ventoux-audit-"))
 
 
 def development_converter() -> DataConverter:

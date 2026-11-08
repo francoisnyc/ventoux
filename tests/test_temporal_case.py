@@ -71,6 +71,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentCases,
         DevelopmentPlans,
         Outcome,
+        development_audit,
         development_converter,
         fake_refund,
         fixture_converter,
@@ -106,6 +107,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 activities,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             # Bounded: a case that hangs (a workflow task retried forever) fails the test.
@@ -167,6 +169,7 @@ def skipping[T](
                 DevelopmentPlans,
                 activities,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=20)

@@ -29,7 +29,13 @@ from ventoux.case.memory import Activity
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow, start_case
 from ventoux.temporal.manifests import environment_worker
 from ventoux.temporal.registry import create_environment, pollers, registry_worker
-from ventoux.testing import CATALOG, FAKES, DevelopmentPlans, development_converter
+from ventoux.testing import (
+    CATALOG,
+    FAKES,
+    DevelopmentPlans,
+    development_audit,
+    development_converter,
+)
 from ventoux.tooling.cli import main
 from ventoux.tooling.releases import FolderStore, release
 
@@ -96,6 +102,7 @@ async def started(
             build,
             identity,
             activity_executor=threads,
+            audit=development_audit(),
         )
         async with worker:
             yield worker

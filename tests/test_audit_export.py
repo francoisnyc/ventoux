@@ -4,19 +4,29 @@ Through `exported`, the store, the case on Temporal and `read_audit`. See
 docs/layers/19-audit-keys.md (19b), docs/guides/audit.md and brief, D77.
 """
 
+import asyncio
 import base64
 import dataclasses
 from pathlib import Path
 from typing import Any
 
 import pytest
+from skipping_server import time_skipping
 from test_audit_records import checked_claim, known
 from test_sensitive import FILE, NATIONAL_ID
+from worker_threads import worker_threads
 
 from ventoux.case.audit import AuditRecord
 from ventoux.case.definition import parse_case
 from ventoux.temporal.audit import ExportRefused, exported, sensitive_fields
-from ventoux.testing import run_case
+from ventoux.temporal.worker import case_worker
+from ventoux.testing import (
+    FAKES,
+    DevelopmentCases,
+    DevelopmentPlans,
+    development_converter,
+    run_case,
+)
 from ventoux.tooling.audit import AuditRefused, FileAudit
 from ventoux.tooling.keys import FileKeys, KeyRefused
 
@@ -96,3 +106,27 @@ def test_the_store_keeps_each_record_once_in_order(tmp_path: Path) -> None:
         ("claim-7/forget", 1),
         ("claim-7/repair#1", 1),
     ]
+
+
+def test_a_case_worker_without_a_store_is_refused() -> None:
+    # A case would run with no trail (brief, D77).
+    async def build() -> None:
+        async with (
+            time_skipping(development_converter()) as environment,
+            worker_threads() as threads,
+        ):
+            with pytest.raises(ValueError) as refused:
+                case_worker(
+                    environment.client,
+                    "refunds",
+                    DevelopmentCases,
+                    DevelopmentPlans,
+                    FAKES,
+                    activity_executor=threads,
+                    audit=None,
+                )
+            assert str(refused.value) == (
+                "a case worker needs an audit store: give case_worker audit=…"
+            )
+
+    asyncio.run(build())
