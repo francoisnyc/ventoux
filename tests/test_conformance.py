@@ -8,9 +8,21 @@ from typing import Any
 
 import pytest
 
+from ventoux.case.engine import ENGINE
 from ventoux.core.validate import ISSUE_CODES, Issue
 from ventoux.testing import CATALOG
-from ventoux.tooling.conformance import SuiteUnreadable, catalog_data, mismatches
+from ventoux.tooling.cli import main
+from ventoux.tooling.conformance import (
+    SUITE,
+    SuiteUnreadable,
+    catalog_data,
+    differences,
+    given,
+    mismatches,
+    read_suite,
+    uncovered,
+)
+from ventoux.tooling.suite import Entry
 
 ROOT = Path(__file__).parent.parent
 REFUND = ROOT / "examples" / "refund" / "refund.json"  # a valid case with no plan step
@@ -244,3 +256,109 @@ def test_an_issue_with_a_code_not_listed_is_refused_when_made() -> None:
     with pytest.raises(ValueError, match="NOT_A_CODE is not a listed issue code"):
         Issue("steps.pay", "NOT_A_CODE", "anything")
     assert "UNKNOWN_FIELD" in ISSUE_CODES
+
+
+def test_a_listed_code_no_entry_expects_is_said_uncovered(tmp_path: Path) -> None:
+    suite = a_suite(tmp_path, closed_early_entry({"issues": [NEVER_FIRES]}))
+    shutil.copy(CLOSED_EARLY, suite / "cases")
+    said = uncovered(suite)
+    assert "UNKNOWN_FIELD: listed, and no entry expects it" in said
+    assert not any(line.startswith("NEVER_FIRES") for line in said)
+    assert len(said) == len(ISSUE_CODES) - 1
+
+
+# The committed suite, as the package ships it.
+COMMITTED = read_suite(SUITE)
+
+
+@pytest.mark.parametrize("entry", COMMITTED.entries, ids=lambda entry: entry.name)
+def test_this_engine_gives_what_each_committed_entry_expects(entry: Entry) -> None:
+    assert differences(entry, given(entry, SUITE)) == []
+
+
+def test_every_listed_code_has_a_committed_entry_expecting_it() -> None:
+    assert uncovered(SUITE) == []
+
+
+def test_the_committed_suite_names_the_engine_it_describes() -> None:
+    assert COMMITTED.engine == ENGINE
+
+
+def test_the_catalog_as_data_holds_everything_validation_reads_from_it() -> None:
+    data = catalog_data(CATALOG)
+    assert set(data) == {
+        "contracts",
+        "roles",
+        "systems",
+        "labels",
+        "option_checks",
+        "document_stores",
+    }
+    assert data["contracts"]["payments.refund@2"]["risk"] == "high"
+    assert data["roles"]["support-lead"] == {
+        "approves": "high",
+        "operates": False,
+        "forgets": False,
+        "edits": True,
+        "migrates": False,
+        "assigns": True,
+    }
+    assert data["option_checks"] == {"branches": "branches.holds@1"}
+    assert data["document_stores"] == {"documents": "documents.issued@1"}
+    assert "crm" in data["systems"] and "llm" in data["labels"]
+
+
+def test_the_committed_catalog_file_is_what_the_development_catalog_gives() -> None:
+    committed = (SUITE / "catalogs" / "development.json").read_text()
+    assert committed == json.dumps(catalog_data(CATALOG), indent=2, sort_keys=True) + "\n"
+
+
+def a_copy_of_the_suite(tmp_path: Path) -> Path:
+    copy = tmp_path / "suite"
+    shutil.copytree(SUITE, copy)
+    return copy
+
+
+def test_unchanged_passes_on_the_committed_suite(capsys: pytest.CaptureFixture[str]) -> None:
+    # The four codes the package refuses first, and OPENER_DECIDES: waiting on a decision.
+    assert main(["conformance", "--unchanged"]) == 0
+    assert "conforms" in capsys.readouterr().out
+
+
+def test_unchanged_fails_on_a_result_changed_naming_the_entry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    suite = a_copy_of_the_suite(tmp_path)
+    data = json.loads((suite / "suite.json").read_text())
+    entry = next(e for e in data["entries"] if e["name"].startswith("WRONG_KIND"))
+    entry["expected"]["issues"][0]["code"] = "UNKNOWN_CONTRACT"
+    (suite / "suite.json").write_text(json.dumps(data))
+    assert main(["conformance", "--unchanged", "--suite", str(suite)]) == 1
+    out = capsys.readouterr().out
+    assert "expected steps.pay.workflow UNKNOWN_CONTRACT (error), not given" in out
+    assert "given steps.pay.workflow WRONG_KIND (error), not expected" in out
+
+
+def test_unchanged_fails_on_a_catalog_file_not_as_generated_naming_the_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    suite = a_copy_of_the_suite(tmp_path)
+    catalog = suite / "catalogs" / "development.json"
+    catalog.write_text(catalog.read_text().replace('"risk": "high"', '"risk": "low"', 1))
+    before = catalog.read_text()
+    assert main(["conformance", "--unchanged", "--suite", str(suite)]) == 1
+    assert "development.json differs from what the development catalog gives, first at line" in (
+        capsys.readouterr().out
+    )
+    assert catalog.read_text() == before  # nothing written
+
+
+def test_write_writes_the_catalog_files_and_never_an_expected_result(tmp_path: Path) -> None:
+    suite = a_copy_of_the_suite(tmp_path)
+    (suite / "catalogs" / "development.json").unlink()
+    entries = (suite / "suite.json").read_text()
+    assert main(["conformance", "--write", "--suite", str(suite)]) == 0
+    assert (suite / "catalogs" / "development.json").read_text() == (
+        SUITE / "catalogs" / "development.json"
+    ).read_text()
+    assert (suite / "suite.json").read_text() == entries

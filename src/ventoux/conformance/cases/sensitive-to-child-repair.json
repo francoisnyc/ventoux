@@ -1,0 +1,66 @@
+{
+  "case": "repair",
+  "display": {
+    "title": "Vehicle repair"
+  },
+  "fields": {
+    "vehicle": {
+      "type": "string",
+      "display": {
+        "title": "Vehicle"
+      }
+    },
+    "budget": {
+      "type": "number",
+      "display": {
+        "title": "Budget"
+      }
+    },
+    "cost": {
+      "type": "number",
+      "display": {
+        "title": "Cost"
+      }
+    },
+    "owner": {
+      "type": "string",
+      "display": {
+        "title": "Owner"
+      }
+    }
+  },
+  "milestones": {
+    "fixed": {
+      "display": {
+        "title": "Vehicle fixed"
+      }
+    }
+  },
+  "steps": {
+    "fix": {
+      "kind": "task",
+      "display": {
+        "title": "Fix the vehicle"
+      },
+      "roles": [
+        "support-lead"
+      ],
+      "outcomes": {
+        "fixed": {
+          "display": {
+            "title": "Fixed"
+          },
+          "sets": [
+            "cost"
+          ],
+          "reaches": [
+            "fixed"
+          ]
+        }
+      }
+    }
+  },
+  "reports": [
+    "cost"
+  ]
+}

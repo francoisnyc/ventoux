@@ -51,6 +51,7 @@ from ventoux.tooling.check import (
     shown,
     write,
 )
+from ventoux.tooling.conformance import SUITE, conformance_command
 from ventoux.tooling.deployment import (
     Configuration,
     Unconfigured,
@@ -106,6 +107,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--unchanged",
         action="store_true",
         help="write nothing: fail if a committed schema differs from the models (for CI)",
+    )
+    conforming = commands.add_parser(
+        "conformance", help="check this engine against the conformance suite (layer 20a)"
+    )
+    conforming.add_argument(
+        "--suite", type=Path, default=SUITE, help="the suite's folder (the one the package ships)"
+    )
+    conforming.add_argument(
+        "--write", action="store_true", help="write the catalog files, never an expected result"
+    )
+    conforming.add_argument(
+        "--unchanged", action="store_true", help="check, writing nothing (the default; for CI)"
     )
     simulating = commands.add_parser(
         "simulate", help="play a story on the in-memory engine, and check what it expects"
@@ -223,6 +236,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(refused, file=sys.stderr)
             return CANT_READ
         return advise_command(arguments, found)  # needs no catalog: the case's worker has it
+    if arguments.command == "conformance":
+        # The suite names its own catalogs, never the deployment's (brief, D80).
+        return conformance_command(arguments.suite, arguments.write)
     if arguments.command == "schema":
         return write_schemas(arguments.out, arguments.unchanged)  # needs no catalog: shape only
     # Every other command reads contracts or roles: the deployment's catalog, named in

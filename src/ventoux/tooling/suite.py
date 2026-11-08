@@ -51,6 +51,13 @@ Expected = Annotated[
 ]
 
 
+class Child(Closed):
+    """A child case a package's case step opens: its case and its plans, as files."""
+
+    case: str  # its case.json, relative to the suite's folder
+    plans: list[str]  # its plans' files
+
+
 class PackageEntry(Closed):
     """A case with its plans and child cases, what it is read against, and what it must give."""
 
@@ -58,7 +65,7 @@ class PackageEntry(Closed):
     kind: Literal["package"]  # says which shape of entry this is
     case: str  # its case.json, relative to the suite's folder
     plans: list[str]  # its plans' files
-    cases: dict[str, str]  # its child cases, by reference: `repair@1`
+    cases: dict[str, Child]  # its child cases, by reference: `repair@1`
     catalog: str  # the catalog file it is read against, by name: `development`
     expected: Expected  # what validation must give
 

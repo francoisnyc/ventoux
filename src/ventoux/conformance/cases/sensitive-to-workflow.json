@@ -1,0 +1,33 @@
+{
+  "case": "claim",
+  "display": {
+    "title": "Insurance claim"
+  },
+  "fields": {
+    "customer_id": {
+      "type": "reference",
+      "system": "crm",
+      "display": {
+        "title": "Customer"
+      },
+      "visible_to": [
+        "adjuster"
+      ],
+      "sensitive": true
+    }
+  },
+  "steps": {
+    "kyc": {
+      "kind": "workflow",
+      "display": {
+        "title": "Check the customer"
+      },
+      "workflow": "kyc.check@1",
+      "inputs": {
+        "customer_id": {
+          "var": "customer_id"
+        }
+      }
+    }
+  }
+}

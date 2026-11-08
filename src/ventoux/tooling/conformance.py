@@ -24,13 +24,16 @@ from ventoux.case.releases import PackageRefused, package, read_json
 from ventoux.core.catalog import Catalog
 from ventoux.core.plan import PlanInvalid, parse_plan
 from ventoux.core.promise import promise_of
-from ventoux.core.validate import validate
+from ventoux.core.validate import ISSUE_CODES, validate
+from ventoux.tooling.check import differs, shown
 from ventoux.tooling.deployment import DEVELOPMENT, catalog_named
 from ventoux.tooling.suite import Entry, Issues, PackageEntry, PlanEntry, Suite, path_of
 
 # The catalogs a suite names, each by the Python catalog its file is generated from. The suite's
 # data names a catalog file, never a Python module: this map is the runner's.
 CATALOGS = {"development": DEVELOPMENT}
+
+SUITE = Path(__file__).parent.parent / "conformance"  # the suite the package ships
 
 Found = tuple[str, str, str]  # one issue as compared: its path, its code, its severity
 
@@ -52,10 +55,47 @@ class BrokenEntry(Exception):
 
 
 def catalog_data(catalog: Catalog) -> dict[str, Any]:
-    """`catalog` as data, for an implementation that can't read Python: each contract as `ventoux
-    promises` writes it, by reference."""
+    """`catalog` as data, for an implementation that can't read Python: everything validation
+    reads from it. Each contract as `ventoux promises` writes it, by reference; each role with the
+    highest risk it may approve and what else it may do; the systems and labels; each system's
+    option check, and each document store's check (brief, D80)."""
     return {
-        "contracts": {contract.reference: promise_of(contract) for contract in catalog.contracts()}
+        "contracts": {c.reference: promise_of(c) for c in catalog.contracts()},
+        "roles": {
+            role: {
+                "approves": approves,
+                "operates": role in catalog.operators,
+                "forgets": role in catalog.forgetters,
+                "edits": role in catalog.editors,
+                "migrates": role in catalog.migrators,
+                "assigns": role in catalog.assigners,
+            }
+            for role, approves in catalog.roles.items()
+        },
+        "systems": catalog.systems,
+        "labels": catalog.labels,
+        "option_checks": {
+            system: check
+            for system in catalog.systems
+            if (check := catalog.option_check(system)) is not None
+        },
+        "document_stores": {
+            system: check
+            for system in catalog.systems
+            if (check := catalog.document_store(system)) is not None
+        },
+    }
+
+
+def catalog_files() -> dict[str, str]:
+    """Each catalog file a suite names, by its path in the suite, as its Python catalog gives it:
+    what `--write` writes and `--unchanged` compares, byte for byte, as the schema is (brief, D60)."""
+    return {
+        f"catalogs/{name}.json": json.dumps(
+            catalog_data(catalog_named(module, None)), indent=2, sort_keys=True
+        )
+        + "\n"
+        for name, module in CATALOGS.items()
     }
 
 
@@ -98,7 +138,14 @@ def package_given(entry: PackageEntry, folder: Path, catalog: Catalog) -> list[F
         return RefusedAt(invalid.paths)
     plans = [(folder / plan).read_text() for plan in entry.plans]
     try:
-        released = package(text, plans)
+        children = {
+            reference: package(
+                (folder / child.case).read_text(),
+                [(folder / plan).read_text() for plan in child.plans],
+            )
+            for reference, child in entry.cases.items()
+        }
+        released = package(text, plans, children)
     except PackageRefused as refused:
         raise BrokenEntry(f"a broken entry, not a package: {refused}") from None
     return [(issue.path, issue.code, issue.severity) for issue in issues_of(released, catalog)]
@@ -140,3 +187,53 @@ def differences(entry: Entry, got: list[Found] | RefusedAt) -> list[str]:
     if sorted(expected.at) != sorted(got.paths):
         return [f"expected refused when read at {at}, refused at {', '.join(sorted(got.paths))}"]
     return []
+
+
+def uncovered(folder: Path) -> list[str]:
+    """Each listed issue code no entry of the suite in `folder` expects, one line each: a rule the
+    suite says nothing about, so another implementation could leave it out and still conform
+    (brief, D80)."""
+    expected = {
+        issue.code
+        for entry in read_suite(folder).entries
+        if isinstance(entry.expected, Issues)
+        for issue in entry.expected.issues
+    }
+    return [f"{code}: listed, and no entry expects it" for code in sorted(ISSUE_CODES - expected)]
+
+
+DONE = 0  # the suite conforms, or the catalog files were written
+FAILED = 1  # a mismatch, a code uncovered, or a catalog file not as generated: each said
+CANT_READ = 2  # the suite can't be read
+
+
+def conformance_command(folder: Path, write: bool) -> int:
+    """`ventoux conformance`: with `write`, write the catalog files, never an expected result,
+    which a person writes; else check that this engine conforms to the suite in `folder`, its
+    catalog files as generated, and every listed code expected by an entry."""
+    files = catalog_files()
+    if write:
+        for name, text in files.items():
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_text(text)
+            print(f"✓ {shown(folder / name)}: what the catalog gives")
+        return DONE
+    problems: list[str] = []
+    for name, text in files.items():
+        committed = folder / name
+        if not committed.is_file():
+            problems.append(f"{shown(committed)} is missing: ventoux conformance --write writes it")
+        elif committed.read_text() != text:
+            gives = f"what the {Path(name).stem} catalog gives"
+            problems.append(differs(shown(committed), gives, committed.read_text(), text))
+    try:
+        problems += mismatches(folder) + uncovered(folder)
+    except SuiteUnreadable as unreadable:
+        print(unreadable)
+        return CANT_READ
+    for problem in problems:
+        print(problem)
+    if problems:
+        return FAILED
+    print(f"✓ this engine conforms to {shown(folder)}")
+    return DONE
