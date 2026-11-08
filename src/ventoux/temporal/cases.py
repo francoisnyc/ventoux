@@ -220,6 +220,8 @@ class CaseReport:
     assignees: dict[str, str] = field(default_factory=dict[str, str])
     # A closed child case's report, which its parent reads; None for any other (brief, D75).
     ending: ChildEnding | None = None
+    # How many of its audit records are not yet written to its store (brief, D77).
+    unwritten: int = 0
 
 
 @dataclass
@@ -602,6 +604,7 @@ class CaseWorkflow:
             state.release or "draft",
             state.engine,
             assignees(state),
+            unwritten=len(state.audit) if state.engine >= RECORDS_FROM else 0,
         )
 
     @workflow.query(name="view")
@@ -838,8 +841,12 @@ class CaseWorkflow:
         waits for an operator."""
         if self.exporting or not self.unwritten() or self.state.export_failed:
             return
+        if self.state.phase != "closed" and not self.holding() and self.switch_due():
+            # The records cross the switch in the state, and the next run writes them: an export
+            # started now would hold the switch back for as long as it runs (brief, D27).
+            return
         self.exporting = True
-        self.running += 1  # the case never switches while its export is under way
+        self.running += 1  # the case never switches while its export is under way (brief, D27)
         self.beside(self.export())
 
     async def export(self) -> None:
@@ -957,6 +964,8 @@ class CaseWorkflow:
         decide, or the time to continue as new."""
         if self.broken is not None or self.woken:
             return True
+        if self.state.phase == "closed":
+            return bool(self.inbox)  # a closed case never switches: it waits for its export
         if self.holding():
             # Only the export's own events are taken while the case holds.
             return any(isinstance(each, ExportFailed | ExportRetried) for each in self.inbox)
@@ -976,8 +985,12 @@ class CaseWorkflow:
         """Whether the case should continue as new now: enough events in this run, or Temporal
         suggests it (its history is getting large); and nothing is running, whose result would
         come back to a run that has ended (brief, D27)."""
+        return self.running == 0 and self.switch_due()
+
+    def switch_due(self) -> bool:
+        """Enough events in this run, or Temporal suggests continuing as new."""
         enough = self.decided >= self.events_per_run
-        return self.running == 0 and (enough or workflow.info().is_continue_as_new_suggested())
+        return enough or workflow.info().is_continue_as_new_suggested()
 
     def switch(self, start: CaseStart) -> None:
         """Continue as new, carrying the whole state. Only at a quiet point: no event waiting to

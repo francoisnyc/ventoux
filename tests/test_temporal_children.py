@@ -24,7 +24,15 @@ from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
 from test_activation import NEEDS, SERVED, SERVES, production, worker
 from test_child_cases import CLOSABLE, claim, repair, written_off_repair
-from test_temporal_case import QUEUE, Case, SwitchingCases, on_temporal, reported, runs_of, skipping
+from test_temporal_case import (
+    QUEUE,
+    Case,
+    SwitchingCases,
+    on_temporal,
+    reported,
+    runs_of,
+    skipping,
+)
 from test_temporal_forget import on_temporal as forgetting_on_temporal
 from test_temporal_forget import reported as forget_reported
 from test_temporal_registry import QUEUE as REFUNDS
@@ -150,7 +158,7 @@ def test_the_guides_child_case_runs_on_temporal() -> None:
     ) in "\n".join(parent.history)
     # A released case says its release first; then who opened it: its parent, never a person.
     assert child.history[:2] == [
-        "opened on repair 3, engine 2",
+        "opened on repair 3, engine 3",
         "opened by claim-7, from repair#1, with budget and vehicle",
     ]
 
@@ -259,7 +267,9 @@ def test_a_child_terminated_in_the_run_that_started_it_fails_the_step_at_once() 
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
         child = await started(client, DevelopmentCases, "claim-10/repair#1")
-        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        # Its records written: the time-skipping server skips no time past an activity whose
+        # workflow was terminated while it ran (brief, D77).
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
         await child.terminate("from outside")
         return await reported(parent, lambda now: bool(now.needs_attention))
 
@@ -280,7 +290,9 @@ def test_a_child_terminated_after_a_switch_is_noticed_when_the_next_run_starts()
         first, _ = await runs_of(client, "claim-11")
         _, second = await until_switched(client, "claim-11", first)
         child = await started(client, SwitchingCases, "claim-11/repair#1")
-        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        # Its records written: the time-skipping server skips no time past an activity whose
+        # workflow was terminated while it ran (brief, D77).
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
         await child.terminate("from outside")
         for entry in ("repair#8", "repair#9"):  # two events: the case switches again
             await case_handle(client, SwitchingCases, "claim-11").signal("child_ended", entry)
@@ -348,7 +360,9 @@ def test_a_child_terminated_unheard_is_noticed_within_a_day() -> None:
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
         child = await started(client, DevelopmentCases, "claim-13/repair#1")
-        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        # Its records written: the time-skipping server skips no time past an activity whose
+        # workflow was terminated while it ran (brief, D77).
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
         await child.terminate("from outside")
         await environment.sleep(timedelta(hours=23))
         unheard = await reported(parent, lambda now: True)
@@ -372,7 +386,9 @@ def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> 
         first, _ = await runs_of(client, "claim-14")
         await until_switched(client, "claim-14", first)
         child = await started(client, SwitchingCases, "claim-14/repair#1")
-        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        # Its records written: the time-skipping server skips no time past an activity whose
+        # workflow was terminated while it ran (brief, D77).
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
         await child.terminate("from outside")
         await environment.sleep(timedelta(hours=25))
         return await reported(parent, lambda now: bool(now.needs_attention))

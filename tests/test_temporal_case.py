@@ -778,6 +778,17 @@ REWORKABLE = copy.deepcopy(REFUND)
 REWORKABLE["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
 
 
+async def continued_as_new(client: Client, id: str) -> None:
+    """Once the case has continued as new: a switch waits for nothing to run, its export
+    included (brief, D27) (brief, D77). Asked a bounded number of times."""
+    for _ in range(100):
+        first, last = await runs_of(client, id)
+        if last != first:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{id} never continued as new")
+
+
 async def runs_of(client: Client, id: str) -> tuple[str, str]:
     """The case's first run ID, and its current one."""
     described = await client.get_workflow_handle(id).describe()
@@ -891,9 +902,15 @@ def test_a_switch_waits_while_an_activity_runs() -> None:
             case,
             lambda now: "pay#1 done, giving refund_id from untrusted:undeclared" in now.history,
         )
+        # Then it switches, once nothing runs: the payment, and the export of its records
+        # (brief, D77). Asked a bounded number of times.
+        for _ in range(100):
+            if (switched := await runs_of(client, "refund-1"))[1] != while_running[1]:
+                break
+            await asyncio.sleep(0.05)
         await close(case, "duplicate", "ana", PEOPLE["ana"])
         await case.result()
-        return while_running, paid, await runs_of(client, "refund-1")
+        return while_running, paid, switched
 
     (first, during), paid, (_, last) = on_temporal(
         scenario, {**FAKES, "payments.refund@2": held}, cases=SwitchingCases
@@ -963,6 +980,9 @@ def test_a_case_history_replays() -> None:
         case = await start_case(client, SwitchingCases, REFUND, LARGE, "refund-1", QUEUE)
         await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
         await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await continued_as_new(
+            client, "refund-1"
+        )  # once its export has written the review's records
         await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
         await case.result()
         first, last = await runs_of(client, "refund-1")
@@ -1231,6 +1251,9 @@ def test_a_waiting_start_crosses_continue_as_new() -> None:
         case = await start_case(client, SwitchingCases, PAID_BY_A_RULE, LARGE, "refund-1", QUEUE)
         await answer(case, "review#1", "approve", "sam", PEOPLE["sam"], REVIEW_FORM)
         await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await continued_as_new(
+            client, "refund-1"
+        )  # once its export has written the review's records
         await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
         await answer(case, "pay.approval#1", "approve", "lee", PEOPLE["lee"])
         ended = await case.result()

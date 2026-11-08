@@ -52,6 +52,7 @@ from ventoux.testing import START
 with workflow.unsafe.imports_passed_through():
     from test_sensitive import FILE, OPENING, claim
 
+    from ventoux.case import engine as engine_module
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.runtime import CaseRefused, decide
     from ventoux.case.state import CaseState, Opened
@@ -506,9 +507,12 @@ def test_replay_needs_the_key() -> None:
     replay(history, converter)
 
 
-def test_a_history_from_before_9b_replays() -> None:
+def test_a_history_from_before_9b_replays(monkeypatch: pytest.MonkeyPatch) -> None:
     # A case recorded with no codec at all, as before 9b: its payloads have no parts, so the
-    # codec passes them as they are, asking for no key (brief, D31).
+    # codec passes them as they are, asking for no key (brief, D31). It opens as code before 9b
+    # did, at engine 1, so it schedules no export (brief, D77). Python's `monkeypatch`: each run
+    # of the workflow reads `OPENING` from `ventoux.case.engine`, which the sandbox passes through.
+    monkeypatch.setattr(engine_module, "OPENING", (1,))
     before_9b = dataclasses.replace(
         DataConverter.default, payload_converter_class=ExactPayloadConverter
     )
@@ -535,6 +539,7 @@ def test_a_history_from_before_9b_replays() -> None:
                 return await case.fetch_history()
 
     history = asyncio.run(go())
+    monkeypatch.undo()  # replayed by today's code
     replay(history, development_converter())
 
 
