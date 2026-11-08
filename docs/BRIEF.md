@@ -3315,20 +3315,23 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   then: kept for an adapter after v1.0.
 - **A case ID as a name:** lowercase letters, digits and `-` stay; every other byte of its UTF-8,
   capitals and `_` included, is `_` and two hex digits (`refund-A-1001` is
-  `ventoux-refund-_41-1001`). Two IDs never share a name, and no name holds a character a URL path would read. An empty ID,
-  and one whose name passes 128 characters, are refused.
+  `ventoux-refund-_41-1001`). Two IDs never share a name, and no name holds a character a URL path
+  would read. An empty ID, and one whose name passes 128 characters, are refused.
 - **The client is the standard library** (`urllib.request`), no new dependency. Every call has a
   timeout (10 seconds by default). The token is read from `VAULT_TOKEN` as each call is made, never
   kept on the object, never said in a message, a log, a `repr` or a recording (D62); an `http://`
-  address is refused unless it is `localhost` or `127.0.0.1`.
+  address is refused unless it is `localhost` or `127.0.0.1`; a redirect is never followed, so the
+  token goes nowhere but the address named. The guide gives the token's policy, checked against a
+  development Vault: `ventoux-*` keys and the marks, never deleting a mark.
 - **Off the event loop:** every provider call made from async code (the codec, the forget
   request's activities, the client opening a case or a run) goes through `asyncio.to_thread`,
   whichever provider: a call waiting on Vault never stalls a worker.
 - **Two kinds of error, never an empty value or a guess** (D17):
   - `KeyRefused`, final: never made; destroyed (a mark); a key that can leave Vault, or of another
     type; a part that doesn't open; an ID that can't be a name.
-  - `KeyUnavailable`, not now: Vault unreachable, timing out, refusing the token, or answering
-    something unreadable. A workflow task or an activity meeting it is retried until Vault answers.
+  - `KeyUnavailable`, not now: Vault unreachable, timing out, refusing the token, hanging up, or
+    answering something unreadable (a `200` on the mark's path is a mark only in the shape Ventoux
+    writes). A workflow task or an activity meeting it is retried until Vault answers.
   - A key's state is `destroyed` or `never made` only on Vault's answer; anything else is
     `KeyUnavailable`. `read_audit` lets it through, never saying `‹forgotten›`; the forget request
     refuses a proposal it meets before anyone answers, and after the approval waits for Vault.

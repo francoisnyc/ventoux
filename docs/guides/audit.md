@@ -315,6 +315,7 @@ tests replay a model's (D62): a request the recording doesn't hold is refused, s
 | a key can leave the key service | `the key of claim-7 can leave the key service (exportable): it is not used` |
 | an `http://` address that isn't local | `the key service is reached over https: http://vault.internal:8200 is only for a development server on localhost` |
 | a case ID too long to name a key | `a case ID names a key in the key service, and its name can't pass 128 characters` |
+| an empty case ID | `a case ID can't be empty` |
 
 ---
 
