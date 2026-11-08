@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHistory
@@ -69,6 +70,7 @@ from ventoux.testing import (
     DevelopmentPlans,
     as_json,
     development_converter,
+    fixture_converter,
     release_of,
     run_case,
 )
@@ -621,3 +623,21 @@ def test_a_plan_steps_events_are_in_the_record_of_its_end(tmp_path: Path) -> Non
         "order_id": ["system:opener"],
         "amount": ["person:ana"],
     }
+
+
+HERE = Path(__file__).parent / "histories"
+
+# Recorded under 19b's code, at engine 3: a refund whose export failed with the store down, a
+# retry refused, then one taken; and a request forgetting a claim, a refused answer then an
+# approval, writing its own stream. Each replays as recorded, from now on (brief, D51).
+AT_19B: dict[str, tuple[str, type[Any]]] = {
+    "at_19b_refund_export_retried": ("refund-19b", QuicklyFailingExports),
+    "at_19b_forget_request": ("claim-7/forget", DevelopmentForget),
+}
+
+
+def test_histories_recorded_at_19b_replay() -> None:
+    for name, (id, workflow_class) in AT_19B.items():
+        recorded = HERE / f"{name}.json"
+        history = WorkflowHistory.from_json(id, recorded.read_text())
+        asyncio.run(replay_history(history, [workflow_class], fixture_converter(recorded)))
