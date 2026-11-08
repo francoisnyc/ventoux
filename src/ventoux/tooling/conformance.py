@@ -302,3 +302,19 @@ def since_command(base: Path, head: Path) -> int:
         return FAILED
     print(f"✓ every result {shown(head)} changes is said in its changes")
     return DONE
+
+
+def export_command(folder: Path, out: Path) -> int:
+    """`ventoux conformance --export OUT`: the suite's files, byte for byte, into `out`, for an
+    implementer who doesn't install Python. Never into a folder holding files, so an export is
+    never mixed with something else."""
+    if out.exists() and any(out.iterdir()):
+        print(f"{shown(out)} holds files already: export into a new folder")
+        return CANT_READ
+    files = [path for path in sorted(folder.rglob("*")) if path.is_file()]
+    for path in files:
+        target = out / path.relative_to(folder)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.read_bytes())
+    print(f"✓ {len(files)} files of the conformance suite written into {shown(out)}")
+    return DONE

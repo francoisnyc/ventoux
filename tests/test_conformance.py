@@ -474,3 +474,28 @@ def test_the_guides_example_entry_is_in_the_suite_as_written_and_this_engine_giv
     entry = next(entry for entry in COMMITTED.entries if entry.name == example["name"])
     assert entry.model_dump(mode="json", exclude_defaults=True) == example
     assert differences(entry, given(entry, SUITE)) == []
+
+
+def files_in(folder: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(folder)): path.read_bytes()
+        for path in sorted(folder.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_export_writes_every_file_of_the_suite_byte_for_byte_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "out"
+    assert main(["conformance", "--export", str(out)]) == 0
+    assert files_in(out) == files_in(SUITE)
+
+
+def test_export_refuses_a_folder_holding_files_and_writes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "notes.txt").write_text("mine")
+    assert main(["conformance", "--export", str(tmp_path)]) == 2
+    assert "holds files already: export into a new folder" in capsys.readouterr().out
+    assert files_in(tmp_path) == {"notes.txt": b"mine"}
