@@ -132,6 +132,27 @@ class VaultKeys:
         settings = {"type": KEY_TYPE, "exportable": False, "allow_plaintext_backup": False}
         self.ask(case, "POST", self.key_path(name), settings, {200, 204})
 
+    def destroy(self, case: str) -> None:
+        """Destroy `case`'s key, so nothing sealed with it opens again (brief, D15): the mark
+        first, then the key's deletion allowed, then the key deleted. From the mark on the case
+        reads as destroyed and no key of its name is used, whatever Vault would let be made again;
+        a destroy cut short is finished by the next (brief, D78)."""
+        name = vault_name(case)
+        if not self.marked(case, name):
+            if self.key_config(case, name) is None:
+                # Fail closed: no key was made, so there is no case to forget.
+                raise KeyRefused(
+                    f"there is no key for {case} to destroy: no case was opened with its ID"
+                )
+            mark = {"data": {"forgotten": True}}
+            self.ask(case, "POST", self.mark_path(name), mark, {200, 204})
+        elif self.key_config(case, name) is None:
+            return  # marked, and the key gone: a destroy that finished, asked again
+        config = {"deletion_allowed": True}  # Vault deletes no key that doesn't allow it
+        self.ask(case, "POST", f"{self.key_path(name)}/config", config, {200, 204})
+        # A key gone since it was read counts as deleted: two destroys may overlap.
+        self.ask(case, "DELETE", self.key_path(name), None, {200, 204, 404})
+
     def state(self, case: str) -> KeyState:
         """Whether `case`'s key is kept, was destroyed (its mark), or was never made: each only
         on Vault's answer. Anything else is `KeyUnavailable`, never read as either (brief, D78)."""

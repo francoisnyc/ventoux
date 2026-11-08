@@ -472,3 +472,50 @@ def test_an_answer_of_another_shape_is_unavailable_never_a_value() -> None:
     with pytest.raises(KeyUnavailable) as failed:
         vault(no_mark(), partial).seal("claim-7", VALUE.encode(), "sensitive/0")
     assert str(failed.value) == said
+
+
+MARK = {"data": {"forgotten": True}}  # the mark, as Ventoux writes it
+
+
+def write_mark(answer: Answer | Exception = (200, {})) -> Exchange:
+    return Exchange("POST", f"{MARKS}/{NAME}", MARK, answer)
+
+
+def allow_deletion(answer: Answer | Exception = (204, {})) -> Exchange:
+    return Exchange("POST", f"{KEYS}/{NAME}/config", {"deletion_allowed": True}, answer)
+
+
+def delete(answer: Answer | Exception = (204, {})) -> Exchange:
+    return Exchange("DELETE", f"{KEYS}/{NAME}", None, answer)
+
+
+def test_destroying_marks_the_case_first_and_destroying_again_finishes() -> None:
+    # The mark first, then the key's deletion allowed, then the key deleted: from the mark on the
+    # case reads as destroyed, whatever fails after. A destroy cut short at any step is finished by
+    # the next, which writes nothing twice it doesn't need and takes a key already gone as deleted
+    # (brief, D32) (brief, D78).
+    down = Unreachable("connection refused")
+    vault(no_mark(), key(), write_mark(), allow_deletion(), delete()).destroy("claim-7")
+    # Cut short at the mark: nothing changed, so destroying again does it all.
+    with pytest.raises(KeyUnavailable):
+        vault(no_mark(), key(), write_mark(down)).destroy("claim-7")
+    vault(no_mark(), key(), write_mark(), allow_deletion(), delete()).destroy("claim-7")
+    # Cut short after the mark: the case is destroyed already; destroying again finishes.
+    for cut in (
+        [write_mark(), allow_deletion(down)],
+        [write_mark(), allow_deletion(), delete(down)],
+    ):
+        with pytest.raises(KeyUnavailable):
+            vault(no_mark(), key(), *cut).destroy("claim-7")
+        assert vault(marked()).state("claim-7") == "destroyed"
+        vault(marked(), key(), allow_deletion(), delete()).destroy("claim-7")
+    # The key gone already: nothing left to do; gone between its read and its deletion (two
+    # destroys overlapping), it counts as deleted.
+    vault(marked(), no_key()).destroy("claim-7")
+    vault(marked(), key(), allow_deletion(), delete(NOT_FOUND)).destroy("claim-7")
+    # No key and no mark: there is no case to forget (as FileKeys says).
+    with pytest.raises(KeyRefused) as refused:
+        vault(no_mark(), no_key()).destroy("claim-7")
+    assert str(refused.value) == (
+        "there is no key for claim-7 to destroy: no case was opened with its ID"
+    )
