@@ -29,6 +29,10 @@ from test_temporal_case import (
     on_temporal,
     reported,
 )
+from test_child_cases import claim as repair_claim
+from test_child_cases import repair
+from test_temporal_children import CLOSING, VIN, sensitive, started
+from test_temporal_children import FILE as REPAIR_FILE
 from test_temporal_forget import on_temporal as forgetting_on_temporal
 from worker_threads import worker_threads
 
@@ -43,6 +47,7 @@ from ventoux.temporal.cases import (
     CaseStart,
     CaseWorkflow,
     answer,
+    close,
     retry_export,
     shown,
     start_case,
@@ -58,6 +63,7 @@ from ventoux.testing import (
     DevelopmentPlans,
     as_json,
     development_converter,
+    release_of,
     run_case,
 )
 from ventoux.tooling.audit import AuditRefused, FileAudit
@@ -451,3 +457,73 @@ def test_with_the_store_down_forgetting_keeps_the_key_until_the_export_is_writte
     assert (ended.status, key) == ("forgotten", "destroyed")
     case = [each for each in store.read("claim-7") if each["stream"] == "claim-7"]
     assert case[-1]["lines"][-1] == "omar retried the audit export as operations"
+
+
+def test_a_childs_records_are_its_own_stream_sealed_under_its_parents_key(tmp_path: Path) -> None:
+    # A child writes its own stream, under its parent's ID: a sensitive value it was given is
+    # sealed with its parent's key, the key it is under, and is in clear nowhere in the store
+    # (brief, D75) (brief, D77).
+    store = FileAudit(tmp_path / "audit")
+    released = release_of(
+        sensitive(repair_claim(), "support"),
+        1,
+        cases={"repair@3": sensitive(repair(), "support-lead")},
+    )
+
+    async def scenario(client: Client) -> tuple[CaseReport, bytes]:
+        file = REPAIR_FILE | {"vehicle": VIN}
+        parent = await start_case(client, DevelopmentCases, released, file, "claim-41", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, DevelopmentCases, "claim-41/repair#1")
+        done = await reported(child, lambda now: now.waiting_at == ["fix#1"] and not now.unwritten)
+        [opening] = [each for each in store.stream("claim-41/repair#1") if each["number"] == 1]
+        sealed = opening["act"]["values"]["vehicle"]
+        opened = keys_of(client).open(
+            "claim-41", base64.b64decode(sealed["sealed"]), sealed["part"]
+        )
+        return done, opened
+
+    child, opened = on_temporal(scenario, audit=store)
+    written = store.stream("claim-41/repair#1")
+    assert [line for each in written for line in each["lines"]] == child.history
+    assert written[0]["act"]["values"]["vehicle"]["visible_to"] == ["support-lead"]
+    assert opened == f'"{VIN}"'.encode()
+    assert VIN not in str(store.read("claim-41"))
+
+
+def test_with_the_store_down_a_parent_closing_its_child_ends_once_both_exports_are_retried(
+    tmp_path: Path,
+) -> None:
+    # The store down as a parent closes: its child closes and waits for its export, and the
+    # parent for its child; each needs attention, neither ends, nothing deadlocks. Once an
+    # operator retries each export, the child ends, then the parent (brief, D75) (brief, D77).
+    store = DownAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport, CaseReport, CaseReport]:
+        cases = QuicklyFailingExports
+        parent = await start_case(client, cases, CLOSING, REPAIR_FILE, "claim-42", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, cases, "claim-42/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and not now.unwritten)
+        await reported(parent, lambda now: not now.unwritten)
+        store.down = True
+        await close(parent, "duplicate", "ana", ["support"])
+        closed = await reported(child, lambda now: FAILED in now.needs_attention)
+        held = await reported(parent, lambda now: FAILED in now.needs_attention)
+        store.down = False
+        await retry_export(child, "omar", ["operations"])
+        await retry_export(parent, "omar", ["operations"])
+        return closed, held, await child.result(), await parent.result()
+
+    closed, held, child, parent = on_temporal(scenario, cases=QuicklyFailingExports, audit=store)
+    assert closed.status == "closed"
+    assert closed.history[-2:] == [
+        "closed: by its parent: duplicate, by ana",
+        "audit export failed: the store failed with ConnectionError: ‹sensitive›",
+    ]
+    assert held.status != "closed"  # its child hasn't ended: the parent waits for it
+    assert child.unwritten == 0 and parent.unwritten == 0
+    assert parent.status == "closed"
+    for case, ended in (("claim-42", parent), ("claim-42/repair#1", child)):
+        written = store.stream(case)
+        assert [line for each in written for line in each["lines"]] == ended.history, case
