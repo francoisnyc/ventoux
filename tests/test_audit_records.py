@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from cases.refund import refund
-from test_sensitive import FILE, NATIONAL_ID, claim, lookup
+from test_sensitive import FILE, NATIONAL_ID, OPENING, claim, lookup
 
 from ventoux.case.audit import Act, Decision, Fact
 from ventoux.case.recording import record_refused
@@ -188,6 +188,27 @@ def test_a_failure_is_recorded_by_its_type_and_a_retry_says_so() -> None:
         ("retried", "pay#1"),
         ("started", "pay#1"),
     ]
+
+
+def test_a_form_value_is_recorded_as_the_case_file_keeps_it() -> None:
+    # The client wraps every value of a form, since it can't tell which are sensitive; the record,
+    # like the case file, keeps wrapped only the sensitive ones (brief, D31) (brief, D76).
+    definition = claim()
+    definition["steps"]["assess"]["outcomes"]["accept"]["sets"] = [
+        "national_id",
+        "estimated_damage",
+    ]
+    # Given plain: `run_case` plays the client, which wraps every value of the form.
+    form = {"national_id": NATIONAL_ID, "estimated_damage": 900}
+    opening = {name: value for name, value in OPENING.items() if name != "estimated_damage"}
+    run = run_case(
+        definition, opening, [("assess", "accept", "ana", form)], {"ana": ["adjuster"]}, engine=3
+    )
+    [answer] = [each for each in run.audit if each.act.kind == "answered"]
+    assert answer.act.values == {
+        "national_id": Sensitive(NATIONAL_ID),
+        "estimated_damage": Decimal(900),
+    }
 
 
 def known(inputs: dict[str, Any]) -> dict[str, Any]:
