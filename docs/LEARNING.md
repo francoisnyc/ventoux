@@ -56,6 +56,8 @@ and record the key points. A question is closed once you can explain the answer 
 | 49 | Layer 18b: how a repeated run is named, retried and migrated | open |
 | 50 | Layer 18: what a child case can never do to its parent | open |
 | 51 | Layer 19a: one act, the decisions it caused, the facts they read | open |
+| 52 | Layer 19: what the audit export says after forgetting, and what no one can read | open |
+| 53 | Layer 19c: a mark that outlives the key, waiting or refusing, and the event loop | open |
 
 ---
 
@@ -266,6 +268,26 @@ and record the key points. A question is closed once you can explain the answer 
   it's in the contract if a case could notice it or tighten it; where it runs is not.
 - Status: reopened; "what vs where" is solid now, the contents of a contract (D17) still need a
   retrieval. Layer 1 builds exactly that.
+- Retrieval (layer 20 warm-up, 2026-11-08), the question itself, asking a) everything each
+  activity declares and where the two differ, b) whether the Java developer reads Python and what
+  the two meet through. Your answer: asked to be told. Given:
+  - **a) The same contract, filled in differently.** Each declares `name@version`; its input and
+    output models, published as JSON Schema; an input policy on each input field (which sources it
+    accepts, D21); the source of each output field (`system:<name>` or `untrusted:<label>`); `risk`
+    and `effect`; `idempotency_key`; timeouts (start-to-close, schedule-to-start) and the retry
+    policy; its declared failure outcomes (D17); and a display (title, description, outcome
+    titles), which is outside the hash. The scorer: `effect: compute`, no idempotency key, its
+    score declared from a `system:` source (trusted). The letter: `effect: write` (it creates a draft), so an idempotency
+    key is required, and `low` risk because it drafts and never sends. Not in the contract: the
+    task queue, which is the deployment binding's (where, not what).
+  - **b) No.** They meet through the published contract (JSON Schema), the plan's JSON and a
+    Temporal task queue. The Java developer reads the contract and the definition, never the
+    engine. What the schema can't tell them is whether a definition is *valid*: that needs the
+    engine's rules, and so the engine itself, unless the rules are published as data that any
+    implementation can be checked against. That is the conformance suite D4 promises, and layer 20
+    builds it. The manifest each worker publishes (D5) is the one place a Java worker needs a small
+    Ventoux library or an equivalent.
+- Status: open, until the contents of a contract come back from memory.
 
 ## 10. Versions
 
