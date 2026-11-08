@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from ventoux.core.validate import ISSUE_CODES, Issue
 from ventoux.testing import CATALOG
 from ventoux.tooling.conformance import SuiteUnreadable, catalog_data, mismatches
 
@@ -235,3 +236,11 @@ def test_a_plan_entry_is_compared_as_a_package_is(tmp_path: Path) -> None:
     assert mismatches(suite)[0] == (
         "nowhere: given states.approve_refund UNREACHABLE_STATE (error), not expected"
     )
+
+
+def test_an_issue_with_a_code_not_listed_is_refused_when_made() -> None:
+    # Every code is listed, so the suite can say which have an entry (brief, D80): a check given
+    # a new code fails until it is listed.
+    with pytest.raises(ValueError, match="NOT_A_CODE is not a listed issue code"):
+        Issue("steps.pay", "NOT_A_CODE", "anything")
+    assert "UNKNOWN_FIELD" in ISSUE_CODES
