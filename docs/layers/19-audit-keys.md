@@ -397,7 +397,23 @@ failure's own text, which never quotes a value (D30), and a failure's is its typ
   records made, and none failed because of them (only wording that names the engine version
   changed). That is how the routes were found; each has its own test.
 - **For 19b:** the Temporal driver still writes a refused act's bare line; it calls
-  `record_refused` once cases open at 3 there.
+  `record_refused` once cases open at 3 there. And a record's number is `len(state.audit) + 1`:
+  once exported records are dropped from the state, the next number would repeat one already
+  used, so 19b needs a counter in the state that survives trimming and crosses continue-as-new
+  (from the tutor's review of #90).
+
+### From the tutor's review of #90
+
+- **No case moves on Temporal to engine 3 before 19b.** `OPENING` kept new cases at 2, but a
+  migration's target engine was checked against `KNOWN`, which holds 3: on Temporal a migration to
+  refund 2 at engine 3, approved, moved the case to engine 3, which would then keep every record in
+  its state with nothing to export it, and decide as an engine 3 that 19b finishes differently
+  (D51). Now the Temporal driver refuses, when proposed, a migration to a version this code knows
+  but opens no case at: `engine 3 is one this code knows but doesn't run cases at yet (it runs
+  them at 2, 1)`. A version it doesn't know at all keeps the case's own refusal. In memory the
+  migration stays possible, for the engine's tests. Checked at the proposal only: a request
+  reaches a case no other way, and code before 19a, which didn't know 3, refused it there too; so
+  no pending request in any history targets it.
 
 ## Promises (19a)
 
@@ -423,7 +439,7 @@ for a pin of behaviour already built, failing under a mutation (said in each sli
 | A parent records its child's start and end; the child records its own; in memory it opens at its parent's engine | `test_a_child_case_is_started_and_read_by_its_parent_and_records_its_own` |
 | An event, a claim, a timer, a plan step, a proposal and a record shown are each recorded; a timer's start names its rule | `test_an_event_and_a_claim_are_acts_with_what_they_caused`, `test_a_timer_a_plan_a_proposal_and_a_record_shown_are_each_recorded` |
 | Records are made from engine 3 only; a migration to 3 says what came before wasn't recorded | `test_a_case_before_engine_3_records_nothing_until_it_migrates_to_it` |
-| No case opens on Temporal at a version above `ENGINE` | `test_temporal_case_release.py::test_a_draft_is_as_before`, `::test_the_release_and_engine_cross_continue_as_new` (fail with `KNOWN` in place of `OPENING`) |
+| No case opens or moves on Temporal to a version above `ENGINE`: a migration there is refused when proposed, saying so; one this code doesn't know keeps the case's own refusal; in memory it stays possible | `test_temporal_case_release.py::test_a_draft_is_as_before`, `::test_the_release_and_engine_cross_continue_as_new` (fail with `KNOWN` in place of `OPENING`); `test_temporal_migrations.py::test_no_case_moves_on_temporal_to_an_engine_it_doesnt_open_cases_at` (from the tutor's review of #90); `test_a_case_before_engine_3_records_nothing_until_it_migrates_to_it` (in memory) |
 | Records cross continue-as-new as they were: wrapped values, exact decimals, what a decision wrote and reached | `test_records_cross_continue_as_new_as_they_were` |
 | A record is never renamed by a later migration | `test_records_keep_the_names_a_migration_later_changes` |
 
@@ -462,7 +478,8 @@ them (D74). Into the export is 19b's.
 **Guards, each watched failing when switched off:** records only from engine 3; a sensitive value
 wrapped; a form value kept as the case file keeps it; records carried, and what a decision wrote;
 every line in exactly one record; the migration's "not recorded"; a request not applied refused; a
-refused proposal's step; no record renamed; `OPENING` (four release tests).
+refused proposal's step; no record renamed; `OPENING` (four release tests); on Temporal, a
+migration to a version known but not opened, and its branch for a version not known at all.
 
 ## What changed in the guide with the answers
 

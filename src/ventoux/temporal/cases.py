@@ -45,7 +45,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.closing import CloseRefused, needs_attention
     from ventoux.case.definition import CaseInvalid, CaseStep, PlanStep, parse_case
     from ventoux.case.ending import ending_of
-    from ventoux.case.engine import ENGINE, OPENING, opening_engine
+    from ventoux.case.engine import ENGINE, KNOWN, OPENING, opening_engine
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.migrations import all_plans, migration_of
@@ -740,6 +740,7 @@ class CaseWorkflow:
             event = self.inbox.pop(0)
             try:
                 names_its_entry(event, self.state)
+                refuse_an_engine_not_opened(event)
                 await self.ask_to_move(event)
                 self.decide(self.case, event)
             except REFUSALS as refused:
@@ -1343,6 +1344,22 @@ def names_its_entry(event: Event, state: CaseState) -> None:
         ]
         example = open_now[0] if open_now else f"{step}#1"
         raise AnswerRefused(f"name the entry it answers, such as {example}")
+
+
+def refuse_an_engine_not_opened(event: Event) -> None:
+    """A migration to an engine version this code knows, but opens no case at, is refused when
+    proposed, saying so. Opening one there would leave a case deciding as a version not yet
+    finished, which a later release of it would decide differently (brief, D51). In memory it
+    stays possible: the engine's own tests decide as it. Checked at the proposal only: a request
+    reaches a case no other way, and code that didn't know the version refused it there too."""
+    if not isinstance(event, ChangeProposed) or not isinstance(event.value, Migration):
+        return
+    if event.value.engine in KNOWN and event.value.engine not in OPENING:
+        opened = ", ".join(str(version) for version in OPENING)
+        raise ChangeRefused(
+            f"engine {event.value.engine} is one this code knows but doesn't run cases at yet "
+            f"(it runs them at {opened})"
+        )
 
 
 async def start_case(

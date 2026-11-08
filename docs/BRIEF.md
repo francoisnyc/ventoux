@@ -3234,7 +3234,9 @@ D15, D27, D30, D31 and D51, whose text is kept.*
   reached or stopped. A refused act names the entry as it was asked, never a step guessed from it.
   `admitted` is an approval asked; a start reads its condition, its approval's condition, then its
   inputs. A failure's reason is its run's own, the message already replaced by `‹sensitive›`. A
-  record is never renamed by a later migration.
+  record is never renamed by a later migration. *From the tutor's review of 19a:* until then no
+  case moves to version 3 on Temporal either: a migration there is refused when proposed, saying
+  that this code knows the version but doesn't run cases at it yet.
 
 ## Concepts
 
