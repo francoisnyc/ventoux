@@ -81,6 +81,36 @@ def test_a_migrated_case_runs_its_new_release() -> None:
     replay(history, EveryEventCases, converter)
 
 
+def test_no_case_moves_on_temporal_to_an_engine_it_doesnt_open_cases_at() -> None:
+    # This code knows engine 3, but opens no case at it: its records would have no export to
+    # write them, and the engine 3 that 19b finishes would decide such a case differently, which
+    # D51 rules out. So on Temporal a migration there is refused when proposed, saying so; in
+    # memory it stays possible, for the engine's own tests (brief, D51) (brief, D76).
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, REFUND_1, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await propose_migration(case, REFUND_2, {}, "pia", PEOPLE["pia"], engine=3)
+        await answer(case, "case.change#1", "approve", "lee", PEOPLE["lee"])
+        # A version this code doesn't know at all is the case's own refusal, as in memory.
+        await propose_migration(case, REFUND_2, {}, "pia", PEOPLE["pia"], engine=4)
+        return await reported(case, lambda now: "engine 4" in now.history[-1])
+
+    now = on_temporal(scenario)
+    assert now.history[-3:] == [
+        (
+            "refused pia's proposal to migrate refund 2: engine 3 is one this code knows but "
+            "doesn't run cases at yet (it runs them at 2, 1)"
+        ),
+        "refused lee's answer approve to case.change#1: case.change#1 isn't open",
+        (
+            "refused pia's proposal to migrate refund 2: engine 4 is one this code doesn't know "
+            "(it knows 3, 2, 1)"
+        ),
+    ]
+    assert (now.release, now.engine) == ("refund 1", 2)
+
+
 def test_a_cohort_preview_names_every_case() -> None:
     # The cohort is the case IDs given: each in the result, with what it would get or why not,
     # none skipped silently; and a preview is a query, so no case's history changes

@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ventoux.case.audit import AuditRecord, Decision
 from ventoux.case.engine import ENGINE
 from ventoux.core.before_activity import Steering
 from ventoux.core.provenance import Sourced
@@ -307,6 +308,12 @@ class CaseState:
     requested: int = (
         0  # how many change requests the case has numbered: the next is `case.change#2`
     )
+    # Each act it decided from engine version 3, as an audit record, in order; numbered from 1
+    # (brief, D76).
+    audit: list[AuditRecord] = field(default_factory=list[AuditRecord])
+    # What the engine decided in the decision being made, waiting to be recorded: always empty
+    # between events, like `moments` (brief, D76).
+    deciding: list[Decision] = field(default_factory=list[Decision])
 
 
 @dataclass(frozen=True)

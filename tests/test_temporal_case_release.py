@@ -104,7 +104,7 @@ def test_an_unknown_engine_version_waits_for_its_code() -> None:
     # retries until code that knows it is deployed: the case waits, never decided as an older
     # version, never failed for good (brief, D17, D51).
     async def scenario(client: Client) -> tuple[list[str], bool]:
-        carried = state_as_data(CaseState("refund-1/run-1")) | {"engine": 3}
+        carried = state_as_data(CaseState("refund-1/run-1")) | {"engine": 4}
         case = await client.start_workflow(
             DevelopmentCases.run,
             CaseStart(REFUND, {}, None, carried),

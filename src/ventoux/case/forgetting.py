@@ -8,6 +8,7 @@ See docs/layers/09-case-data.md (9c).
 
 from collections.abc import Iterable
 
+from ventoux.case.audit import Decision
 from ventoux.case.closing import begin_closing
 from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.state import CaseState, ForgetApproved
@@ -81,9 +82,11 @@ def forget(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Forg
         f"forgetting approved by {event.approved_by} as {approver}, "
         f"proposed by {event.proposed_by} as {proposer}"
     )
+    who = f"proposed by {event.proposed_by} as {proposer}, approved by {event.approved_by} as {approver}"
+    state.deciding.append(Decision("forgotten", reason=who))
     if state.phase == "closing":
         return  # already closing, with its own reason: it closes, then the key goes
-    begin_closing(state, "the case is being forgotten", "forgotten")
+    begin_closing(state, "the case is being forgotten", "forgotten", None)
 
 
 # What a definition may say of forgetting, from the loosest to the strictest (brief, D32).

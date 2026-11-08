@@ -1,0 +1,496 @@
+# Layer 19: Audit export and a production key provider
+
+Status: 2026-11-08, answered; 19a built, its promises and routes checked. This note starts
+from `main` at `ff37fb9`, with layers 0 to 18 merged. The warm-up was asked and recorded (learning question 37). The guide
+was written first (curriculum step 2): `docs/guides/audit.md` describes the layer as if it worked;
+it was changed with the answers (listed at the end).
+
+**Answered 2026-11-07.** Choices A to C and 1 to 21 as recommended. D76 is written before 19a is
+built, with dated amendments under D27 and D51; D77 and D78 are written before 19b and 19c, with
+the amendments choice B lists under D15, D17 and D32. The branch is renamed
+`layer-19a-audit-records`.
+
+Prior art: none in the prototype (the curriculum names none). Vault's transit engine API, read for
+this note: encrypt and decrypt take `associated_data` for AES-GCM keys; deleting a key needs
+`deletion_allowed` set on it first; `exportable` and `allow_plaintext_backup`, once set, can never
+be unset.
+
+## Warm-up: learning question 37, what the audit keeps after forgetting
+
+Recorded in `docs/LEARNING.md`, entry 37. Asked to be told, a second time running; the status
+stays open until "the facts by name and source" and the retention choice (D32) come back from
+memory. It is this layer's own check-yourself question, from the other side: 37 asks what an
+auditor can still learn, layer 19 builds the copy that must keep it.
+
+## What this layer is for
+
+**An audit trail kept apart from Temporal's history, with its own retention.** Temporal's history
+is a replay log: kept for the namespace's retention, then deleted; shaped for the engine (what it
+was given and asked for, decisions being code run inside workflow tasks); split by continue-as-new
+and by child workflows; readable by anyone with namespace access; and rewritable from an earlier
+point by an admin's reset (D19). An auditor needs the opposite on each count. So every decision is
+copied, as it is made, to a store the platform team keeps for as long as the business must (D8:
+"reporting uses an export").
+
+**Sensitive values leave encrypted and stay so** (D15). Forgetting doesn't delete rows in someone
+else's warehouse: it destroys one key, and every sealed value, wherever it was copied, becomes
+unreadable at once.
+
+**Keys held by the platform's key service, never by Ventoux.** `FileKeys` is a development stand-in.
+The production provider seals, opens and destroys inside the key service, behind the existing
+`KeyProvider`.
+
+## What D15 (and D31, D32, D62) already settle
+
+Not asked again:
+
+- **Per-case keys,** through the key provider (create, seal, open, destroy, state); one
+  production adapter in v1.0, Vault or a cloud KMS (D15). The provider never hands out a key; each
+  sealed value is bound to its case and its place, its `part` (D31).
+- **Every copy stays encrypted:** the export carries sensitive values as ciphertext under the same
+  case key, *or omits them* (D15). Reports needing such a value open it through the key provider
+  while the key exists.
+- **What the trail keeps:** every decision, who made it, the rule and the release; only the values
+  go (D15, D32).
+- **Forgetting** is a request approved by someone else, closing the case first, then destroying the
+  key; a destroyed key is never made again, and the check outlives Temporal (D32). A child is
+  forgotten only with its parent, under the one key (D75).
+- **A provider that talks to a service** is tested from recordings, never the network or a key; its
+  credential is read from one environment variable, never logged; anything it can't do is a
+  failure saying why, by the setting's name (D62's pattern).
+
+What they leave open is below.
+
+## What I checked in the code before asking
+
+- **The engine has no structured decisions.** `CaseState.history` is `list[str]`, written from 134
+  places in `case`. The *acts* that reach `decide` are structured (`Opened`, `Answered`,
+  `Proposed`, `Completed`, `Failed`, `Retried`, `CloseAsked` … in `case/state.py`); what the engine
+  decides from each is only lines. A plan run's history is structured already (`core/history.py`).
+- **An old case can't start calling an activity.** A case workflow that now schedules an export
+  activity would issue a command its recorded history doesn't have: every history recorded before
+  this layer would fail to replay. So the export is an engine version (D51): version 3, marker
+  `ventoux-engine-3`.
+- **`KeyRefused` says everything:** a key never made, destroyed, or a damaged part. A provider that
+  can't be reached is a new kind: the case must wait for it, never read it as "never made" or
+  "destroyed".
+- **Forgetting checks `keys.state(case)`** before anyone approves (`temporal/forget.py`); with Vault,
+  that state must outlive the key itself.
+- **No HTTP client is a dependency.** Vault's transit API is six HTTPS calls with a token header;
+  the standard library's `urllib.request` makes them, synchronously, as the codec calls the
+  provider.
+
+## The split
+
+| PR | What it builds | Its negative test |
+|---|---|---|
+| **19a: audit records, in the engine** | `case` makes one structured record per act it decides: the act (who, roles, entry, outcome), each decision it caused (kind, step and entry, rule path, facts read by name, source and value), its lines; numbered from 1; carried across continue-as-new; the in-memory run gives them. A plan run's events too. Engine version 3. | A record never holds a sensitive value unwrapped; every route makes its record (each refused act included). |
+| **19b: the export, on Temporal** | The store protocol and `FileAudit`; the worker's export activity, after each workflow task that made records, in order, idempotent by ID; sealing with a `part` naming its place in the export; the store down: waiting, then needs attention, and no close with records unwritten; `read_audit`, filtered by role; the forget request's own records. | **curriculum:** an exported event holding a sensitive value in clear fails the export. Also: a gap or a changed record refused by the store; a case worker without a store refused. |
+| **19c: the Vault key provider** | `VaultKeys` behind `KeyProvider`: a key per case, never exportable; destroy; "never made again" outliving the key; the token from `VAULT_TOKEN` alone; an unreachable service told apart, in the codec and in forgetting; tests from recordings. | **curriculum:** a key the provider can't give is an error saying why, never an empty value. Also: an exportable key refused; a destroyed case's ID never made again. |
+
+**Why this order.** 19a is pure and fast to test, and every later part reads what it makes. 19b
+puts it on Temporal and is where the curriculum's first negative test lives. 19c touches nothing
+in 19a or 19b (it is a `KeyProvider`), so it could go first; I'd keep it last so the export's
+sealing is built on the provider protocol everyone already uses, and 19c then proves Vault keeps it.
+
+## Design questions for you
+
+Each answer becomes a decision in the brief, from D76 on, added and never rewriting an earlier one.
+A correction to a merged decision is a dated amendment under it.
+
+### For the whole layer
+
+A. **The split:** 19a, 19b, 19c, as in the table, one pull request each. Branches
+   `layer-19a-audit-records`, `layer-19b-audit-export`, `layer-19c-vault-keys`. The warm-up, the
+   guide and this note sit on `layer-19a-audit-keys`, which I'd rename to `layer-19a-audit-records`.
+   *Alternative:* two parts, the records and the export together. *Recommended: three.*
+
+B. **Decisions: one per part,** D76 (19a), D77 (19b), D78 (19c), each written before its part is
+   built. Dated amendments under D15 (the adapter chosen; ciphertext, not omission, for sealed
+   values), D17 (an export that can't be written needs attention), D27 (records cross
+   continue-as-new), D32 (the forget request's records; "never made again" on Vault) and D51
+   (engine version 3). *Recommended.*
+
+C. **No new dependency:** Vault through the standard library's HTTP (choice 17). *Recommended.*
+
+### For 19a: audit records
+
+1. **The unit: one record per act, holding the decisions it caused.**
+   - (a) **Per act.** Each call of `decide` (an opening, an answer, a proposal, an activity's
+     completion or failure, an event, a timer, a close, an edit, a migration) makes one record: the
+     act as it came (who, their roles, the entry, the outcome), then each decision it caused, in
+     order, then its history lines. An answer that approves `pay` and so starts it is one record:
+     `approved`, then `admitted`, then `started`. Who caused a decision is always the act's.
+   - (b) Per decision: one record per decision (the guide's example), each repeating its act.
+   - (c) Per history line: every one of the 134 places writes a typed record beside its line.
+
+   *Recommended: (a).* It matches how the engine works (one act in, its consequences out), gives an
+   auditor "why did this start?" without joining records, and needs typed records only where the
+   engine decides, not at every line. The guide's example changes shape to it.
+
+2. **What a decision says.** Its kind (`answered`, `approved`, `rejected`, `refused`, `admitted`,
+   `started`, `completed`, `failed`, `retried`, `skipped`, `reached`, `set`, `closed`, `stopped`,
+   `edited`, `migrated`, `forgotten`); the step and entry; the **rule**, as the path of what
+   decided in the definition (`steps.pay.when`, `steps.pay.approval`, `rules.escalate`); and the
+   **facts it read**, each by name with its sources and value, from the same analysis that gives a
+   condition's fields (D36). A refusal is a decision too (`refused`, with its reason): an auditor
+   asks about the opener who tried to approve. *Recommended.*
+
+3. **Values: in clear where not sensitive, wrapped where sensitive.**
+   - (a) **The export carries values.** Reports need them ("every claim above 10,000", D8); a
+     history line still never quotes one (D30), and the reader filters them by role (choice 11).
+   - (b) Names and sources only, no values: the export then can't answer the reports D8 sends it.
+
+   *Recommended: (a).* In the record, a sensitive value stays `Sensitive`, wrapped as in the state,
+   so it can't be read or written by mistake; 19b seals it.
+
+4. **Form values and failure messages.** On Temporal the client seals every form value, since it
+   can't tell which are sensitive (D31); the engine can. And a failure's message is always sealed,
+   since no one knows what it says.
+   - (a) **The record follows the case file:** a form value that isn't sensitive is in the record
+     in clear, as it is in the case file (`approved_amount`); a failure is recorded by its type
+     only, its message left out (D15's "or omits"). The message stays in Temporal's failure, for
+     operators, under the key.
+   - (b) Every form value and every failure's message sealed, as on Temporal.
+
+   *Recommended: (a).* A non-sensitive answer value is a decision fact: D32 keeps it after
+   forgetting where it was used. A failure's message helps operators, not auditors, and sealing
+   text no one can classify into a long-lived store only adds risk. The guide changes with it.
+
+5. **Numbering and streams.** A record's ID is its stream and a number: the stream is the workflow
+   that made it (`claim-7`, a child `claim-7/repair#1`, a plan run `claim-7/settle#1`, a request
+   `claim-7/forget`), the number counts from 1 in that stream and crosses continue-as-new in the
+   state. Never a time, never random: a repeated write carries the same ID. *Recommended.*
+
+6. **A plan run's events.** Its history is structured already (`core/history.py`). Exported as its
+   own stream, each event a record, its run naming the step and entry that started it. The
+   curriculum says "case and run events". *Recommended: in 19a/19b.*
+
+7. **The engine version.** Version 3: a case opened at 3 makes and exports records; a case opened
+   before decides and replays as it did, and exports nothing. Its report says so
+   (`no audit export: opened at engine 2`), and `ventoux environment check` lists such open cases. A
+   migration that moves a case to engine 3 (D53) starts its export there, its first record saying
+   what came before was not exported. Never a partial trail passed off as whole. *Recommended.*
+
+### For 19b: the export on Temporal
+
+8. **How it is written.**
+   - (a) **By the case's own workflow,** through an activity the worker registers (never a contract
+     a definition could call, as the key's destruction, D32): after each workflow task that made
+     records, one call with every record not yet written, oldest first. The store keeps each by its
+     ID: the same content again is accepted, other content refused, and a record whose previous
+     number it doesn't hold is refused. So a retry duplicates nothing, and nothing is skipped.
+   - (b) Outside the workflow: a separate exporter reads histories. It would replay or parse them
+     (forbidden: "never history lines parsed"), and run with the keys of every case.
+
+   *Recommended: (a).* One call per workflow task, not per record, keeps the history's growth to
+   three events a task.
+
+9. **When the export can't be written** (the store down, refusing, slow).
+   - (a) **The case goes on, but never closes with records unwritten.** Records wait in the state,
+     in order (crossing continue-as-new); the activity is retried by its own retry policy, and the
+     view says `audit export waiting: attempt 4`. After its retries the case **needs attention**
+     (`audit export failed: look at the store, then retry`), retried by an operator as a step is
+     (D26). A close waits for the export before the case ends, so nothing is unwritten when
+     Temporal's retention starts counting.
+   - (b) The case waits: no step starts while records are unwritten. Stricter, but a warehouse
+     outage would stop every payment.
+   - (c) The case goes on and may close; unwritten records are lost with its history.
+
+   *Recommended: (a).* Nothing is lost while the history holds it, nothing is silent, and the
+   business isn't stopped by its reporting. **Known limit, said in D77:** a case terminated by an
+   admin (D19) ends with whatever it hadn't written; terminating is admin access, small and
+   audited.
+
+10. **Sealing, and where the negative test is enforced.** The activity receives records with
+    sensitive values wrapped (the codec carries them sealed into the activity and opens them
+    there, as for any activity). It seals each with the provider, under the case's key (a child's
+    and a plan run's: its case's, D75), with a `part` naming its place in the export:
+    `audit/<stream>/<number>/<field>`. Then, before anything is written, it checks every value of a
+    field the definition declares sensitive (the record carries the list from the case's
+    definition) is sealed: one in clear fails the whole call, nothing written, saying which record
+    and field, never the value. Read from the definition, not the wrapper, so a value unwrapped by
+    a bug is still caught. *Recommended.*
+
+11. **Who may read it.** `read_audit(store, case, roles, keys)` filters each value as the case view
+    does (D30): every role the case names sees the records (decisions, people, rules: D48's
+    amendment to D30), a value whose `visible_to` excludes them is said hidden, and a sealed value
+    is opened only for a role in its `visible_to`, while the key exists, and said `‹forgotten›`
+    after. The store's rows themselves are admin access (D19), said so in the guide. *Recommended.*
+
+12. **Retention and forgetting.** Ventoux never deletes from the store; its retention is the
+    platform team's. The forget request writes its own stream (`claim-7/forget`: proposed,
+    approved or rejected, closed, key destroyed), so the act of forgetting is in the trail too.
+    *Recommended.*
+
+13. **The store.** A protocol of two methods, `append(records)` and `read(stream prefix)`, and
+    `FileAudit`, one JSON Lines file per stream, append-only, for development and tests. A
+    production store is the platform team's, written to the protocol. A case worker without a
+    store is refused. *Recommended.*
+
+### For 19c: the production key provider
+
+14. **Vault's transit engine, or a cloud KMS.**
+    - (a) **Vault transit.** A named key per case, free, deleted at once; AES-GCM with associated
+      data, so `part` binds as it does in `FileKeys`; keys made non-exportable and checked so.
+    - (b) A cloud KMS (AWS). Deletion is only scheduled, 7 to 30 days ahead and cancellable until
+      then; a key per case costs about $1 a month and counts against a quota.
+    - (c) Both.
+
+    *Recommended: (a).* D15 asks for one; Vault's "destroy" means destroyed.
+
+15. **What "destroy" means, and when a case is forgotten.** With Vault, deletion is immediate:
+    the case is forgotten when the request's last activity returns, and the request says so. With a
+    KMS it would be "scheduled for deletion on 2026-12-07": the case would say `forgetting, key
+    deletion scheduled for …`, refuse cancelling, and be forgotten only then. Recorded so a KMS
+    adapter after v1.0 has its answer. *Recommended: Vault, immediate; the KMS reading kept in D78.*
+
+16. **"Never made again", when Vault forgets.** Vault may let a deleted key's name be made again,
+    and D32's check must outlive the key.
+    - (a) **A mark in Vault's key-value engine,** `ventoux/forgotten/<case>`, written before the key
+      is deleted. `create` refuses a case with a mark; `state` reads the mark first; `seal` and
+      `open` refuse it. A crash between the two steps leaves "destroyed", and destroying again
+      finishes it. Same service, same team, same audit device.
+    - (b) Never delete: trim every version and keep the name. Vault keeps a usable latest version,
+      so "destroyed" would be a convention, not a fact.
+    - (c) A mark in Ventoux's environment registry: a Temporal workflow, a set growing for ever.
+
+    *Recommended: (a).*
+
+17. **The client: no new dependency.** Six HTTPS calls (create, read, configure, encrypt, decrypt,
+    delete; and the mark's read and write) through `urllib.request`, synchronous as the codec
+    calls the provider. *Alternative:* `hvac`, the usual Python client, as an optional extra
+    `ventoux[vault]` (it pulls in `requests`). *Recommended: the standard library.* If you prefer
+    `hvac`, this is where I ask for it.
+
+18. **Settings.** The address and mount are named in configuration (`[tool.ventoux] vault` and
+    `vault_mount`, or the constructor), no default; the token from `VAULT_TOKEN` alone, never a
+    file, a definition or the command line, never logged or said (D62). Only `https` addresses,
+    except `localhost` for a development server. *Recommended.*
+
+19. **A key the provider can't give: errors that say why.** Two kinds:
+    - **Final** (`KeyRefused`, as today): never made; destroyed; a key that can leave Vault
+      (exportable or plaintext backup allowed), never used; a part that doesn't open.
+    - **Not now** (a new `KeyUnavailable`): Vault unreachable, timing out, or refusing the token.
+      The codec raises it like any error, so a workflow task or an activity is retried until Vault
+      answers (D17: the case waits, said by Temporal); forgetting refuses the request with it,
+      never reading "unreachable" as "never made".
+
+    Never an empty value, never a guess. *Recommended.*
+
+20. **Tests without the network or a key.** `VaultKeys` takes a transport; tests give it a
+    recording of Vault's answers, request by request, as D62's recordings do: a request the
+    recording doesn't hold is refused, saying which. The recordings are written by hand from Vault's
+    documented answers, and checked once against a development Vault (`vault server -dev`) when one
+    is available, with a test marked to run only then. *Recommended.*
+
+### Carried from 18d
+
+21. **A parent terminated with a child still running, then forgotten,** loses the key under that
+    child: the child's workflow tasks fail until an operator terminates it. Nothing permissive
+    happens, and its values were to become unreadable; but the child isn't closed.
+    - (a) **Out of scope here, said in D77 as a known limit,** with what an operator does
+      (`ventoux` lists the family's workflows still running; terminate them). Finding every child
+      from a terminated parent's runs needs Temporal's visibility queries, which the test server
+      doesn't serve as the development server does: a deployment question, for layer 20.
+    - (b) In scope as a 19d: the forget request lists every workflow whose ID starts with
+      `claim-7/`, and destroys the key only once none runs.
+
+    *Recommended: (a).* It is about terminating (admin access), not the export or the keys.
+
+## Seams and tests for 19a (curriculum step 4, proposed)
+
+**Found while choosing the seams.**
+
+- **A refused act never reaches `decide`'s result:** `decide` raises and changes nothing, and each
+  driver records the refusal itself (on Temporal, a bare line, `refused …: …`). So the refusal's
+  record is made by one function in `case` that the drivers call, beside the line, never by
+  `decide`.
+- **A case in memory has no ID.** The stream a record belongs to is its workflow's ID, which only
+  the driver knows. So a record in `case` carries its number, and the export names its stream
+  (19b), as the codec finds a case's key from the workflow ID Temporal gives it.
+- **A plan run's events can't be exported by its own workflow:** making the plan workflow call
+  an activity would break the replay of every plan run recorded before, and a plan has no engine
+  version. They ride in the record of the plan step's end instead, from the run's report, which
+  its case already reads (19b). A plan run started outside a case exports nothing: said in D77.
+
+**The seams.** Only what a test of the engine uses today, plus one new field and one function:
+
+1. **`run_case(...)`,** as now: its `CaseRun` gains `audit`, the case's records in order. Its
+   `engine` argument, as now (the default becomes 3): `engine=2` makes none.
+2. **The record** (`ventoux.case.audit`), read field by field, never through its lines:
+   `AuditRecord(number, at, release, engine, act, decisions, lines)`;
+   `Act(kind, by, roles, entry, outcome, values)`;
+   `Decision(kind, step, entry, rule, read, reason)`; `Fact(field, sources, value)`. A value is as
+   the state holds it: an exact decimal, a text, a `Sensitive`.
+3. **`record_refused(state, act, refusal)`** (`ventoux.case.audit`): the state with the refused
+   act's record added, and nothing else changed. The Temporal driver calls it where it records a
+   refusal today (19b); a test calls it with the refusal `decide` raised. *(Changed while
+   building: `record_refused(case, state, act, refusal)`, in `ventoux.case.recording`; see
+   below.)*
+4. **The existing scripts:** answers, proposals, events, `later(…)`, change requests, retries,
+   closes, child cases' scripts, plan answers, as `run_case` takes them today.
+
+**The decisions, word for word (proposed):** a decision's `kind` is one of D76's list; `rule` is a
+path in the definition (`steps.pay.when`, `steps.pay.approval`, `steps.pay.approval.when`,
+`milestones.assessed`, `rules.escalate`, `closes_when`); `reason` is the refusal's or the
+failure's own text, which never quotes a value (D30), and a failure's is its type only:
+`payments.refund@2 failed with ConnectionError`.
+
+**The tests, in the order I'd write them,** each failing first (the negative first):
+
+1. **(negative)** A refused answer (the opener approving their own refund) is one record, its one
+   decision `refused` with the reason, and the state is otherwise unchanged.
+2. **(negative)** A sensitive value is never unwrapped in a record: `national_id` in the opening
+   act's values, and in the facts read by the step it reaches, is a `Sensitive`.
+3. The quickstart's small refund: one record per act, numbered from 1, each with its release,
+   engine and time; the opening's record holds `admitted` and `started review#1`; the review's
+   answer, its `set` of `approved_amount` and `started pay#1` with `rule: steps.pay.when` and the
+   facts read.
+4. The guide's example: an approval that approves and starts `pay` is one record, `approved` then
+   `started`, each with its rule and facts.
+5. A failure is recorded by its type, never its message; a retry's record says `retried`.
+6. A form value is in the record as the case file holds it: sensitive wrapped, others in clear.
+7. Each route makes its record: an event (and a rule it fires: `set`, `started` by `rules.…`), a
+   timer, a close and a stop, an edit and a migration (D52, D53), a claim and an assignment, a
+   `shown` line, a plan step's end, a child case (the parent's `started` and `completed` name it;
+   the child's records are its own), forgetting approved.
+8. A case opened at engine 2 makes no record; migrated to engine 3, its first record says that
+   what came before was not recorded.
+9. Every record's `lines` are exactly the lines its act added to the history, so the history is
+   unchanged: every existing test stays green.
+
+### Decided while building 19a
+
+- **`ENGINE` stays 2 until 19b.** Version 3 is known (`KNOWN = (3, 2, 1)`) and makes records, but
+  a new case on Temporal opens only at a version up to `ENGINE` (`OPENING`): opened at 3 before
+  the export exists, its records would pile up unwritten. 19b moves `ENGINE`, and `run_case`'s
+  default, to 3. Three tests that used 3 as a version this code doesn't know now use 4.
+- **Two seams moved.** `record_refused` is in `ventoux.case.recording`, beside the code that makes
+  records; the record types stay in `ventoux.case.audit`, data only, so the state holds them
+  without an import cycle. And it takes the case, `record_refused(case, state, act, refusal)`: an
+  act's values are kept as the case file keeps them, which only the definition says.
+- **A refusal names the entry as it was asked,** never a step guessed from it: a refused act may
+  name an entry that doesn't exist (`review#9`). A refused proposal names its step, which it gives.
+- **`admitted` is an approval asked;** a start needing none is `started` alone. A start reads its
+  condition, then its approval's condition (which decided no person had to approve), then its
+  inputs. An approval answered reads its condition, then the inputs the approver saw (D11).
+- **A decision gains two fields:** `wrote`, a fact for what it wrote (a rule's `set`, an applied
+  edit), and `target`, what it reached or stopped (a milestone, a run, an approval). Both cross
+  continue-as-new.
+- **A failure's reason is its run's reason,** `payments.refund@2 failed with ConnectionError:
+  ‹sensitive›`: the message was replaced where the failure was caught (D31), so none is there to
+  leave out, and cutting the text to the type would be parsing a line.
+- **A change request rejected is `rejected`; approved but no longer applicable, `refused`,** with
+  the reason. A migration to engine 3 says `what came before engine 3 was not recorded`.
+- **A start's rule is read before its proposal is spent** (found by the timer's test): a task a
+  rule started was recorded as its own step's start, since who proposed a run is forgotten as it
+  starts.
+- **Two small moves, no behaviour changed:** `asked` (a refused act's words) from the Temporal
+  driver into `ventoux.case.recording`; `kept` (how the case file keeps a given value) from
+  `runtime.py` into `ventoux.case.keeping`, so recording can use it.
+- **In memory, a child case opens at its parent's engine,** as on Temporal the same code opens
+  both.
+- **A record is never renamed:** a migration renaming `pay` to `payment` changes the case; the
+  records before it keep `pay`.
+- **Experiment, not committed:** with `ENGINE` at 3, every in-memory test of the suite ran with
+  records made, and none failed because of them (only wording that names the engine version
+  changed). That is how the routes were found; each has its own test.
+- **For 19b:** the Temporal driver still writes a refused act's bare line; it calls
+  `record_refused` once cases open at 3 there. And a record's number is `len(state.audit) + 1`:
+  once exported records are dropped from the state, the next number would repeat one already
+  used, so 19b needs a counter in the state that survives trimming and crosses continue-as-new
+  (from the tutor's review of #90).
+
+### From the tutor's review of #90
+
+- **No case moves on Temporal to engine 3 before 19b.** `OPENING` kept new cases at 2, but a
+  migration's target engine was checked against `KNOWN`, which holds 3: on Temporal a migration to
+  refund 2 at engine 3, approved, moved the case to engine 3, which would then keep every record in
+  its state with nothing to export it, and decide as an engine 3 that 19b finishes differently
+  (D51). Now the Temporal driver refuses, when proposed, a migration to a version this code knows
+  but opens no case at: `engine 3 is one this code knows but doesn't run cases at yet (it runs
+  them at 2, 1)`. A version it doesn't know at all keeps the case's own refusal. In memory the
+  migration stays possible, for the engine's tests. Checked at the proposal only: a request
+  reaches a case no other way, and code before 19a, which didn't know 3, refused it there too; so
+  no pending request in any history targets it.
+
+## Promises (19a)
+
+Each claim the note, D76 and the guide make about audit records, and the test that would fail if
+it weren't true. Tests are in `tests/test_audit_records.py`. Each was watched failing first or,
+for a pin of behaviour already built, failing under a mutation (said in each slice's commit).
+
+| Promise | Test |
+|---|---|
+| One record per act: the act as it came, the decisions it caused in order, its lines | `test_the_quickstarts_small_refund_records_each_act_and_what_it_decided`, `test_an_approval_that_starts_its_step_is_one_record` |
+| Each record keeps exactly the lines its act added; numbered from 1 with no gap; the history is unchanged | `test_each_record_keeps_exactly_the_lines_its_act_added` (seven routes), and the whole suite green |
+| Each record carries its time, its release and its engine version | `test_a_refused_act_is_one_record_saying_why_and_nothing_else_changes`, `test_the_quickstarts_small_refund_records_each_act_and_what_it_decided` |
+| A refused act is one record, `refused` with its reason, and nothing else changes; it names the entry as asked, a proposal its step | `test_a_refused_act_is_one_record_saying_why_and_nothing_else_changes` |
+| A decision names its rule and each fact it read, with its sources and value | `test_the_quickstarts_small_refund_records_each_act_and_what_it_decided`, `test_an_approval_that_starts_its_step_is_one_record`, `test_a_rule_that_sets_and_reaches_says_what_it_wrote_on_what_it_read` |
+| A start reads its condition, its approval's condition, then its inputs; `admitted` is an approval asked; an approval reads what the approver saw | `test_the_quickstarts_small_refund_records_each_act_and_what_it_decided`, `test_an_approval_that_starts_its_step_is_one_record` |
+| A sensitive value is never unwrapped in a record | `test_a_sensitive_value_is_never_unwrapped_in_a_record` |
+| A form value is recorded as the case file keeps it: wrapped only if sensitive | `test_a_form_value_is_recorded_as_the_case_file_keeps_it` |
+| A failure is recorded by its type, never its message; a retry says `retried` | `test_a_failure_is_recorded_by_its_type_and_a_retry_says_so` |
+| A rule's `set` says what it wrote on what it read; a milestone reached says by what | `test_a_rule_that_sets_and_reaches_says_what_it_wrote_on_what_it_read` |
+| A stop says what it stopped, by which firing or close, under which rule | `test_a_rules_stop_and_a_persons_close_say_what_they_stopped` |
+| A change request says what it changed (`edited`, `skipped`), or why not (`rejected`, `refused`) | `test_a_change_request_says_what_it_changed_or_why_not` |
+| Forgetting approved names both people | `test_forgetting_approved_is_recorded_with_both_people` |
+| A parent records its child's start and end; the child records its own; in memory it opens at its parent's engine | `test_a_child_case_is_started_and_read_by_its_parent_and_records_its_own` |
+| An event, a claim, a timer, a plan step, a proposal and a record shown are each recorded; a timer's start names its rule | `test_an_event_and_a_claim_are_acts_with_what_they_caused`, `test_a_timer_a_plan_a_proposal_and_a_record_shown_are_each_recorded` |
+| Records are made from engine 3 only; a migration to 3 says what came before wasn't recorded | `test_a_case_before_engine_3_records_nothing_until_it_migrates_to_it` |
+| No case opens or moves on Temporal to a version above `ENGINE`: a migration there is refused when proposed, saying so; one this code doesn't know keeps the case's own refusal; in memory it stays possible | `test_temporal_case_release.py::test_a_draft_is_as_before`, `::test_the_release_and_engine_cross_continue_as_new` (fail with `KNOWN` in place of `OPENING`); `test_temporal_migrations.py::test_no_case_moves_on_temporal_to_an_engine_it_doesnt_open_cases_at` (from the tutor's review of #90); `test_a_case_before_engine_3_records_nothing_until_it_migrates_to_it` (in memory) |
+| Records cross continue-as-new as they were: wrapped values, exact decimals, what a decision wrote and reached | `test_records_cross_continue_as_new_as_they_were` |
+| A record is never renamed by a later migration | `test_records_keep_the_names_a_migration_later_changes` |
+
+**Not tested, said so:** an assignment, an unassignment and a give-back are mapped to acts as a
+claim is, and ran with records made in the experiment, but have no test of their own here; they
+decide nothing about the case, as a claim doesn't.
+
+## Routes checked before the pull request (19a)
+
+| Route | What it records | Test |
+|---|---|---|
+| the opening | `opened`, its values as kept, sensitive ones wrapped; what it started | the quickstart's test, the sensitive value's |
+| an answer | `answered` under its outcome's path; what it set, reached and started | the quickstart's, the approval's |
+| an approval | `admitted` when asked, `approved` or `rejected` on what the approver saw | the approval's |
+| an edit (D52) | `edited`, with what it wrote; `rejected` or `refused` | the change request's |
+| a skip (D52) | `skipped`, naming the run | the change request's |
+| a migration (D53) | `migrated`; from engine 2 to 3, saying records start there; names never rewritten | the engine test, the rename test |
+| an event (D41) | the act, with its payload; the wait it completes | the event's |
+| a rule (D38 to D44) | `set` with what it wrote, `reached`, `stopped`, `started` under `rules.…` | the rule's, the stop's, the timer's |
+| a timer (D44) | the act, naming its rule; what the rule did | the timer's |
+| a plan (D28) | `started` and `completed` for its step (its own events are 19b's) | the plan step's |
+| a child case (D74, D75) | the parent's `started` and `completed`; the child's own records | the child case's |
+| a close or a stop (D40) | `stopped` for each run, approval, firing or request it ends; `closed` | the stop's |
+| a retry (D26) | `retried`, then what started | the failure's |
+| forgetting (D32) | the act by its approver; `forgotten` naming both | the forgetting test |
+| a refusal | `refused`, its reason; nothing else | the refusal's |
+| continue-as-new (D27) | every record not yet exported, as it was | the crossing test |
+
+**State keyed by a step's name:** none. A record is what happened, under the names the case had
+then; a migration renames the case, never its records (the rename test).
+
+**Sources across every boundary:** a fact carries its sources as the state holds them; a value a
+child was given keeps its parent's sources in the child's own records, since its opening keeps
+them (D74). Into the export is 19b's.
+
+**Guards, each watched failing when switched off:** records only from engine 3; a sensitive value
+wrapped; a form value kept as the case file keeps it; records carried, and what a decision wrote;
+every line in exactly one record; the migration's "not recorded"; a request not applied refused; a
+refused proposal's step; no record renamed; `OPENING` (four release tests); on Temporal, a
+migration to a version known but not opened, and its branch for a version not known at all.
+
+## What changed in the guide with the answers
+
+Done, on this branch:
+
+- The example event becomes one record per act (choice 1), its decisions inside it.
+- "Every form value in an answer is sealed too … and so is every failure's message" becomes: a
+  form value is sealed only if its field is sensitive; a failure is exported by its type only
+  (choice 4).
+- `audit/41/national_id` becomes `audit/claim-7/41/national_id` (choice 10).
+- "Turning it on" says a case exports from engine 3, and what an older case says (choice 7).
+- A section on the forget request's own stream (choice 12), and the "never made again" mark
+  (choice 16).
+- The key table gains the "not now" kind's wording (choice 19).
