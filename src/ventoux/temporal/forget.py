@@ -44,6 +44,7 @@ with workflow.unsafe.imports_passed_through():
         CaseStart,
     )
     from ventoux.temporal.converter import keys_of
+    from ventoux.tooling.keys import KeyUnavailable
 
 # How long one call to the key provider may take; Temporal retries it until it answers, as a
 # system that is down is retried (brief, D17).
@@ -95,6 +96,9 @@ class CaseLookup:
     # What its definition says (brief, D32): allowed, while_open or never; empty if its
     # definition can't be read any more.
     forgetting: str
+    # Why the key service couldn't say where its key stands, if it couldn't: never read as a key
+    # destroyed or never made (brief, D78). Empty in a lookup recorded before 19c.
+    unavailable: str = ""
 
 
 def child_refusal(case: str) -> str | None:
@@ -109,6 +113,9 @@ def child_refusal(case: str) -> str | None:
 
 def lookup_refusal(case: str, found: CaseLookup) -> str | None:
     """Why a request to forget `case` is refused before anyone answers; None if it may go on."""
+    if found.unavailable:
+        # Nothing was decided, so nothing waits: proposed again, it is asked again (brief, D78).
+        return f"{found.unavailable}: propose again once it answers"
     if found.key == "never made":
         return f"there is no case {case}: no key was ever made for it"
     if found.key == "destroyed":
@@ -387,7 +394,11 @@ class ForgetActivities:
     @activity.defn(name="ventoux.forget.look_up")
     async def look_up(self, case: str) -> CaseLookup:
         """The case's key state, whether its workflow runs, and what its definition says."""
-        key = self.keys.state(case)
+        # Off the event loop, as every call to the key service (brief, D78).
+        try:
+            key = await asyncio.to_thread(self.keys.state, case)
+        except KeyUnavailable as down:
+            return CaseLookup("", False, "", unavailable=str(down))
         if key != "kept":
             return CaseLookup(key, False, "")
         return CaseLookup(key, await self.still_running(case), await self.forgetting(case))
@@ -464,7 +475,7 @@ class ForgetActivities:
             raise ApplicationError(
                 f"{case} is still running: its key is destroyed once its workflow has ended"
             )
-        self.keys.destroy(case)
+        await asyncio.to_thread(self.keys.destroy, case)  # off the event loop (brief, D78)
 
     async def still_running(self, case: str) -> bool:
         """Whether the case's workflow (its latest run) is still running."""

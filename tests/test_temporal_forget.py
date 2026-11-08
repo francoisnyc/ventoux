@@ -26,7 +26,7 @@ from temporalio.client import (
     WorkflowHandle,
     WorkflowQueryFailedError,
 )
-from temporalio.converter import WorkflowSerializationContext
+from temporalio.converter import DataConverter, WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 from test_temporal_case import LARGE, REVIEW_FORM, CasesWithPlans, refund_with_plan
@@ -102,13 +102,15 @@ def on_temporal[T](
     activities: Mapping[str, Activity] = FAKES,
     cases: type[CaseWorkflow] = DevelopmentCases,
     audit: AuditStore | None = None,
+    converter: DataConverter | None = None,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a case worker serving
-    `activities` and requests to forget; its records go to `audit`, else a fresh store."""
+    `activities` and requests to forget; its records go to `audit`, else a fresh store; its keys
+    are `converter`'s, else fresh development ones."""
 
     async def go() -> T:
         async with (
-            time_skipping(development_converter()) as environment,
+            time_skipping(converter or development_converter()) as environment,
             worker_threads() as threads,
             case_worker(
                 environment.client,

@@ -320,6 +320,9 @@ class CaseState:
     # Why the audit export failed, until an operator retries it; empty while it hasn't
     # (brief, D77).
     export_failed: str = ""
+    # What an operator looks at before retrying it: `the store`, or `the key service` when the
+    # export couldn't seal (brief, D78).
+    export_service: str = "the store"
 
 
 @dataclass(frozen=True)
@@ -615,6 +618,8 @@ class ExportFailed:
     at the store (brief, D17) (brief, D77)."""
 
     reason: str  # why, in words that never quote a value (brief, D30)
+    # What failed, for the operator to look at: `the store`, or `the key service` (brief, D78).
+    service: str = "the store"
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 

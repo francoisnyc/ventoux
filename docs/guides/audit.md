@@ -225,24 +225,78 @@ A child case is forgotten with its parent, under the one key (D75).
 ```python
 from ventoux.tooling.vault import VaultKeys
 
-keys = VaultKeys(address="https://vault.internal:8200", mount="transit")
+keys = VaultKeys(
+    address="https://vault.internal:8200",
+    transit_mount="transit",  # Vault's transit engine: the keys
+    marks_mount="secret",  # a key-value engine, version 2: the marks of forgotten cases
+)
 ```
+
+Each is required; there are no defaults. An `http://` address is refused unless it is `localhost`
+or `127.0.0.1`, for a development server.
 
 - **The token is read from `VAULT_TOKEN` alone,** never from a definition, a file or the command
   line, and is never logged or said (as D62 reads a model's key).
 - **A key per case,** named `ventoux-claim-7`, `aes256-gcm96`, made when the case opens. Vault
-  seals and opens for Ventoux; the key never leaves it. A key Vault would let leave (`exportable`,
-  or a plaintext backup allowed) is refused, never used.
+  seals and opens for Ventoux; the key never leaves it. Before each use its configuration is read:
+  a key Vault would let leave (`exportable`, or a plaintext backup allowed), or one of another
+  type, is refused, never used.
+- **A case ID becomes a name one way:** lowercase letters, digits and `-` stay as they are; every
+  other character is `_` and its bytes in hex, so `refund-A-1001` is `ventoux-refund-_41-1001`.
+  Two IDs never share a name, and no name holds a character a URL would read as a path. An ID
+  whose name would pass 128 characters can't open a case.
 - **Destroying is immediate:** Vault deletes the key, and every value sealed with it is
   unreadable from then on.
 - **Never made again:** before it deletes a key, `VaultKeys` writes a mark in Vault's key-value
   engine, `ventoux/forgotten/claim-7`. A case ID with a mark can never open a case again, and its
-  key is never used, even if Vault would let a key of that name be made again.
+  key is never used, even if Vault would let a key of that name be made again. If Vault fails
+  after the mark, the case is forgotten already, and the request, retrying, finishes the deletion.
+  The mark is read from its metadata, so a version of it deleted (`vault kv delete`, or the
+  mount's `delete_version_after`) changes nothing. Never delete a mark's metadata (`vault kv
+  metadata delete`): the case would read as never opened, and its ID could open a case again.
+  Ventoux's own token can't.
+- **Every call has a timeout,** 10 seconds unless you give another, and runs off the worker's
+  event loop: Vault slow or down never stalls the other cases on that worker.
+- **Each value sealed or opened costs three calls to Vault, one after another:** the mark, the
+  key's configuration, then the seal or open. A worker replaying a case's history (after a restart,
+  or to read its state) opens every sensitive value in it, inside one workflow task: a case with
+  many, replayed, waits on Vault that many times over. Keep Vault near your workers.
+- **A contract test's runs each get a key,** as every run Ventoux starts does, and keep it: with
+  Vault, one key per run. Run contract tests against the development provider.
+- **Vault is reached directly,** never through a proxy the environment names (`https_proxy`,
+  `http_proxy`): a proxy would carry the token, and one that inspects TLS would read it. A redirect
+  is never followed either. A proxy to Vault, if your network needs one, would be a setting of its
+  own, named on purpose; it isn't built.
+- **An export that can't seal says so,** naming the key service, not the store: `audit export
+  failed: the key service at https://vault.internal:8200 can't be reached: …: look at the key
+  service, then retry the export`. It is retried as a store that is down is; a key Vault refuses
+  for good (one that can leave it) fails the export at once.
 
 Give Ventoux's token a policy that allows only `ventoux-*` keys (creating, configuring,
 encrypting, decrypting, reading and deleting them) and reading and writing the marks under
-`ventoux/forgotten/`. Ventoux talks to Vault over HTTPS with the standard library: nothing to
-install.
+`ventoux/forgotten/`, never deleting one. For mounts named `transit` and `secret`:
+
+```hcl
+path "transit/keys/ventoux-*" {
+  capabilities = ["create", "read", "update", "delete"]
+}
+path "transit/encrypt/ventoux-*" {
+  capabilities = ["update"]
+}
+path "transit/decrypt/ventoux-*" {
+  capabilities = ["update"]
+}
+path "secret/data/ventoux/forgotten/ventoux-*" {
+  capabilities = ["create", "read", "update"]
+}
+path "secret/metadata/ventoux/forgotten/ventoux-*" {
+  capabilities = ["read"]
+}
+```
+
+A token holding only this does everything Ventoux asks of Vault, and nothing more: it reads no
+other key, and can't delete a mark, so a forgotten case can't be unmarked with it. Ventoux talks
+to Vault over HTTPS with the standard library: nothing to install.
 
 **Why not a cloud KMS in v1.0:** a KMS never destroys a key at once. It schedules the deletion, 7 to
 30 days ahead, and the key can be restored until then. A case would be "forgotten" only weeks after
@@ -256,9 +310,9 @@ Never an empty value, never a guess: an error that says why.
 |---|---|---|
 | was never made | `there is no key for claim-7, so its sensitive values can't be read or written` | refused at the opening; anywhere else, an error |
 | was destroyed | `the key of claim-7 was destroyed when it was forgotten: its sensitive values can't be read or written` | `read_audit` says `‹forgotten›`; a replay fails, the worker carries on (D32) |
-| Vault can't be reached | `the key service at https://vault.internal:8200 can't be reached: claim-7's sensitive values can't be read or written now` | waits: the workflow task, or the activity, is retried until Vault answers; a request to forget is refused, saying so |
+| Vault can't be reached, or doesn't answer in time | `the key service at https://vault.internal:8200 can't be reached: claim-7's sensitive values can't be read or written now` | waits: the workflow task, or the activity, is retried until Vault answers; a proposal to forget is refused, saying so; an approved one waits; `read_audit` fails, never saying `‹forgotten›` |
 | Vault refuses Ventoux's token | `the key service refused Ventoux's token for claim-7: check the token's policy` | waits, as above |
-| is one Vault would let leave | `the key of claim-7 can leave the key service (exportable): it is not used` | waits, needing a platform fix |
+| is one Vault would let leave, or of another type | `the key of claim-7 can leave the key service (exportable): it is not used` | waits, needing a platform fix; the audit export fails at once, needing attention |
 
 ## In tests
 
@@ -276,6 +330,9 @@ tests replay a model's (D62): a request the recording doesn't hold is refused, s
 | a record's ID is kept with other content | `audit record claim-7/41 is already kept, with other content` |
 | the token is missing | `VAULT_TOKEN is not set: the key service can't be asked` |
 | a key can leave the key service | `the key of claim-7 can leave the key service (exportable): it is not used` |
+| an `http://` address that isn't local | `the key service is reached over https: http://vault.internal:8200 is only for a development server on localhost` |
+| a case ID too long to name a key | `a case ID names a key in the key service, and its name can't pass 128 characters` |
+| an empty case ID | `a case ID can't be empty` |
 
 ---
 
@@ -294,5 +351,9 @@ Decided in layer 19's design note (`docs/layers/19-audit-keys.md`), answered 202
 5. **"Never made again" on Vault** is a mark in Vault's key-value engine, written before the key
    is deleted (19c).
 6. **No client library:** Vault over HTTPS with the standard library (19c).
+8. **A provider call never runs on the event loop,** and a failed export says which service failed
+   (19c, D78).
+9. **A key's state is read only from Vault's answer:** unreachable is never forgotten, nor never
+   made (19c, D78).
 7. **A parent terminated with a child still running, then forgotten** (carried from layer 18d)
    stays a known limit.

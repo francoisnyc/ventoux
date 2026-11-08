@@ -249,9 +249,7 @@ def needs_attention(state: CaseState) -> list[str]:
     (brief, D17) (brief, D38), then a failed audit export (brief, D77)."""
     runs = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
     rules = [f"{f.entry}: {f.reason}" for f in state.firings if f.status == "failed"]
-    export = (
-        [f"audit export failed: {state.export_failed}: look at the store, then retry the export"]
-        if state.export_failed
-        else []
-    )
+    failed = state.export_failed
+    look = f"look at {state.export_service}, then retry the export"  # the store, or the key service
+    export = [f"audit export failed: {failed}: {look}"] if failed else []
     return runs + rules + export

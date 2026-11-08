@@ -1,5 +1,6 @@
 """Starting a plan run, answering its waits, and reading how it went (layer 6)."""
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -25,7 +26,7 @@ async def start_plan(
     # The codec finds a key from the part of a workflow ID before its first `/` (brief, D31).
     if "/" in id:
         raise ValueError(f"{id} can't name a run: a run's ID has no \"/\"")
-    keys.create(id)
+    await asyncio.to_thread(keys.create, id)  # off the event loop (brief, D78)
     start = PlanStart(
         plan, {name: Given(given.value, sorted(given.sources)) for name, given in fields.items()}
     )

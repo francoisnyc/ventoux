@@ -18,7 +18,6 @@ from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHistory
-from temporalio.common import RetryPolicy
 from test_audit_records import checked_claim, known
 from test_case import REFUND
 from test_child_cases import CLOSABLE, repair
@@ -50,6 +49,7 @@ from ventoux.case.state import ExportRetried
 from ventoux.temporal import client as plans
 from ventoux.temporal.audit import ExportRefused, exported, restricted_fields, sensitive_fields
 from ventoux.temporal.cases import (
+    EXPORT_RETRIES,
     CaseReport,
     CaseStart,
     CaseWorkflow,
@@ -302,7 +302,11 @@ def test_a_deployment_retries_the_export_ten_times_and_holds_past_256_kb() -> No
     # What a deployment gets unless it lowers them, as the guide says (brief, D77).
     retries = CaseWorkflow.export_retries
     assert (retries.maximum_attempts, retries.maximum_interval) == (10, timedelta(minutes=5))
-    assert set(retries.non_retryable_error_types or ()) == {"ExportRefused", "AuditRefused"}
+    assert set(retries.non_retryable_error_types or ()) == {
+        "ExportRefused",
+        "AuditRefused",
+        "KeyRefused",  # a key refused for good (brief, D78)
+    }
     assert CaseWorkflow.audit_bound == 256 * 1024
 
 
@@ -341,10 +345,10 @@ class DownAudit(FileAudit):
 @workflow.defn(name="ventoux.case")
 class QuicklyFailingExports(CaseWorkflow):
     catalog = DevelopmentCases.catalog
-    export_retries = RetryPolicy(
-        maximum_attempts=2,
-        initial_interval=timedelta(milliseconds=50),
-        non_retryable_error_types=["ExportRefused", "AuditRefused"],
+    # Python: `dataclasses.replace` copies the deployment's policy, refusals never retried
+    # included, with only these changed.
+    export_retries = dataclasses.replace(
+        EXPORT_RETRIES, maximum_attempts=2, initial_interval=timedelta(milliseconds=50)
     )
 
     @workflow.run

@@ -536,6 +536,230 @@ attribute a test's workflow lowers, as `events_per_run` is for continue-as-new.
     documented answers, and checked once against a development Vault (`vault server -dev`) when one
     is available, with a test marked to run only then. *Recommended.*
 
+### 19c, at its start (2026-11-08): what 19b settled, and what is still to answer
+
+Choices 14 to 20 stand as answered on 2026-11-07: Vault's transit engine; destroyed at once; the
+mark in Vault's key-value engine; the standard library, no new dependency; `VAULT_TOKEN` alone;
+`KeyRefused` and `KeyUnavailable`; tests from recordings. D78 is written once the questions below
+are answered, before any code.
+
+**Checked in the code before asking:**
+
+- **The codec calls the provider synchronously from async code.** `SensitiveCodec.encode` and
+  `decode` are `async`, and call `keys.seal` and `keys.open` directly. So do the forget request's
+  async activities (`look_up` reads `keys.state`, `destroy_key` calls `keys.destroy`) and the
+  client's `start_case` and `start_run` (`keys.create`). With `FileKeys` that is a file read; with
+  Vault it is a round trip, on the event loop of the worker or the client.
+- **The export's sealing already runs off the loop:** `ExportActivities.append` is a plain
+  function, run on the worker's `activity_executor` threads.
+- **A failed export is said as the store's** (`export_failure`): anything but Ventoux's own two
+  refusals reads `the store failed with <type>`, and the attention line ends `look at the store,
+  then retry the export`.
+- **Two places read a key's state:** `read_audit` (`‹forgotten›` when `destroyed`) and the forget
+  request's `look_up` (`there is no case …` when `never made`).
+- **A case ID is refused only for a `/`** (`start_case`, `start_run`); the codec takes the part
+  before the first `/`. Every ID in the tests and guides is letters, digits and `-`, with capitals
+  (`refund-A-1001`).
+- **No Vault here:** none is installed. HashiCorp's release site answers, so a development server
+  (`vault server -dev`) can be fetched into a scratch folder for the one check against a real
+  Vault: a tool for a check, not a dependency of the project.
+
+**The questions, each with a recommendation:**
+
+31. **The codec's calls, off the event loop.** A Vault call made on the loop blocks every workflow
+    and activity on that worker for its round trip, and for its whole timeout while Vault is down.
+    - (a) **Every provider call from async code goes through `asyncio.to_thread`:** the codec's
+      `encode` and `decode` (one thread hop for the whole list of payloads, not one per part), the
+      forget activities' `state` and `destroy`, and the client's `create`. `FileKeys` goes the same
+      way: one path, whichever provider. The export activity is already on a thread.
+    - **Every Vault call has a timeout:** 10 seconds, connect and answer, a constructor argument; a
+      call that runs past it is `KeyUnavailable`, so the worker's thread is never held longer.
+    - **The export's sealing:** one call per sensitive value, each with its timeout; the activity's
+      own limit (`EXPORT_CALL`, a minute) bounds the whole, and a timeout there is retried as any
+      failure of the store is. Batching seals (Vault's `batch_input`) is left for later: said, not
+      built.
+    - (b) A thread pool of the provider's own. More to own, for nothing `to_thread` doesn't give.
+
+    *Recommended: (a).*
+
+32. **The export's failure names the service that failed,** and a final refusal is never retried.
+    - **Which service:** the activity's failure types are sorted three ways. `KeyUnavailable` and
+      `KeyRefused` are the key service's, and their message is Ventoux's own (it names the case and
+      the service's address, never a value), so it is said whole; `ExportRefused` and
+      `AuditRefused` stay Ventoux's refusals, said whole; anything else is the store's, by its type
+      alone. `ExportFailed` gains what to look at, `the store` or `the key service`, and the
+      attention line ends `look at the key service, then retry the export` when it was Vault.
+      Default `the store`, so a state carried from 19b reads as it did.
+    - **A final `KeyRefused`** (an exportable key, a mark, the wrong type) is non-retryable: it
+      fails the export at once, never 10 times. `KeyUnavailable` is retried, as a store that is down
+      is. `EXPORT_RETRIES` gains `KeyRefused`, and its test says so.
+
+    *Recommended.*
+
+33. **Forgotten or unreachable, never confused.** `VaultKeys.state` says `destroyed` only when
+    Vault answered with the mark, and `never made` only when Vault answered that neither the key
+    nor the mark exists. Anything else (unreachable, a timeout, the token refused, an answer it
+    can't read) raises `KeyUnavailable`.
+    - **`read_audit`** lets it through: an error, never `‹forgotten›`. A test.
+    - **The forget request, before anyone answers** (`look_up`): refused, saying so (choice 19):
+      `refused pia's proposal: the key service at https://vault.internal:8200 can't be reached:
+      propose again once it answers`. Nothing was decided, so nothing waits. A test that it is
+      never `there is no case claim-7`.
+    - **After the approval** (`destroy_key`): retried until Vault answers, as today: the approval
+      was given, so the request waits, `closing the case`. Said, with a test.
+
+    *Recommended.*
+
+34. **A case ID as a Vault name.** Vault puts a key's name in a URL path, and its key-value engine
+    puts the mark's there too: `.`, `..`, `%`, `?`, `#` and spaces would be read as path, query or
+    fragment, and two IDs could meet on one name.
+    - (a) **One spelling, escaped:** lowercase letters, digits and `-` stay as they are; every
+      other byte of the ID's UTF-8, capitals and `_` included, is written `_` and two hex digits.
+      `refund-A-1001` is `ventoux-refund-_41-1001`, `claim 7` is `ventoux-claim_207`. Two IDs never
+      share a name (`_` only starts an escape, so the mapping reads back), the name holds no path
+      character, and it is the same whether Vault folds capitals or not. The mark is
+      `ventoux/forgotten/<the same name>`. Refused, with `KeyRefused` at `create`: an empty ID, and
+      one whose name would pass 128 characters, saying the limit.
+    - (b) Refuse every ID outside lowercase letters, digits and `-`: simplest, but it refuses the
+      guide's `refund-A-1001`, and only where Vault is the provider, so development and production
+      would accept different IDs.
+
+    *Recommended: (a).* Tests: each awkward character, `..`, a capital against its lowercase twin,
+    and the refusals.
+
+35. **The part's binding is Vault's, and the key is checked as it is used.**
+    - **The part** is sent as `associated_data`, base64, on every encrypt and decrypt, `<case>/
+      <part>` as `FileKeys` binds it. A recording shows it is sent; only a real Vault shows a value
+      moved to another place fails to open: a test marked to run only where `vault` is installed,
+      run once here against a development server, and the PR says whether it ran, and where.
+    - **The key, read on every use:** before each seal or open, its configuration is read, and
+      refused unless its type is `aes256-gcm96`, it isn't exportable, and it allows no plaintext
+      backup. One more round trip per use; a check made once and remembered would miss a key made
+      exportable later (Vault lets that be turned on, never off). Created with all three set
+      explicitly.
+
+    *Recommended.*
+
+36. **The mark and the delete.** `destroy` writes the mark, then allows the key's deletion, then
+    deletes it. From the mark on, `state` says `destroyed`, and `create`, `seal` and `open` refuse:
+    the case is forgotten even if a later step fails. `destroy` again finishes: the mark is written
+    again (the same content), and a key already gone counts as deleted. A test for each step
+    failing (the mark, the configuration, the deletion), each then finished by a second `destroy`.
+    *Recommended.*
+
+**Settings, as choice 18 said, made exact:** `VaultKeys(address, transit_mount, marks_mount)`,
+each required, no default (the marks need a key-value engine of version 2, named apart from
+transit's); an `http://` address refused unless its host is `localhost` or `127.0.0.1`; the
+token read from `VAULT_TOKEN` when each call is made, never kept on the object, so it is in no
+`repr`; missing, the constructor refuses, saying to set `VAULT_TOKEN`. The default transport adds
+the token; a recording never sees it.
+
+**Answered 2026-11-08: as recommended,** 31 to 36 and the settings. D78 is written, and the guide
+follows (the Vault section, its errors and refusals, an export that can't seal).
+
+### Seams and tests for 19c (curriculum step 4, proposed)
+
+**The seams,** public only:
+
+1. **The provider** (`ventoux.tooling.vault`): `VaultKeys(address, transit_mount, marks_mount,
+   *, timeout=10, transport=None)`, a `KeyProvider` (`create`, `seal`, `open`, `destroy`,
+   `state`); and `vault_name(case)`, the name a case's key has.
+2. **The errors** (`ventoux.tooling.keys`): `KeyRefused`, as today, and `KeyUnavailable`, new.
+3. **The transport:** a function given a request (method, path, body) and giving Vault's answer
+   (status, body). The default one speaks HTTPS through `urllib.request` and adds the token;
+   `Recording(exchanges)` answers from a list, in order, and refuses a request it doesn't hold.
+   Tests give `VaultKeys` a recording, and read what it was asked.
+4. **Callers, as today:** the codec (`SensitiveCodec.encode`, `decode`), the forget request
+   (`propose_forget`, `answer_forget`), `start_case`, `read_audit`, and the case's export, seen
+   through its report. To see a call made off the loop, a test's provider notes the thread each
+   call ran on.
+5. **A development Vault,** in one test that runs only where `vault` is installed.
+
+**The refusals and errors, word for word (proposed):**
+
+| Situation | What is said |
+|---|---|
+| never made | `there is no key for claim-7, so its sensitive values can't be read or written` (as `FileKeys`) |
+| destroyed (a mark) | `the key of claim-7 was destroyed when it was forgotten: its sensitive values can't be read or written` (as `FileKeys`) |
+| made again | `a key was already made for claim-7: open the case under a new ID` (as `FileKeys`) |
+| can leave Vault | `the key of claim-7 can leave the key service (exportable): it is not used`; `(plaintext backup allowed)` |
+| another type | `the key of claim-7 is aes128-gcm96, not aes256-gcm96: it is not used` |
+| a part that doesn't open | `a sealed part of claim-7 doesn't open: it was damaged, or sealed for another case or place` (as `FileKeys`) |
+| an ID that can't be a name | `a case ID names a key in the key service, and its name can't pass 128 characters`; `a case ID can't be empty` |
+| unreachable | `the key service at https://vault.internal:8200 can't be reached: claim-7's sensitive values can't be read or written now` |
+| timing out | `the key service at https://vault.internal:8200 didn't answer within 10 seconds: claim-7's sensitive values can't be read or written now` |
+| the token refused | `the key service refused Ventoux's token for claim-7: check the token's policy` |
+| an answer it can't read | `the key service at https://vault.internal:8200 gave an answer Ventoux can't read for claim-7` |
+| no token | `VAULT_TOKEN is not set: the key service can't be asked` |
+| an `http://` address | `the key service is reached over https: http://vault.internal:8200 is only for a development server on localhost` |
+| a setting missing | `VaultKeys needs an address, a transit mount and a marks mount: transit_mount is empty` |
+| a request not recorded | `the recording holds no GET /v1/transit/keys/ventoux-claim-7 (request 3): record it, or fix what asked` |
+| forgetting, Vault down | `refused pia's proposal: the key service at … can't be reached: …: propose again once it answers` |
+| the export, Vault down | `audit export failed: the key service at … can't be reached: …: look at the key service, then retry the export` |
+
+**The tests, in the order I'd write them,** each failing first (the negative first):
+
+1. **(negative, the curriculum's)** A key the provider can't give is an error saying why, never an
+   empty value: seal and open for a case never made, and for one with a mark.
+2. **(negative)** A key that can leave Vault (exportable, plaintext backup) or of another type is
+   refused when used, read from its configuration before each use.
+3. **(negative)** A recording refuses a request it doesn't hold, saying which.
+4. **(negative)** Settings: an `http://` address other than `localhost` or `127.0.0.1`; a missing
+   address or mount; no `VAULT_TOKEN` (a token in `~/.vault-token`, or given any other way, is
+   never read). The token is in no message, `repr`, log or recording: searched for.
+5. A name per case: each awkward character, `..`, a capital and its lowercase twin; an empty ID
+   and one too long refused. `create` makes the key with its three settings; refuses a case with a
+   mark or a key.
+6. Seal and open: the part sent as associated data; a part that doesn't open refused.
+7. **(negative)** `KeyUnavailable` from every call: unreachable, timing out, the token refused, an
+   answer it can't read.
+8. `state`: kept, destroyed (the mark, even with the key still there), never made; unreachable is
+   `KeyUnavailable`, never either.
+9. `destroy`: the mark, the configuration, the deletion; each failing, then finished by a second
+   `destroy`; the case destroyed from the mark on.
+10. Off the loop: the codec, the forget request's activities and `start_case` call the provider on
+    a thread, never the event loop's.
+11. The export: with the key service down, the attention names it, and it is retried; a final
+    `KeyRefused` fails it at once.
+12. Forgetting and reading with Vault down: a proposal refused, saying so, never "no case"; an
+    approved request waits; `read_audit` fails, never `‹forgotten›`.
+13. A development Vault (runs only where `vault` is installed): the whole round trip, and a value
+    moved to another place doesn't open.
+14. `FileKeys` and its tests unchanged; every recorded history replays.
+
+### Decided while building 19c
+
+- **A redirect is never followed.** `urllib` follows one by default, carrying the request's
+  headers, the token among them, to wherever Vault's answer points. The transport refuses, and the
+  redirect's status comes back as an answer Ventoux can't read.
+- **Only a mark as Ventoux writes it says the case was forgotten.** A `200` on the mark's path
+  whose body holds no mark is an answer Ventoux can't read, never "destroyed": found when a
+  recorded `200 {"warnings": []}` read as a mark.
+- **What the transport meets, sorted:** no connection made (even one that timed out connecting) is
+  `can't be reached`; connected and no answer in time, `didn't answer within …`; hung up on before
+  an answer, `can't be reached`; an answer that isn't HTTP, or a status or body Ventoux doesn't
+  expect, `gave an answer Ventoux can't read`. A test each, through a socket on this machine.
+- **`VAULT_TOKEN` unset after `VaultKeys` was made** is `KeyUnavailable` at the call, saying so:
+  it is read as each call is made, never kept.
+- **`destroy` reads the key before allowing its deletion,** so a destroy asked again after the
+  key went finishes without asking Vault to configure a key it no longer holds; a `404` on the
+  deletion itself counts as deleted (two destroys overlapping).
+- **A value sealed elsewhere** (raw bytes, as `FileKeys` seals) given to `VaultKeys` is refused as
+  a part that doesn't open, never an error of another kind.
+- **The guide's policy is written out and checked:** a token holding only it creates, seals,
+  opens and destroys, reads no other key, and can't delete a mark (neither its latest version nor
+  all of them), against a development Vault.
+- **The tests' quick export policy copies the deployment's** (`dataclasses.replace` on
+  `EXPORT_RETRIES`), changing only the attempts and the wait, so a refusal never retried in
+  production is never retried in a test either: found when `KeyRefused` was retried twice there.
+- **The development Vault:** Vault 1.21.4, downloaded from HashiCorp's releases into a scratch
+  folder, its checksum checked against the published list (the list's signature wasn't); the two
+  tests that use it ran here, and are skipped where `vault` isn't installed, as in CI. Every
+  recorded answer the other tests use was checked against it: a key's configuration, the mark,
+  `400` for a part that doesn't open, `204` for a deletion.
+- **Not built, said:** mounts are taken as the platform team names them, unchecked; batching
+  seals (`batch_input`) is left for later.
+
 ### Carried from 18d
 
 21. **A parent terminated with a child still running, then forgotten,** loses the key under that
@@ -817,6 +1041,87 @@ operating role retrying; a close waiting for its export; the hold; the forget st
 record each, and its last record; sealing under the parent's key; `read_audit`'s hidden, forgotten
 and narrowed branches, and the place it opens at; the plan's decisions, given and recorded; records
 only from engine 3; the forget patch, on replay.
+
+### From the tutor's review of #92
+
+- **A deleted mark read as no mark.** A read of a KV v2 version deleted (`vault kv delete`, or the
+  mount's `delete_version_after`, nobody acting) is a `404`, its metadata still in the body.
+  Shown first against Vault 1.21.4: with the mark's latest version deleted as root, the case read
+  as `never made`, and `create` made its key again. Now the mark is read from its metadata: any
+  version ever written means forgotten, deleted or destroyed since; no metadata means never marked,
+  which Ventoux's policy can't delete; metadata holding no version is an answer Ventoux can't read.
+  The policy gains `read` on the metadata path. Two development-Vault tests (a version deleted as
+  root, and the mount's `delete_version_after` at one second) still read destroyed and refuse
+  `create`, and the recordings' metadata is checked field by field against Vault's.
+- **The token followed the environment's proxy.** `build_opener` adds a `ProxyHandler` from
+  `http_proxy` and `https_proxy`. The opener is now built with an empty `ProxyHandler`, per
+  transport (so the environment read at import no longer matters), and a proxy named in the
+  environment receives nothing, tested. The guide says Vault is reached directly; a proxy to
+  Vault would be a setting of its own, not built.
+- **The name rule's hinge, tested:** `Claim-7` is `ventoux-_43laim-7`, `_43laim-7` is
+  `ventoux-_5f43laim-7`; with `_` kept, they would share a key.
+- **Optional, done:**
+  - `KeyUnavailable` says what is safe to say: the unreachable kind (`ConnectionRefusedError`,
+    `SSLCertVerificationError`, `gaierror`) and an unexpected status (`status 503`, a sealed Vault);
+    an answer that isn't HTTP, or is cut short, says so.
+  - An error answer's body stalled or cut short is unavailable, never the standard library's
+    exception escaping (which the export would have said as the store's).
+  - The contract test makes its runs' keys off the event loop, tested.
+  - The guide says what a value costs (three calls in turn) and that a replay opens every
+    sensitive value in one workflow task.
+- **Kept, said:** a contract test's runs keep their keys, one per run with Vault; destroying one
+  while its run may still be running would break the run. The guide says to run contract tests
+  against the development provider.
+
+## Promises (19c)
+
+Each claim the note, D78 and the guide make about the key provider, and the test that would fail
+if it weren't true. Tests are in `tests/test_vault_keys.py` and `tests/test_temporal_keys.py`. Each
+was watched failing first or, for a guard, failing when switched off (said in each slice's commit).
+
+| Promise | Test |
+|---|---|
+| A key the provider can't give is an error saying why, never an empty value: never made; destroyed (a mark), the key itself never asked for | `test_a_key_the_provider_cant_give_is_an_error_saying_why` |
+| A key that is exportable, allows a plaintext backup, or is of another type is never used, read before each use | `test_a_key_that_can_leave_vault_or_of_another_type_is_never_used`, `test_against_a_development_vault` (made exportable outside Ventoux) |
+| A recording refuses a request it doesn't hold, in that place or with that body, saying which, never the body | `test_a_recording_refuses_a_request_it_doesnt_hold` |
+| No setting has a default; plain `http` only to `localhost` or `127.0.0.1`; the token from `VAULT_TOKEN` alone, never a file or an argument | `test_settings_are_named_the_token_comes_from_vault_token_alone` |
+| The token is in no message, `repr`, log or recording; sent only in Vault's header; no redirect followed, no proxy the environment names used | `test_settings_are_named_the_token_comes_from_vault_token_alone`, `test_the_https_transport_sends_the_token_only_to_vault_and_never_says_it`, `test_vault_is_reached_directly_never_through_the_environments_proxy` |
+| One name per case ID, none shared, with capitals folded or not, an ID spelling an escape included, none holding a path character; an empty ID or one too long refused | `test_each_case_id_has_one_name_no_url_reads_as_a_path` |
+| A key is made once, each setting stated; a case with a key or a mark is refused | `test_a_key_is_made_once_never_able_to_leave_vault`, `test_against_a_development_vault` |
+| A value is sealed for its place, as associated data, and opens only there; another case's key, another provider's bytes, don't open it | `test_a_value_is_sealed_for_its_place_and_opens_only_there`, `test_a_value_sealed_by_another_provider_doesnt_open`, `test_against_a_development_vault` |
+| Vault unreachable, timing out, refusing the token, hanging up, cutting an answer short, or answering what Ventoux can't read is `KeyUnavailable`, at every request of every use, saying the unreachable kind or the status | `test_an_error_answer_cut_short_or_stalled_is_unavailable`, `test_vault_not_answering_is_unavailable_never_a_refusal`, `test_an_answer_of_another_shape_is_unavailable_never_a_value`, `test_the_https_transport_sends_the_token_only_to_vault_and_never_says_it`, `test_a_connection_dropped_or_an_answer_not_http_is_unavailable` |
+| A key's state is `destroyed` or `never made` only on Vault's answer; anything else is `KeyUnavailable` | `test_a_keys_state_is_read_only_from_vaults_answer` |
+| Destroying: the mark first, then the deletion allowed, then the key deleted; destroyed from the mark on; cut short at any step, destroying again finishes; the mark outlives a key of the name made again | `test_destroying_marks_the_case_first_and_destroying_again_finishes`, `test_against_a_development_vault` |
+| The mark is read from its metadata: a version deleted, by hand or by `delete_version_after`, still says forgotten and refuses `create`; metadata with no version is unreadable | `test_a_mark_is_read_from_its_metadata`, `test_a_mark_whose_version_was_deleted_still_says_forgotten` (development Vault) |
+| No provider call runs on the event loop: the codec, the forget request's activities, opening a case or a run, the contract test's runs | `test_no_provider_call_runs_on_the_event_loop`, `test_the_contract_test_makes_its_runs_keys_off_the_event_loop` |
+| An export that can't seal names the key service; a key refused for good fails it at once; one unavailable is retried; which service failed crosses continue-as-new | `test_an_export_that_cant_seal_names_the_key_service`, `test_which_service_failed_crosses_continue_as_new`, `test_audit_export.py::test_a_deployment_retries_the_export_ten_times_and_holds_past_256_kb` |
+| With Vault down: a proposal to forget is refused, saying so, never "no case"; an approved request waits, then forgets; `read_audit` fails, never saying `‹forgotten›` | `test_with_the_key_service_down_a_proposal_to_forget_is_refused_saying_so`, `test_with_the_key_service_down_an_approved_request_waits_then_forgets`, `test_read_audit_with_vault_down_fails_never_saying_forgotten` |
+| The guide's policy is all Ventoux needs (the mark's metadata read included): no other key, no deleting a mark or its metadata | `test_the_guides_policy_is_all_ventoux_needs` |
+| `FileKeys` and its tests unchanged; every recorded history replays | the suite: `keys.py` only gains `KeyUnavailable`, no `FileKeys` test changed, and the replay tests over `tests/histories` |
+
+**Not tested, said so:** a connection that times out while connecting (a host that drops packets)
+reads as `can't be reached`, by the transport's code alone; no test here reaches such a host.
+
+## Routes checked before the pull request (19c)
+
+| Route | What a production provider changes | Test |
+|---|---|---|
+| opening a case or a run | its key made off the loop; an ID that can't be a name refused | the off-the-loop test, the naming test |
+| a workflow task, an activity | sealing and opening off the loop; Vault down retried by Temporal | the off-the-loop test, the unavailable test |
+| the audit export | sealing failing names the key service; final refusals at once | the export test |
+| a continue-as-new | which service failed carried | the crossing test |
+| forgetting | refused before an answer with Vault down; waits after the approval; the mark, then the deletion | the two forgetting tests, the destroy test |
+| reading the audit | Vault down is an error, never `‹forgotten›` | the `read_audit` test |
+| replay | none: no workflow's commands changed | the replay tests over `tests/histories` |
+
+**Guards, each watched failing when switched off:** the mark read first; never made; exportable,
+plaintext backup, type; the recording's place and body; each setting, the http host, the token;
+the name's kept set, an empty ID, its length; `create`'s two refusals; associated data on seal and
+open (against Vault); a part that doesn't open; each kind of unavailable, and the mark's shape; the
+state's destroyed; the mark, the configuration and the deletion's steps, the key gone, a `404`
+deleted; every call off the loop (six); the export naming the key service, `KeyRefused` never
+retried, the attention line, the state's service, its crossing; the proposal refused, and the
+lookup's catch; `read_audit` not swallowing; the policy's mark deletion; the hang-up.
 
 ## What changed in the guide with the answers
 

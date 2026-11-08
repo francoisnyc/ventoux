@@ -20,6 +20,7 @@ EXPORT = "audit export"
 def export_failed(state: CaseState, event: ExportFailed) -> None:
     """The export failed after its retries: the records wait, and an operator looks."""
     state.export_failed = event.reason
+    state.export_service = event.service
     state.history.append(f"audit export failed: {event.reason}")
     state.deciding.append(Decision("failed", target=EXPORT, reason=event.reason))
 
