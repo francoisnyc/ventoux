@@ -20,7 +20,7 @@ from temporalio.client import Client, WorkflowHistory
 from temporalio.common import RetryPolicy
 from test_audit_records import checked_claim, known
 from test_case import REFUND
-from test_sensitive import FILE, NATIONAL_ID
+from test_sensitive import FILE, NATIONAL_ID, claim
 from test_temporal_case import (
     LARGE,
     QUEUE,
@@ -29,6 +29,7 @@ from test_temporal_case import (
     on_temporal,
     reported,
 )
+from test_temporal_forget import on_temporal as forgetting_on_temporal
 from worker_threads import worker_threads
 
 from ventoux.case.admission import RetryRefused
@@ -46,12 +47,16 @@ from ventoux.temporal.cases import (
     shown,
     start_case,
 )
+from ventoux.temporal.converter import keys_of
+from ventoux.temporal.forget import ForgetReport, answer_forget, propose_forget
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     CATALOG,
     FAKES,
     DevelopmentCases,
+    DevelopmentForget,
     DevelopmentPlans,
+    as_json,
     development_converter,
     run_case,
 )
@@ -345,3 +350,104 @@ def test_past_its_bound_the_case_holds_until_its_export_catches_up(tmp_path: Pat
         "ana answered review#1 approve as support, setting approved_amount"
     )
     assert retried < answered  # decided once the export caught up, in the order it came
+
+
+async def open_claim(client: Client, cases: type[CaseWorkflow]) -> Any:
+    """The guide's claim, holding a national ID, waiting for its assessment."""
+    return await start_case(client, cases, claim(), as_json(FILE), "claim-7", QUEUE)
+
+
+def test_forgetting_closes_exports_then_destroys(tmp_path: Path) -> None:
+    # Close, export, destroy: every record of the case is written, sealed, before its key goes,
+    # and no longer opens after; the request writes its own stream (brief, D32) (brief, D77).
+    store = FileAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> tuple[ForgetReport, str]:
+        await open_claim(client, DevelopmentCases)
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        return await request.result(), keys_of(client).state("claim-7")
+
+    ended, key = forgetting_on_temporal(scenario, audit=store)
+    assert (ended.status, key) == ("forgotten", "destroyed")
+    written = store.read("claim-7")
+    case = [each for each in written if each["stream"] == "claim-7"]
+    assert case[-1]["lines"][-1] == "closed: forgotten"
+    sealed = case[0]["act"]["values"]["national_id"]
+    assert NATIONAL_ID not in str(written)
+    keys = FileKeys(tmp_path / "unused.json")  # any provider: the key itself is gone
+    with pytest.raises(KeyRefused):
+        keys.open("claim-7", base64.b64decode(sealed["sealed"]), sealed["part"])
+    request = [each for each in written if each["stream"] == "claim-7/forget"]
+    assert [(each["act"]["kind"], each["act"]["by"]) for each in request] == [
+        ("forget proposed", "pia"),
+        ("answered", "olu"),
+        ("key destroyed", None),
+    ]
+    assert [line for each in request for line in each["lines"]] == ended.history
+
+
+def test_a_refused_answer_and_a_rejection_are_each_recorded_in_the_request_s_stream(
+    tmp_path: Path,
+) -> None:
+    # Each answer is an act of the request, refused or not: its record says what was decided and
+    # why, in the line's own words; nothing is forgotten, and the key stays (brief, D77).
+    store = FileAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> tuple[ForgetReport, str]:
+        await open_claim(client, DevelopmentCases)
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "pia", ["privacy"])  # the proposer: refused
+        await answer_forget(request, "reject", "olu", ["privacy"])
+        return await request.result(), keys_of(client).state("claim-7")
+
+    ended, key = forgetting_on_temporal(scenario, audit=store)
+    assert (ended.status, key) == ("rejected", "kept")
+    request = [each for each in store.read("claim-7") if each["stream"] == "claim-7/forget"]
+    decided = [
+        (each["act"]["kind"], each["act"]["by"], [d["kind"] for d in each["decisions"]])
+        for each in request
+    ]
+    assert decided == [
+        ("forget proposed", "pia", ["admitted"]),
+        ("answered", "pia", ["refused"]),
+        ("answered", "olu", ["rejected"]),
+    ]
+    [refused] = request[1]["decisions"]
+    assert request[1]["lines"] == [f"refused pia's answer approve: {refused['reason']}"]
+    assert [line for each in request for line in each["lines"]] == ended.history
+
+
+def test_with_the_store_down_forgetting_keeps_the_key_until_the_export_is_written(
+    tmp_path: Path,
+) -> None:
+    # The store down as forgetting is approved: the case closes but doesn't end, needing
+    # attention; the request waits, and the key stays. Once an operator retries the export, the
+    # case ends, and only then does the key go (brief, D32) (brief, D77).
+    store = DownAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> tuple[CaseReport, str, ForgetReport, str]:
+        case = await open_claim(client, QuicklyFailingExports)
+        await reported(case, lambda now: now.unwritten == 0)
+        store.down = True
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        waiting = await reported(case, lambda now: FAILED in now.needs_attention)
+        kept = keys_of(client).state("claim-7")
+        store.down = False
+        await retry_export(case, "omar", ["operations"])
+        return waiting, kept, await request.result(), keys_of(client).state("claim-7")
+
+    waiting, kept, ended, key = forgetting_on_temporal(
+        scenario, cases=QuicklyFailingExports, audit=store
+    )
+    assert (waiting.status, kept) == ("closed", "kept")
+    assert (ended.status, key) == ("forgotten", "destroyed")
+    case = [each for each in store.read("claim-7") if each["stream"] == "claim-7"]
+    assert case[-1]["lines"][-1] == "omar retried the audit export as operations"

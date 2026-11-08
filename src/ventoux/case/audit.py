@@ -37,6 +37,10 @@ type ActKind = Literal[
     "unassigned",
     "export failed",
     "export retried",
+    # A request to forget a case writes its own stream (brief, D77): proposed, answered, and once
+    # the case has ended, its key destroyed.
+    "forget proposed",
+    "key destroyed",
 ]
 
 # What the engine decided, as an auditor asks about it (brief, D76).

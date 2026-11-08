@@ -69,6 +69,7 @@ from ventoux.temporal.forget import (
 )
 from ventoux.temporal.sandbox import SANDBOX
 from ventoux.temporal.worker import case_worker
+from ventoux.tooling.audit import AuditStore
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
 # uses from the development setup is passed through, imported once and shared (as in 8c's tests).
@@ -100,9 +101,10 @@ def on_temporal[T](
     scenario: Callable[[Client], Awaitable[T]],
     activities: Mapping[str, Activity] = FAKES,
     cases: type[CaseWorkflow] = DevelopmentCases,
+    audit: AuditStore | None = None,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a case worker serving
-    `activities` and requests to forget."""
+    `activities` and requests to forget; its records go to `audit`, else a fresh store."""
 
     async def go() -> T:
         async with (
@@ -116,7 +118,7 @@ def on_temporal[T](
                 activities,
                 forget=DevelopmentForget,
                 activity_executor=threads,
-                audit=development_audit(),
+                audit=audit or development_audit(),
             ),
             Worker(
                 environment.client,
