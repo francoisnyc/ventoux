@@ -5,9 +5,9 @@ Pydantic: each class lists its fields with their types, and `model_validate` che
 them, saying every problem with its path. `extra="forbid"` refuses a key that isn't a field.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag
 
 
 class Closed(BaseModel):
@@ -38,16 +38,44 @@ class ReadRefused(Closed):
     at: list[str]  # each path a problem is at, as its line says it; "" is the root
 
 
-class Entry(Closed):
-    """One definition, what it is read against, and what validation must give."""
+def expected_shape(value: object) -> str:
+    """Which shape an `expected` is: refused when read if it says `read`, else a list of issues."""
+    return "refused" if isinstance(value, dict) and "read" in value else "issues"
+
+
+# Pydantic: a `Discriminator` picks the shape by calling `expected_shape`; each shape is `Tag`ged
+# with the name it returns, so a problem is said against that shape alone.
+Expected = Annotated[
+    Annotated[Issues, Tag("issues")] | Annotated[ReadRefused, Tag("refused")],
+    Discriminator(expected_shape),
+]
+
+
+class PackageEntry(Closed):
+    """A case with its plans and child cases, what it is read against, and what it must give."""
 
     name: str  # what the entry shows, said in each mismatch
-    kind: Literal["package"]  # a case with its plans and children
+    kind: Literal["package"]  # says which shape of entry this is
     case: str  # its case.json, relative to the suite's folder
     plans: list[str]  # its plans' files
     cases: dict[str, str]  # its child cases, by reference: `repair@1`
     catalog: str  # the catalog file it is read against, by name: `development`
-    expected: Issues | ReadRefused  # what validation must give
+    expected: Expected  # what validation must give
+
+
+class PlanEntry(Closed):
+    """A plan alone, what it is read against, and what it must give."""
+
+    name: str  # what the entry shows, said in each mismatch
+    kind: Literal["plan"]  # says which shape of entry this is
+    plan: str  # its file, relative to the suite's folder
+    catalog: str  # the catalog file it is read against, by name: `development`
+    expected: Expected  # what validation must give
+
+
+# Pydantic: `Field(discriminator="kind")` picks the shape by the entry's `kind`, so a problem is said
+# against that shape alone.
+Entry = Annotated[PackageEntry | PlanEntry, Field(discriminator="kind")]
 
 
 class Suite(Closed):
@@ -55,3 +83,15 @@ class Suite(Closed):
 
     engine: int  # the engine version whose validation it states (brief, D51)
     entries: list[Entry]
+
+
+def path_of(loc: tuple[int | str, ...]) -> str:
+    """Where a problem is in `suite.json`, as it is written: `entries.0.expected.issues.0.code`.
+    Pydantic's `loc` also names the shape it picked, an entry's kind after `entries.N` and the
+    shape of `expected` after it; neither is in the file, so both are left out."""
+    parts = [str(part) for part in loc]
+    if parts[:1] == ["entries"] and len(parts) > 2:
+        del parts[2]  # the entry's kind: `package` or `plan`
+    if "expected" in parts and parts.index("expected") + 1 < len(parts):
+        del parts[parts.index("expected") + 1]  # the shape of `expected`: `issues` or `refused`
+    return ".".join(parts)

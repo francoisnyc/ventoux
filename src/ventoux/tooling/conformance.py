@@ -20,11 +20,13 @@ from pydantic import ValidationError
 
 from ventoux.case.checked import issues_of
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.case.releases import package, read_json
+from ventoux.case.releases import PackageRefused, package, read_json
 from ventoux.core.catalog import Catalog
+from ventoux.core.plan import PlanInvalid, parse_plan
 from ventoux.core.promise import promise_of
+from ventoux.core.validate import validate
 from ventoux.tooling.deployment import DEVELOPMENT, catalog_named
-from ventoux.tooling.suite import Entry, Issues, Suite
+from ventoux.tooling.suite import Entry, Issues, PackageEntry, PlanEntry, Suite, path_of
 
 # The catalogs a suite names, each by the Python catalog its file is generated from. The suite's
 # data names a catalog file, never a Python module: this map is the runner's.
@@ -44,6 +46,11 @@ class SuiteUnreadable(Exception):
     """A suite that can't be read as the format says: it can't be run at all."""
 
 
+class BrokenEntry(Exception):
+    """An entry whose files read but can't be put together as a package (a plan missing, one given
+    twice): those refusals have no path or code, so the entry is broken, never a result."""
+
+
 def catalog_data(catalog: Catalog) -> dict[str, Any]:
     """`catalog` as data, for an implementation that can't read Python: each contract as `ventoux
     promises` writes it, by reference."""
@@ -57,22 +64,43 @@ def read_suite(folder: Path) -> Suite:
     try:
         return Suite.model_validate(json.loads((folder / "suite.json").read_text()))
     except ValidationError as error:
-        problems = "\n".join(
-            f"{'.'.join(str(part) for part in e['loc'])}: {e['msg']}" for e in error.errors()
-        )
-        raise SuiteUnreadable(f"{folder / 'suite.json'} can't be read as a suite:\n{problems}")
+        problems = "\n".join(f"{path_of(e['loc'])}: {e['msg']}" for e in error.errors())
+        raise SuiteUnreadable(
+            f"{folder / 'suite.json'} can't be read as a suite:\n{problems}"
+        ) from None
 
 
 def given(entry: Entry, folder: Path) -> list[Found] | RefusedAt:
     """What this engine gives for `entry`, a suite's entry whose files are in `folder`: the issues
-    of the one check (`issues_of`), or where its definition is refused when read."""
+    of the check `ventoux check` makes, or where its definition is refused when read."""
     catalog = catalog_named(CATALOGS[entry.catalog], None)
+    if isinstance(entry, PlanEntry):
+        return plan_given(entry, folder, catalog)
+    return package_given(entry, folder, catalog)
+
+
+def plan_given(entry: PlanEntry, folder: Path, catalog: Catalog) -> list[Found] | RefusedAt:
+    """A plan alone: read, then checked as a package's plans are (layer 3)."""
+    try:
+        plan = parse_plan(read_json((folder / entry.plan).read_text(), entry.plan))
+    except PlanInvalid as invalid:
+        return RefusedAt(invalid.paths)
+    return [(issue.path, issue.code, issue.severity) for issue in validate(plan, catalog)]
+
+
+def package_given(entry: PackageEntry, folder: Path, catalog: Catalog) -> list[Found] | RefusedAt:
+    """A package: its case read, then put together with its plans and checked by `issues_of`, the
+    one check `ventoux check` and `ventoux release` refuse on (brief, D50)."""
     text = (folder / entry.case).read_text()
     try:
         parse_case(read_json(text, entry.case))
     except CaseInvalid as invalid:
         return RefusedAt(invalid.paths)
-    released = package(text, [])
+    plans = [(folder / plan).read_text() for plan in entry.plans]
+    try:
+        released = package(text, plans)
+    except PackageRefused as refused:
+        raise BrokenEntry(f"a broken entry, not a package: {refused}") from None
     return [(issue.path, issue.code, issue.severity) for issue in issues_of(released, catalog)]
 
 
@@ -81,7 +109,12 @@ def mismatches(folder: Path) -> list[str]:
     and both sides. Empty: the engine conforms."""
     found: list[str] = []
     for entry in read_suite(folder).entries:
-        found += [f"{entry.name}: {line}" for line in differences(entry, given(entry, folder))]
+        # Every entry is run, whatever the others give: one broken entry never hides another.
+        try:
+            lines = differences(entry, given(entry, folder))
+        except BrokenEntry as broken:
+            lines = [str(broken)]
+        found += [f"{entry.name}: {line}" for line in lines]
     return found
 
 

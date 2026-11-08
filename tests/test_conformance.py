@@ -105,7 +105,7 @@ def test_an_expected_issue_carrying_a_message_is_refused_since_wording_is_never_
     shutil.copy(CLOSED_EARLY, suite / "cases")
     with pytest.raises(SuiteUnreadable) as refused:
         mismatches(suite)
-    assert "entries.0.expected.Issues.issues.0.message: Extra inputs are not permitted" in str(
+    assert "entries.0.expected.issues.0.message: Extra inputs are not permitted" in str(
         refused.value
     )
 
@@ -152,3 +152,86 @@ def test_a_definition_refused_at_another_path_is_a_mismatch(tmp_path: Path) -> N
             "refused at steps.review.automatic"
         )
     ]
+
+
+PACKAGE = ROOT / "examples" / "packages" / "refund"  # a case with a plan step, and its plan
+
+
+def with_package(suite: Path) -> Path:
+    """`suite` with the refund package's case and its plan."""
+    shutil.copy(PACKAGE / "case.json", suite / "cases" / "refund-package.json")
+    (suite / "plans").mkdir(exist_ok=True)
+    shutil.copy(PACKAGE / "plans" / "refund-order.json", suite / "plans")
+    return suite
+
+
+def package_entry(plans: list[str]) -> dict[str, Any]:
+    return {
+        **refund_entry({"issues": []}),
+        "name": "the refund package",
+        "case": "cases/refund-package.json",
+        "plans": plans,
+    }
+
+
+def test_a_package_is_read_with_its_plans_as_the_one_check_reads_it(tmp_path: Path) -> None:
+    suite = with_package(a_suite(tmp_path, package_entry(["plans/refund-order.json"])))
+    assert mismatches(suite) == []
+
+
+def test_a_package_that_cant_be_put_together_is_a_broken_entry_said_never_a_result(
+    tmp_path: Path,
+) -> None:
+    suite = with_package(a_suite(tmp_path, package_entry([])))
+    assert mismatches(suite) == [
+        (
+            "the refund package: a broken entry, not a package: refund-order@1 is run by a plan "
+            "step and isn't in plans/: add it"
+        )
+    ]
+
+
+def with_plans(suite: Path) -> Path:
+    """`suite` with the refund order plan, one sending `done` nowhere, and one unreadable."""
+    plan = json.loads((PACKAGE / "plans" / "refund-order.json").read_text())
+    (suite / "plans").mkdir(exist_ok=True)
+    (suite / "plans" / "refund-order.json").write_text(json.dumps(plan))
+    plan["states"]["check_order"]["on"]["done"] = "nowhere"
+    (suite / "plans" / "nowhere.json").write_text(json.dumps(plan))
+    plan["states"]["check_order"]["activity"] = 3
+    (suite / "plans" / "unreadable.json").write_text(json.dumps(plan))
+    return suite
+
+
+def plan_entry(name: str, expected: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "kind": "plan",
+        "plan": f"plans/{name}.json",
+        "catalog": "development",
+        "expected": expected,
+    }
+
+
+def test_a_plan_alone_is_read_and_checked_against_its_catalog(tmp_path: Path) -> None:
+    unreached = [
+        {"path": f"states.{state}", "code": "UNREACHABLE_STATE", "severity": "error"}
+        for state in ("approve_refund", "pay", "paid")
+    ]
+    nowhere = {"path": "states.check_order.on.done", "code": "UNKNOWN_TARGET", "severity": "error"}
+    suite = with_plans(
+        a_suite(
+            tmp_path,
+            plan_entry("refund-order", {"issues": []}),
+            plan_entry("nowhere", {"issues": [nowhere, *unreached]}),
+            plan_entry("unreadable", {"read": "refused", "at": ["states.check_order.activity"]}),
+        )
+    )
+    assert mismatches(suite) == []
+
+
+def test_a_plan_entry_is_compared_as_a_package_is(tmp_path: Path) -> None:
+    suite = with_plans(a_suite(tmp_path, plan_entry("nowhere", {"issues": []})))
+    assert mismatches(suite)[0] == (
+        "nowhere: given states.approve_refund UNREACHABLE_STATE (error), not expected"
+    )
