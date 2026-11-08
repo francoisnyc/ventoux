@@ -427,3 +427,48 @@ def test_the_https_transport_sends_the_token_only_to_vault_and_never_says_it(
     said.append(repr(recording))
     for each in [*said, caplog.text]:
         assert TOKEN not in each
+
+
+def test_a_keys_state_is_read_only_from_vaults_answer() -> None:
+    # Kept, destroyed, never made: each said only when Vault answered so. The mark says destroyed
+    # even with the key still there (a destroy cut short); anything else is unavailable, never
+    # read as forgotten or never made (brief, D32) (brief, D78).
+    assert vault(no_mark(), key()).state("claim-7") == "kept"
+    assert vault(no_mark(), no_key()).state("claim-7") == "never made"
+    assert vault(marked()).state("claim-7") == "destroyed"
+    for kind, (answer, said) in unavailable("claim-7").items():
+        for at, asked in enumerate([no_mark(), key()]):
+            keys = vault(*[no_mark(), key()][:at], replace(asked, answer=answer))
+            with pytest.raises(KeyUnavailable) as failed:
+                keys.state("claim-7")
+            assert str(failed.value) == said, (kind, at)
+
+
+def test_an_answer_of_another_shape_is_unavailable_never_a_value() -> None:
+    # A ciphertext that isn't text, or a plaintext that isn't base64 (`TWFu!` reads as `Man` to a
+    # decoder that skips what it can't read), is an answer Ventoux can't read: never sealed or
+    # opened as something else (brief, D78).
+    said = f"the key service at {ADDRESS} gave an answer Ventoux can't read for claim-7"
+    bound = b64("claim-7/sensitive/0")
+    encrypt = {"plaintext": b64(VALUE), "associated_data": bound}
+    sealing = Exchange(
+        "POST", f"/v1/transit/encrypt/{NAME}", encrypt, (200, {"data": {"ciphertext": 7}})
+    )
+    with pytest.raises(KeyUnavailable) as failed:
+        vault(no_mark(), key(), sealing).seal("claim-7", VALUE.encode(), "sensitive/0")
+    assert str(failed.value) == said
+    decrypt = {"ciphertext": SEALED, "associated_data": bound}
+    opening = Exchange(
+        "POST",
+        f"/v1/transit/decrypt/{NAME}",
+        decrypt,
+        (200, {"data": {"plaintext": "TWFu!"}}),
+    )
+    with pytest.raises(KeyUnavailable) as failed:
+        vault(no_mark(), key(), opening).open("claim-7", SEALED.encode(), "sensitive/0")
+    assert str(failed.value) == said
+    # A key's configuration missing a setting is unreadable too, never taken as allowed.
+    partial = Exchange("GET", f"{KEYS}/{NAME}", None, (200, {"data": {"type": "aes256-gcm96"}}))
+    with pytest.raises(KeyUnavailable) as failed:
+        vault(no_mark(), partial).seal("claim-7", VALUE.encode(), "sensitive/0")
+    assert str(failed.value) == said
