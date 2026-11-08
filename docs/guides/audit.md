@@ -103,25 +103,41 @@ stream in order. `FileAudit` is the development store; in
 production it is yours (a database table, a bucket), written to that shape. A case worker without
 a store is refused: a case would run with no trail.
 
-**Cases export from engine version 3.** A case opened by an earlier version of Ventoux decides and
-replays as it always did, and exports nothing: its report says `no audit export: opened at engine
-2`, and `ventoux environment check` lists such cases while they are open. Migrating one to engine 3
-starts its export there; its first record says that what came before was not recorded.
+**Cases export from engine version 3,** the version new cases open at. A case opened by an earlier
+version of Ventoux decides and replays as it always did, and exports nothing. Migrating one to
+engine 3 starts its export there; its first record says that what came before was not recorded.
 
 ## Written once, never lost
 
 The case writes its records through an activity the worker registers (never a contract a definition
-could call), after each decision, oldest first. So:
+could call), after each decision, oldest first. Each record's number comes from a counter the case
+keeps, which never goes back, even once written records have left its state. So:
 
 - **A retried write duplicates nothing:** the same records carry the same IDs.
 - **Nothing is skipped:** a record is written only after every record before it. A store that
   holds `claim-7/40` and is given `claim-7/42` refuses it.
 - **A store that is down doesn't stop the case.** The case goes on deciding; its records wait in
-  its state, in order, and Temporal retries the write. The case view says so:
-  `audit export waiting: attempt 4`. After the write's retries the case **needs attention**
-  (`audit export failed: look at the store, then retry`), as any failed step does (D17).
+  its state, in order, and Temporal retries the write, 10 times, waiting at most 5 minutes
+  between tries. Then the case **needs attention** (`audit export failed: look at the store, then
+  retry the export`), as any failed step does (D17). Once the store is back, an operator retries
+  it:
+
+  ```python
+  from ventoux.temporal.cases import retry_export
+
+  await retry_export(case, by="omar", roles=["operations"])
+  ```
+
+  Only an operating role may (D26), as for a step's retry.
+- **Never more waiting than a switch can carry.** Records waiting are measured as the export would
+  write them. Past 256 KB the case **holds**: it decides nothing new until the export catches up,
+  each answer or event sent to it waiting its turn, and says so (`the audit export is 256 KB
+  behind: the case decides nothing until it is written`). Nothing is dropped, and nothing is
+  decided without its record.
 - **A case doesn't close with records unwritten.** Its last records are written before it ends,
-  so the export is complete before Temporal's retention starts counting.
+  so the export is complete before Temporal's retention starts counting. A close never waits on
+  anything but the store: a person's close, a forgetting, or a parent closing its child each
+  finish once the export is written.
 - **Known limit: a terminated case.** An admin who terminates a case's workflow (D19) ends it with
   whatever it hadn't written yet. Keep that access small and audited.
 
@@ -167,9 +183,13 @@ for line in read_audit(store, "claim-7", roles=["claims-officer"], keys=keys):
 
 Ventoux never deletes from the store. How long you keep it is yours, as Temporal's retention is.
 
-When a case is forgotten (D32), the request writes its own stream to the export
-(`claim-7/forget`: who proposed it, who approved it, the case closed, the key destroyed), so the
-act of forgetting is in the trail too. After that, the case's export still says:
+When a case is forgotten (D32), the order is **close, export, then destroy:** the case closes as
+forgotten and writes every record, sealed, before it ends; only then is its key destroyed, so
+nothing is left that could no longer be sealed. With the store down at that moment, the case stays
+closing and needs attention, and the request waits, saying `closing the case: its audit export is
+behind`; the key stays until the export is written. The request writes its own stream to the
+export (`claim-7/forget`: who proposed it, who approved it, the case closed, the key destroyed),
+so the act of forgetting is in the trail too. After that, the case's export still says:
 
 - every decision, who made it, in which role, under which rule and release, and when;
 - every fact each decision rested on, **by name and source**;
@@ -233,6 +253,7 @@ tests replay a model's (D62): a request the recording doesn't hold is refused, s
 | Refused when | Example |
 |---|---|
 | a case worker has no audit store | `a case worker needs an audit store: give case_worker audit=…` |
+| the export is retried by someone without an operating role | `the audit export is retried by an operating role (operations), and ana has support` |
 | a record holds a sensitive value in clear | `audit record claim-7/41 holds national_id, a sensitive field, in clear: nothing was written` |
 | a record skips one | `audit record claim-7/42 can't be kept: claim-7/41 is missing` |
 | a record's ID is kept with other content | `audit record claim-7/41 is already kept, with other content` |
@@ -243,16 +264,18 @@ tests replay a model's (D62): a request the recording doesn't hold is refused, s
 
 ## Design notes: what writing this revealed
 
-Decided in layer 19's design note (`docs/layers/19-audit-keys.md`), answered 2026-11-07 as
-recommended; this guide was changed to match.
+Decided in layer 19's design note (`docs/layers/19-audit-keys.md`), answered 2026-11-07 (19a) and
+2026-11-08 (19b) as recommended; this guide was changed to match.
 
 1. **The engine had no structured decisions:** `CaseState.history` is lines of text. Records are
    made in `case`, one per act, beside the lines (brief, D76).
 2. **The export carries values,** in clear where not sensitive, sealed where sensitive, and is
-   filtered where read (D76).
-3. **A store that is down** lets the case go on but never close with records unwritten (D77).
-4. **"Never made again" on Vault** is a mark in Vault's key-value engine, written before the key
-   is deleted (D78).
-5. **No client library:** Vault over HTTPS with the standard library (D78).
-6. **A parent terminated with a child still running, then forgotten** (carried from layer 18d)
-   stays a known limit, for layer 20's deployment guide.
+   filtered where read (D76, D77).
+3. **A store that is down** lets the case go on but never close with records unwritten; past a
+   bound it holds (D77).
+4. **Forgetting:** close, export, then destroy (D77).
+5. **"Never made again" on Vault** is a mark in Vault's key-value engine, written before the key
+   is deleted (19c).
+6. **No client library:** Vault over HTTPS with the standard library (19c).
+7. **A parent terminated with a child still running, then forgotten** (carried from layer 18d)
+   stays a known limit.
