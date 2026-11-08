@@ -31,6 +31,13 @@ class KeyRefused(Exception):
     """A key the provider won't make or use: why."""
 
 
+class KeyUnavailable(Exception):
+    """A key the provider can't give now: the key service unreachable, timing out, refusing
+    Ventoux's token, or answering something it can't read. Never final: what meets it is retried
+    until the service answers, and it is never read as a key destroyed or never made (brief, D17)
+    (brief, D78)."""
+
+
 class KeyProvider(Protocol):
     """Makes a case's key once, seals and opens with it, and destroys it when the case is
     forgotten (brief, D15). `part` names where the data sits in its payload (`sensitive/0`), so

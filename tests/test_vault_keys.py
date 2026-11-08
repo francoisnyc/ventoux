@@ -5,14 +5,32 @@ reaches Vault, but the one marked to run where `vault` is installed. See
 docs/layers/19-audit-keys.md (19c), docs/guides/audit.md and brief, D78.
 """
 
+import base64
 import inspect
+import json
+import logging
+import socket
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
-from ventoux.tooling.keys import KeyRefused
-from ventoux.tooling.vault import Exchange, Recording, RecordingRefused, VaultKeys, vault_name
+from ventoux.tooling.keys import KeyRefused, KeyUnavailable
+from ventoux.tooling.vault import (
+    Answer,
+    Exchange,
+    Recording,
+    RecordingRefused,
+    TimedOut,
+    Unreachable,
+    VaultKeys,
+    vault_name,
+)
 
 ADDRESS = "https://vault.internal:8200"
 NAME = "ventoux-claim-7"  # claim-7's key, as Vault names it
@@ -201,3 +219,211 @@ def test_a_key_is_made_once_never_able_to_leave_vault() -> None:
         )
     with pytest.raises(KeyRefused):
         vault().create("")  # no name: refused before Vault is asked
+
+
+def b64(text: str) -> str:
+    return base64.b64encode(text.encode()).decode()
+
+
+VALUE = '"1 85 05 78 006 084 36"'  # a national ID, as the converter writes it
+SEALED = "vault:v1:8SDd3WHDOjf7mq69CyCqYjBXAiQQAVZRkFM13ok481zoCmHnSeDX9vyf7w=="
+
+
+def test_a_value_is_sealed_for_its_place_and_opens_only_there() -> None:
+    # Vault seals and opens; the key never leaves it. The case and the part are sent as the
+    # associated data, as FileKeys binds them, so a value moved to another place doesn't open
+    # there: Vault refuses it, and so does Ventoux, never guessing (brief, D31) (brief, D78).
+    bound = b64("claim-7/sensitive/0")
+    sealing = Exchange(
+        "POST",
+        f"/v1/transit/encrypt/{NAME}",
+        {"plaintext": b64(VALUE), "associated_data": bound},
+        (200, {"data": {"ciphertext": SEALED, "key_version": 1}}),
+    )
+    assert vault(no_mark(), key(), sealing).seal("claim-7", VALUE.encode(), "sensitive/0") == (
+        SEALED.encode()
+    )
+    opening = Exchange(
+        "POST",
+        f"/v1/transit/decrypt/{NAME}",
+        {"ciphertext": SEALED, "associated_data": bound},
+        (200, {"data": {"plaintext": b64(VALUE)}}),
+    )
+    keys = vault(no_mark(), key(), opening)
+    assert keys.open("claim-7", SEALED.encode(), "sensitive/0") == VALUE.encode()
+    moved = Exchange(
+        "POST",
+        f"/v1/transit/decrypt/{NAME}",
+        {"ciphertext": SEALED, "associated_data": b64("claim-7/sensitive/1")},
+        (400, {"errors": ["cipher: message authentication failed"]}),
+    )
+    with pytest.raises(KeyRefused) as refused:
+        vault(no_mark(), key(), moved).open("claim-7", SEALED.encode(), "sensitive/1")
+    assert str(refused.value) == (
+        "a sealed part of claim-7 doesn't open: it was damaged, or sealed for another case or place"
+    )
+
+
+def unavailable(name: str) -> dict[str, tuple[Answer | Exception, str]]:
+    """Each way Vault can fail to answer, as the transport meets it, and what the case is told."""
+    return {
+        "unreachable": (
+            Unreachable("connection refused"),
+            (
+                f"the key service at {ADDRESS} can't be reached: {name}'s sensitive values can't "
+                "be read or written now"
+            ),
+        ),
+        "timing out": (
+            TimedOut(),
+            (
+                f"the key service at {ADDRESS} didn't answer within 10 seconds: {name}'s "
+                "sensitive values can't be read or written now"
+            ),
+        ),
+        "the token refused": (
+            (403, {"errors": ["permission denied"]}),
+            f"the key service refused Ventoux's token for {name}: check the token's policy",
+        ),
+        "a status it doesn't expect": (
+            (503, {"errors": ["Vault is sealed"]}),
+            f"the key service at {ADDRESS} gave an answer Ventoux can't read for {name}",
+        ),
+        "a body it can't read": (
+            (200, {"warnings": []}),
+            f"the key service at {ADDRESS} gave an answer Ventoux can't read for {name}",
+        ),
+    }
+
+
+def test_vault_not_answering_is_unavailable_never_a_refusal() -> None:
+    # Not now, never final: unreachable, timing out, refusing the token, or answering something
+    # it can't read, at any request of any use. A workflow task or an activity meeting it is
+    # retried until Vault answers; never read as "never made" or "destroyed" (brief, D17)
+    # (brief, D78).
+    bound = b64("claim-7/sensitive/0")
+    encrypt = {"plaintext": b64(VALUE), "associated_data": bound}
+    decrypt = {"ciphertext": SEALED, "associated_data": bound}
+    uses: dict[str, tuple[list[Exchange], Callable[[VaultKeys], object]]] = {
+        "create": (
+            [no_mark(), no_key(), Exchange("POST", f"{KEYS}/{NAME}", MADE, (204, {}))],
+            lambda keys: keys.create("claim-7"),
+        ),
+        "seal": (
+            [no_mark(), key(), Exchange("POST", f"/v1/transit/encrypt/{NAME}", encrypt, (200, {}))],
+            lambda keys: keys.seal("claim-7", VALUE.encode(), "sensitive/0"),
+        ),
+        "open": (
+            [no_mark(), key(), Exchange("POST", f"/v1/transit/decrypt/{NAME}", decrypt, (200, {}))],
+            lambda keys: keys.open("claim-7", SEALED.encode(), "sensitive/0"),
+        ),
+    }
+    for use, (asked, call) in uses.items():
+        for kind, (answer, said) in unavailable("claim-7").items():
+            for at, failing in enumerate(asked):  # each request in turn, those before answered
+                if (use, at, kind) == ("create", 2, "a body it can't read"):
+                    continue  # making a key reads nothing back: Vault's 200 says it was made
+                keys = vault(*asked[:at], replace(failing, answer=answer))
+                with pytest.raises(KeyUnavailable) as failed:
+                    call(keys)
+                assert str(failed.value) == said, (use, kind, at)
+
+
+class Vault(BaseHTTPRequestHandler):
+    """A stand-in for Vault on this machine, for the HTTPS transport's own test: it notes each
+    request, its token, and answers by path."""
+
+    seen: ClassVar[list[tuple[str, str, str | None]]] = []
+
+    def do_GET(self) -> None:
+        Vault.seen.append(("GET", self.path, self.headers.get("X-Vault-Token")))
+        if "/moved/" in self.path:
+            self.send_response(307)
+            self.send_header("Location", "http://127.0.0.1:9/v1/elsewhere")
+            self.end_headers()
+            return
+        answer = json.dumps({"errors": []}).encode()
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(answer)))
+        self.end_headers()
+        self.wfile.write(answer)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass  # quiet: a test's server
+
+
+@contextmanager
+def serving(handler: type[BaseHTTPRequestHandler]) -> Iterator[str]:
+    """A server on this machine, on a free port, for the length of the block: its address."""
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@contextmanager
+def silent() -> Iterator[str]:
+    """A port that accepts and never answers, for the length of the block: its address."""
+    listening = socket.socket()
+    listening.bind(("127.0.0.1", 0))
+    listening.listen()
+    try:
+        yield f"http://127.0.0.1:{listening.getsockname()[1]}"
+    finally:
+        listening.close()
+
+
+def test_the_https_transport_sends_the_token_only_to_vault_and_never_says_it(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The token goes in Vault's header, read as the call is made; a redirect is never followed,
+    # so it can't be carried elsewhere; a port that refuses, or a Vault that never answers, is
+    # unavailable. And the token is in no message, repr, log or recording (brief, D62) (brief,
+    # D78).
+    monkeypatch.setenv("VAULT_TOKEN", TOKEN)
+    caplog.set_level(logging.DEBUG)
+    said: list[str] = []
+    Vault.seen.clear()
+    with serving(Vault) as address:
+        keys = VaultKeys(address, "transit", "secret")
+        assert keys.state("claim-7") == "never made"
+        assert Vault.seen == [
+            ("GET", f"{MARKS}/{NAME}", TOKEN),
+            ("GET", f"{KEYS}/{NAME}", TOKEN),
+        ]
+        moved = VaultKeys(address, "transit", "secret/moved")
+        with pytest.raises(KeyUnavailable) as failed:
+            moved.state("claim-7")
+        assert str(failed.value) == (
+            f"the key service at {address} gave an answer Ventoux can't read for claim-7"
+        )
+        said.append(str(failed.value))
+        assert len(Vault.seen) == 3  # the redirect not followed
+        said += [repr(keys), repr(vars(keys)), repr(vars(keys.transport))]
+    with serving(Vault) as address:
+        pass  # a port nothing listens on any more
+    with pytest.raises(KeyUnavailable) as failed:
+        VaultKeys(address, "transit", "secret").state("claim-7")
+    assert str(failed.value) == (
+        f"the key service at {address} can't be reached: claim-7's sensitive values can't be read "
+        "or written now"
+    )
+    said.append(str(failed.value))
+    with silent() as address, pytest.raises(KeyUnavailable) as failed:
+        VaultKeys(address, "transit", "secret", timeout=0.2).state("claim-7")
+    assert str(failed.value) == (
+        f"the key service at {address} didn't answer within 0.2 seconds: claim-7's sensitive "
+        "values can't be read or written now"
+    )
+    said.append(str(failed.value))
+    recording = Recording([no_mark(), no_key()])
+    VaultKeys(ADDRESS, "transit", "secret", transport=recording).state("claim-7")
+    said.append(repr(recording))
+    for each in [*said, caplog.text]:
+        assert TOKEN not in each

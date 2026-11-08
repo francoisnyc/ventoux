@@ -8,13 +8,18 @@ Vault's answers in tests.
 See docs/layers/19-audit-keys.md (19c) and docs/guides/audit.md.
 """
 
+import base64
+import binascii
+import json
 import os
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-from ventoux.tooling.keys import FORGOTTEN, KeyRefused
+from ventoux.tooling.keys import FORGOTTEN, KeyRefused, KeyState, KeyUnavailable, place
 
 # What Vault answered: its HTTP status, and its JSON body (empty when it had none).
 type Answer = tuple[int, dict[str, Any]]
@@ -54,7 +59,7 @@ class Exchange:
     method: str  # GET, POST or DELETE
     path: str  # under the address: `/v1/transit/keys/ventoux-claim-7`
     body: dict[str, Any] | None  # the JSON sent, or None
-    answer: Answer  # what Vault answered
+    answer: Answer | Exception  # what Vault answered, or what the transport met instead
 
 
 @dataclass
@@ -75,6 +80,8 @@ class Recording:
                 "what asked"
             )
         self.asked.append(held)
+        if isinstance(held.answer, Exception):
+            raise held.answer  # Vault unreachable, or timing out, as recorded
         return held.answer
 
 
@@ -120,45 +127,150 @@ class VaultKeys:
         in GCM. Never made again: refused for a case with a key, or with a mark, so a reused ID
         never inherits or remakes a key (brief, D31)."""
         name = vault_name(case)
-        made_already = f"a key was already made for {case}: open the case under a new ID"
-        status, _ = self.transport("GET", self.mark_path(name), None)
-        if status == 200:
-            raise KeyRefused(made_already)
-        status, _ = self.transport("GET", self.key_path(name), None)
-        if status == 200:
-            raise KeyRefused(made_already)
+        if self.marked(case, name) or self.key_config(case, name) is not None:
+            raise KeyRefused(f"a key was already made for {case}: open the case under a new ID")
         settings = {"type": KEY_TYPE, "exportable": False, "allow_plaintext_backup": False}
-        self.transport("POST", self.key_path(name), settings)
+        self.ask(case, "POST", self.key_path(name), settings, {200, 204})
+
+    def state(self, case: str) -> KeyState:
+        """Whether `case`'s key is kept, was destroyed (its mark), or was never made: each only
+        on Vault's answer. Anything else is `KeyUnavailable`, never read as either (brief, D78)."""
+        name = vault_name(case)
+        if self.marked(case, name):
+            return "destroyed"
+        return "never made" if self.key_config(case, name) is None else "kept"
 
     def seal(self, case: str, data: bytes, part: str) -> bytes:
-        self.usable(case)
-        raise NotImplementedError
+        """`data` encrypted by Vault with `case`'s key, bound to its place: Vault's ciphertext
+        (`vault:v1:…`), as bytes."""
+        name = self.usable(case)
+        sent = {"plaintext": as_base64(data), "associated_data": as_base64(place(case, part))}
+        path = f"/v1/{self.transit_mount}/encrypt/{name}"
+        _, body = self.ask(case, "POST", path, sent, {200})
+        return self.text(case, body, "data", "ciphertext").encode()
 
     def open(self, case: str, data: bytes, part: str) -> bytes:
-        self.usable(case)
-        raise NotImplementedError
+        """What `seal` encrypted for `case` at `part`; refused for anything else."""
+        name = self.usable(case)
+        sent = {"ciphertext": data.decode(), "associated_data": as_base64(place(case, part))}
+        path = f"/v1/{self.transit_mount}/decrypt/{name}"
+        status, body = self.ask(case, "POST", path, sent, {200, 400})
+        if status == 400:
+            # Vault couldn't open it for this place: fail closed, never a guess at what it held.
+            raise KeyRefused(
+                f"a sealed part of {case} doesn't open: it was damaged, or sealed for another "
+                "case or place"
+            )
+        try:
+            return base64.b64decode(self.text(case, body, "data", "plaintext"), validate=True)
+        except binascii.Error:
+            raise self.unreadable(case) from None
 
     def usable(self, case: str) -> str:
-        """The name of `case`'s key, once Vault says it may be used: no mark, and a key."""
+        """The name of `case`'s key, once Vault says it may be used: no mark, and a key that
+        can't leave it, of the type Ventoux makes."""
         name = vault_name(case)
-        status, _ = self.transport("GET", self.mark_path(name), None)
-        if status == 200:
+        if self.marked(case, name):
             raise KeyRefused(
                 f"the key of {case} {FORGOTTEN}: its sensitive values can't be read or written"
             )
-        status, body = self.transport("GET", self.key_path(name), None)
-        if status == 404:
+        config = self.key_config(case, name)
+        if config is None:
             raise KeyRefused(
                 f"there is no key for {case}, so its sensitive values can't be read or written"
             )
-        refuse_leaving(case, body["data"])
+        refuse_leaving(case, config)
         return name
+
+    def marked(self, case: str, name: str) -> bool:
+        """Whether Vault holds `case`'s mark: it was forgotten."""
+        status, body = self.ask(case, "GET", self.mark_path(name), None, {200, 404})
+        if status == 404:
+            return False
+        # Only a mark as Ventoux writes it says the case was forgotten: never just any answer.
+        if not isinstance(self.read(case, body, "data", "data"), dict):
+            raise self.unreadable(case)
+        return True
+
+    def key_config(self, case: str, name: str) -> dict[str, Any] | None:
+        """The configuration of `case`'s key, as Vault holds it; None if it holds no key."""
+        status, body = self.ask(case, "GET", self.key_path(name), None, {200, 404})
+        if status == 404:
+            return None
+        config = self.read(case, body, "data")
+        settings = ("type", "exportable", "allow_plaintext_backup")
+        if not isinstance(config, dict) or not all(each in config for each in settings):
+            raise self.unreadable(case)
+        return config
+
+    def ask(
+        self,
+        case: str,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None,
+        expected: set[int],
+    ) -> Answer:
+        """Vault's answer to one request about `case`; `KeyUnavailable` for anything but an
+        answer with a status in `expected`: never read as a key destroyed or never made."""
+        try:
+            status, answer = self.transport(method, path, body)
+        except Unreachable:
+            raise KeyUnavailable(
+                f"the key service at {self.address} can't be reached: {self.now(case)}"
+            ) from None
+        except TimedOut:
+            raise KeyUnavailable(
+                f"the key service at {self.address} didn't answer within {self.timeout:g} "
+                f"seconds: {self.now(case)}"
+            ) from None
+        if status == 403:
+            raise KeyUnavailable(
+                f"the key service refused Ventoux's token for {case}: check the token's policy"
+            )
+        if status not in expected:
+            raise self.unreadable(case)
+        return status, answer
+
+    def read(self, case: str, body: dict[str, Any], *keys: str) -> Any:
+        """The value at `keys` in Vault's answer; `KeyUnavailable` if it isn't there."""
+        value: Any = body
+        for each in keys:
+            if not isinstance(value, dict) or each not in value:
+                raise self.unreadable(case)
+            value = value[each]
+        return value
+
+    def text(self, case: str, body: dict[str, Any], *keys: str) -> str:
+        """The text at `keys` in Vault's answer; `KeyUnavailable` if it isn't text."""
+        value = self.read(case, body, *keys)
+        if not isinstance(value, str):
+            raise self.unreadable(case)
+        return value
+
+    def unreadable(self, case: str) -> KeyUnavailable:
+        # Never what Vault said: an error's text is Vault's, and unread here.
+        return KeyUnavailable(
+            f"the key service at {self.address} gave an answer Ventoux can't read for {case}"
+        )
+
+    @staticmethod
+    def now(case: str) -> str:
+        return f"{case}'s sensitive values can't be read or written now"
 
     def key_path(self, name: str) -> str:
         return f"/v1/{self.transit_mount}/keys/{name}"
 
     def mark_path(self, name: str) -> str:
         return f"/v1/{self.marks_mount}/data/ventoux/forgotten/{name}"
+
+
+class Unreachable(Exception):
+    """The transport couldn't reach Vault: refused, reset, or no such host."""
+
+
+class TimedOut(Exception):
+    """Vault didn't answer within the transport's timeout."""
 
 
 KEY_TYPE = "aes256-gcm96"  # AES-256 in GCM: the part a value is sealed for binds as in FileKeys
@@ -208,4 +320,53 @@ class Https:
         self.timeout = timeout
 
     def __call__(self, method: str, path: str, body: dict[str, Any] | None) -> Answer:
-        raise NotImplementedError
+        token = os.environ.get("VAULT_TOKEN")
+        if not token:
+            raise KeyUnavailable(NO_TOKEN)  # unset since: said so, never asked without one
+        sent = None if body is None else json.dumps(body).encode()
+        request = urllib.request.Request(
+            self.address.rstrip("/") + path,
+            data=sent,
+            method=method,
+            headers={"X-Vault-Token": token, "Content-Type": "application/json"},
+        )
+        try:
+            with NEVER_REDIRECTED.open(request, timeout=self.timeout) as response:
+                return response.status, as_json(response.read())
+        except urllib.error.HTTPError as error:
+            # Vault's answer with an error's status (404, 403, 400): an answer, read as such.
+            return error.code, as_json(error.read())
+        except urllib.error.URLError as error:
+            # No connection made, even one that timed out connecting: Vault can't be reached.
+            raise Unreachable(type(error.reason).__name__) from None
+        except TimeoutError:
+            raise TimedOut() from None  # connected, and no answer in time
+        except OSError as error:  # a connection reset as Vault answered
+            raise Unreachable(type(error).__name__) from None
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is never followed: it would carry the token to another address. Its status
+    comes back as Vault's answer, which Ventoux doesn't expect, and says so."""
+
+    def redirect_request(self, *args: Any) -> None:
+        return None
+
+
+# The standard library's opener, following no redirect.
+NEVER_REDIRECTED = urllib.request.build_opener(NoRedirect())
+
+
+def as_json(data: bytes) -> dict[str, Any]:
+    """Vault's body as JSON; empty if it had none, or none Ventoux can read (said by the caller
+    when it needs what isn't there)."""
+    try:
+        parsed = json.loads(data) if data else {}
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def as_base64(data: bytes) -> str:
+    """`data` as Vault takes bytes in JSON: base64 text."""
+    return base64.b64encode(data).decode()
