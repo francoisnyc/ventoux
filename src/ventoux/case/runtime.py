@@ -43,7 +43,7 @@ from ventoux.case.approvals import (
 )
 from ventoux.case.assigning import assign, unassign
 from ventoux.case.assignment_rules import follow_rule
-from ventoux.case.audit import Decision
+from ventoux.case.audit import Decision, DecisionKind
 from ventoux.case.called import called
 from ventoux.case.claims import (
     ClaimRefused,
@@ -944,7 +944,7 @@ def answer_approval(
     role = judge_approval(case, catalog, state, approval.entry, approval.step, step, event)
     worded = as_worded(state, event)
     # What the approver saw: the approval's condition, then the inputs (brief, D11).
-    kind = "approved" if event.outcome == APPROVE else "rejected"
+    kind: DecisionKind = "approved" if event.outcome == APPROVE else "rejected"
     read = facts(state, [step.approval.when, *step.inputs.values()])
     rule = f"steps.{approval.step}.approval"
     state.deciding.append(
