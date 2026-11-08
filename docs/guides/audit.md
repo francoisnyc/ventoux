@@ -260,8 +260,26 @@ or `127.0.0.1`, for a development server.
 
 Give Ventoux's token a policy that allows only `ventoux-*` keys (creating, configuring,
 encrypting, decrypting, reading and deleting them) and reading and writing the marks under
-`ventoux/forgotten/`. Ventoux talks to Vault over HTTPS with the standard library: nothing to
-install.
+`ventoux/forgotten/`, never deleting one. For mounts named `transit` and `secret`:
+
+```hcl
+path "transit/keys/ventoux-*" {
+  capabilities = ["create", "read", "update", "delete"]
+}
+path "transit/encrypt/ventoux-*" {
+  capabilities = ["update"]
+}
+path "transit/decrypt/ventoux-*" {
+  capabilities = ["update"]
+}
+path "secret/data/ventoux/forgotten/ventoux-*" {
+  capabilities = ["create", "read", "update"]
+}
+```
+
+A token holding only this does everything Ventoux asks of Vault, and nothing more: it reads no
+other key, and can't delete a mark, so a forgotten case can't be unmarked with it. Ventoux talks
+to Vault over HTTPS with the standard library: nothing to install.
 
 **Why not a cloud KMS in v1.0:** a KMS never destroys a key at once. It schedules the deletion, 7 to
 30 days ahead, and the key can be restored until then. A case would be "forgotten" only weeks after

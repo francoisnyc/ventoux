@@ -642,3 +642,53 @@ def test_against_a_development_vault(tmp_path: Path, monkeypatch: pytest.MonkeyP
             keys.seal("claim-8", VALUE.encode(), "sensitive/0")
         with pytest.raises(KeyRefused, match="a key was already made for claim-8"):
             keys.create("claim-8")
+
+
+# The guide's policy for Ventoux's token, word for word (docs/guides/audit.md, "The production key
+# service: Vault"), for mounts named `transit` and `secret`.
+POLICY = """\
+path "transit/keys/ventoux-*" {
+  capabilities = ["create", "read", "update", "delete"]
+}
+path "transit/encrypt/ventoux-*" {
+  capabilities = ["update"]
+}
+path "transit/decrypt/ventoux-*" {
+  capabilities = ["update"]
+}
+path "secret/data/ventoux/forgotten/ventoux-*" {
+  capabilities = ["create", "read", "update"]
+}
+"""
+
+
+@pytest.mark.skipif(
+    VAULT is None, reason="runs only where vault is installed (a development Vault)"
+)
+def test_the_guides_policy_is_all_ventoux_needs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A token holding only the guide's policy opens, seals, forgets: everything Ventoux asks. And
+    # nothing else: no other key, and no deleting a mark, so a forgotten case can't be unmarked
+    # with Ventoux's token (brief, D19) (brief, D78).
+    assert POLICY in (Path(__file__).parent.parent / "docs" / "guides" / "audit.md").read_text()
+    monkeypatch.setenv("VAULT_TOKEN", DEVELOPMENT_TOKEN)
+    with development_vault(tmp_path) as address:
+        root = Https(address, 2)
+        assert root("PUT", "/v1/sys/policies/acl/ventoux", {"policy": POLICY})[0] in (200, 204)
+        status, body = root("POST", "/v1/auth/token/create", {"policies": ["ventoux"]})
+        assert status == 200, status
+        made = {"type": "aes256-gcm96", "exportable": False, "allow_plaintext_backup": False}
+        assert root("POST", "/v1/transit/keys/payroll", made)[0] in (200, 204)
+        monkeypatch.setenv("VAULT_TOKEN", body["auth"]["client_token"])  # Ventoux's own now
+        keys = VaultKeys(address, "transit", "secret")
+        keys.create("claim-7")
+        sealed = keys.seal("claim-7", VALUE.encode(), "sensitive/0")
+        assert keys.open("claim-7", sealed, "sensitive/0") == VALUE.encode()
+        keys.destroy("claim-7")
+        assert keys.state("claim-7") == "destroyed"
+        ventoux = Https(address, 2)
+        assert ventoux("GET", "/v1/transit/keys/payroll", None)[0] == 403
+        # Deleting a mark, its latest version or all of them: refused.
+        for path in (f"{MARKS}/{NAME}", f"/v1/secret/metadata/ventoux/forgotten/{NAME}"):
+            assert ventoux("DELETE", path, None)[0] == 403, path
