@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from cases.refund import refund
-from test_case import REFUND, with_check_order
+from test_case import REFUND, reworkable, with_check_order
 from test_change_requests import FORGETTERS, OPERATING, TYPED_WRONG, account_closed
 from test_change_requests import LARGE as LARGE_ORD_1
 from test_change_requests import PEOPLE as CHANGERS
@@ -28,11 +28,12 @@ from test_set import APPROVED, with_owed
 from test_set import FILE as WITH_FEE
 from test_set import PEOPLE as SET_PEOPLE
 
+from ventoux.case.admission import ProposalRefused
 from ventoux.case.audit import Act, Decision, Fact
 from ventoux.case.memory import CaseRun
 from ventoux.case.recording import record_refused
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered
+from ventoux.case.state import Answered, Proposed
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
@@ -89,6 +90,12 @@ def test_a_refused_act_is_one_record_saying_why_and_nothing_else_changes() -> No
     assert dataclasses.replace(after, audit=run.state.audit, history=run.state.history) == (
         run.state
     )
+    # A refused proposal names its step: the act gives it (brief, D76).
+    proposal = Proposed("pay", "sam", frozenset({"support"}), at=LATER)
+    with pytest.raises(ProposalRefused) as refusal:
+        decide(run.definition, CATALOG, run.state, proposal)
+    after = record_refused(run.definition, run.state, proposal, refusal.value)
+    assert after.audit[-1].decisions == [Decision("refused", step="pay", reason=str(refusal.value))]
 
 
 def test_the_quickstarts_small_refund_records_each_act_and_what_it_decided() -> None:
@@ -328,6 +335,21 @@ def test_a_change_request_says_what_it_changed_or_why_not() -> None:
     run = run_case(REFUND, LARGE_ORD_1, rejected, CHANGERS, engine=3)
     assert run.audit[-1].decisions == [
         Decision("rejected", entry="case.change#1", reason="lee rejected it")
+    ]
+    # Approved, but its field changed meanwhile: not applied, and refused, saying why.
+    reworked = [
+        *proposed,
+        propose("review", "sam"),
+        ("review#2", "approve", "sam", {"approved_amount": 300}),
+        ("case.change#1", "approve", "lee"),
+    ]
+    run = run_case(reworkable(), LARGE_ORD_1, reworked, CHANGERS, engine=3)
+    assert run.audit[-1].decisions == [
+        Decision(
+            "refused",
+            entry="case.change#1",
+            reason="approved_amount changed since it was proposed: propose it again",
+        )
     ]
     # A skip of a failed run, approved by another operator.
     skipped = [

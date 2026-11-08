@@ -1,6 +1,6 @@
 # Layer 19: Audit export and a production key provider
 
-Status: 2026-11-08, answered; 19a built (its promises and routes next). This note starts
+Status: 2026-11-08, answered; 19a built, its promises and routes checked. This note starts
 from `main` at `ff37fb9`, with layers 0 to 18 merged. The warm-up was asked and recorded (learning question 37). The guide
 was written first (curriculum step 2): `docs/guides/audit.md` describes the layer as if it worked;
 it was changed with the answers (listed at the end).
@@ -398,6 +398,71 @@ failure's own text, which never quotes a value (D30), and a failure's is its typ
   changed). That is how the routes were found; each has its own test.
 - **For 19b:** the Temporal driver still writes a refused act's bare line; it calls
   `record_refused` once cases open at 3 there.
+
+## Promises (19a)
+
+Each claim the note, D76 and the guide make about audit records, and the test that would fail if
+it weren't true. Tests are in `tests/test_audit_records.py`. Each was watched failing first or,
+for a pin of behaviour already built, failing under a mutation (said in each slice's commit).
+
+| Promise | Test |
+|---|---|
+| One record per act: the act as it came, the decisions it caused in order, its lines | `test_the_quickstarts_small_refund_records_each_act_and_what_it_decided`, `test_an_approval_that_starts_its_step_is_one_record` |
+| Each record keeps exactly the lines its act added; numbered from 1 with no gap; the history is unchanged | `test_each_record_keeps_exactly_the_lines_its_act_added` (seven routes), and the whole suite green |
+| Each record carries its time, its release and its engine version | `test_a_refused_act_is_one_record_saying_why_and_nothing_else_changes`, `test_the_quickstarts_small_refund_records_each_act_and_what_it_decided` |
+| A refused act is one record, `refused` with its reason, and nothing else changes; it names the entry as asked, a proposal its step | `test_a_refused_act_is_one_record_saying_why_and_nothing_else_changes` |
+| A decision names its rule and each fact it read, with its sources and value | `test_the_quickstarts_small_refund_records_each_act_and_what_it_decided`, `test_an_approval_that_starts_its_step_is_one_record`, `test_a_rule_that_sets_and_reaches_says_what_it_wrote_on_what_it_read` |
+| A start reads its condition, its approval's condition, then its inputs; `admitted` is an approval asked; an approval reads what the approver saw | `test_the_quickstarts_small_refund_records_each_act_and_what_it_decided`, `test_an_approval_that_starts_its_step_is_one_record` |
+| A sensitive value is never unwrapped in a record | `test_a_sensitive_value_is_never_unwrapped_in_a_record` |
+| A form value is recorded as the case file keeps it: wrapped only if sensitive | `test_a_form_value_is_recorded_as_the_case_file_keeps_it` |
+| A failure is recorded by its type, never its message; a retry says `retried` | `test_a_failure_is_recorded_by_its_type_and_a_retry_says_so` |
+| A rule's `set` says what it wrote on what it read; a milestone reached says by what | `test_a_rule_that_sets_and_reaches_says_what_it_wrote_on_what_it_read` |
+| A stop says what it stopped, by which firing or close, under which rule | `test_a_rules_stop_and_a_persons_close_say_what_they_stopped` |
+| A change request says what it changed (`edited`, `skipped`), or why not (`rejected`, `refused`) | `test_a_change_request_says_what_it_changed_or_why_not` |
+| Forgetting approved names both people | `test_forgetting_approved_is_recorded_with_both_people` |
+| A parent records its child's start and end; the child records its own; in memory it opens at its parent's engine | `test_a_child_case_is_started_and_read_by_its_parent_and_records_its_own` |
+| An event, a claim, a timer, a plan step, a proposal and a record shown are each recorded; a timer's start names its rule | `test_an_event_and_a_claim_are_acts_with_what_they_caused`, `test_a_timer_a_plan_a_proposal_and_a_record_shown_are_each_recorded` |
+| Records are made from engine 3 only; a migration to 3 says what came before wasn't recorded | `test_a_case_before_engine_3_records_nothing_until_it_migrates_to_it` |
+| No case opens on Temporal at a version above `ENGINE` | `test_temporal_case_release.py::test_a_draft_is_as_before`, `::test_the_release_and_engine_cross_continue_as_new` (fail with `KNOWN` in place of `OPENING`) |
+| Records cross continue-as-new as they were: wrapped values, exact decimals, what a decision wrote and reached | `test_records_cross_continue_as_new_as_they_were` |
+| A record is never renamed by a later migration | `test_records_keep_the_names_a_migration_later_changes` |
+
+**Not tested, said so:** an assignment, an unassignment and a give-back are mapped to acts as a
+claim is, and ran with records made in the experiment, but have no test of their own here; they
+decide nothing about the case, as a claim doesn't.
+
+## Routes checked before the pull request (19a)
+
+| Route | What it records | Test |
+|---|---|---|
+| the opening | `opened`, its values as kept, sensitive ones wrapped; what it started | the quickstart's test, the sensitive value's |
+| an answer | `answered` under its outcome's path; what it set, reached and started | the quickstart's, the approval's |
+| an approval | `admitted` when asked, `approved` or `rejected` on what the approver saw | the approval's |
+| an edit (D52) | `edited`, with what it wrote; `rejected` or `refused` | the change request's |
+| a skip (D52) | `skipped`, naming the run | the change request's |
+| a migration (D53) | `migrated`; from engine 2 to 3, saying records start there; names never rewritten | the engine test, the rename test |
+| an event (D41) | the act, with its payload; the wait it completes | the event's |
+| a rule (D38 to D44) | `set` with what it wrote, `reached`, `stopped`, `started` under `rules.…` | the rule's, the stop's, the timer's |
+| a timer (D44) | the act, naming its rule; what the rule did | the timer's |
+| a plan (D28) | `started` and `completed` for its step (its own events are 19b's) | the plan step's |
+| a child case (D74, D75) | the parent's `started` and `completed`; the child's own records | the child case's |
+| a close or a stop (D40) | `stopped` for each run, approval, firing or request it ends; `closed` | the stop's |
+| a retry (D26) | `retried`, then what started | the failure's |
+| forgetting (D32) | the act by its approver; `forgotten` naming both | the forgetting test |
+| a refusal | `refused`, its reason; nothing else | the refusal's |
+| continue-as-new (D27) | every record not yet exported, as it was | the crossing test |
+
+**State keyed by a step's name:** none. A record is what happened, under the names the case had
+then; a migration renames the case, never its records (the rename test).
+
+**Sources across every boundary:** a fact carries its sources as the state holds them; a value a
+child was given keeps its parent's sources in the child's own records, since its opening keeps
+them (D74). Into the export is 19b's.
+
+**Guards, each watched failing when switched off:** records only from engine 3; a sensitive value
+wrapped; a form value kept as the case file keeps it; records carried, and what a decision wrote;
+every line in exactly one record; the migration's "not recorded"; a request not applied refused; a
+refused proposal's step; no record renamed; `OPENING` (four release tests).
 
 ## What changed in the guide with the answers
 
