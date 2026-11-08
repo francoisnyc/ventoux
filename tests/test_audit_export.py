@@ -20,6 +20,8 @@ from temporalio.client import Client, WorkflowHistory
 from temporalio.common import RetryPolicy
 from test_audit_records import checked_claim, known
 from test_case import REFUND
+from test_child_cases import claim as repair_claim
+from test_child_cases import repair
 from test_sensitive import FILE, NATIONAL_ID, claim
 from test_temporal_case import (
     LARGE,
@@ -29,8 +31,6 @@ from test_temporal_case import (
     on_temporal,
     reported,
 )
-from test_child_cases import claim as repair_claim
-from test_child_cases import repair
 from test_temporal_children import CLOSING, VIN, sensitive, started
 from test_temporal_children import FILE as REPAIR_FILE
 from test_temporal_forget import on_temporal as forgetting_on_temporal
