@@ -351,6 +351,11 @@ class Https:
             raise ValueError(NO_TOKEN)  # never another place a token may be kept
         self.address = address
         self.timeout = timeout
+        # The standard library's opener, through no proxy and following no redirect. By
+        # default it takes a proxy from the environment (`https_proxy`), which would carry the
+        # token, and a TLS-inspecting one would read it: Vault is reached directly (brief, D78)
+        # (tutor review of #92).
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def __call__(self, method: str, path: str, body: dict[str, Any] | None) -> Answer:
         token = os.environ.get("VAULT_TOKEN")
@@ -364,7 +369,7 @@ class Https:
             headers={"X-Vault-Token": token, "Content-Type": "application/json"},
         )
         try:
-            with NEVER_REDIRECTED.open(request, timeout=self.timeout) as response:
+            with self.opener.open(request, timeout=self.timeout) as response:
                 return response.status, as_json(response.read())
         except urllib.error.HTTPError as error:
             # Vault's answer with an error's status (404, 403, 400): an answer, read as such.
@@ -390,9 +395,6 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 UNREADABLE = 0  # the status given to an answer that wasn't HTTP: Ventoux expects none such
-
-# The standard library's opener, following no redirect.
-NEVER_REDIRECTED = urllib.request.build_opener(NoRedirect())
 
 
 def as_json(data: bytes) -> dict[str, Any]:

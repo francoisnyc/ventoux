@@ -253,6 +253,10 @@ or `127.0.0.1`, for a development server.
   after the mark, the case is forgotten already, and the request, retrying, finishes the deletion.
 - **Every call has a timeout,** 10 seconds unless you give another, and runs off the worker's
   event loop: Vault slow or down never stalls the other cases on that worker.
+- **Vault is reached directly,** never through a proxy the environment names (`https_proxy`,
+  `http_proxy`): a proxy would carry the token, and one that inspects TLS would read it. A redirect
+  is never followed either. A proxy to Vault, if your network needs one, would be a setting of its
+  own, named on purpose; it isn't built.
 - **An export that can't seal says so,** naming the key service, not the store: `audit export
   failed: the key service at https://vault.internal:8200 can't be reached: …: look at the key
   service, then retry the export`. It is retried as a store that is down is; a key Vault refuses

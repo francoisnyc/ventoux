@@ -819,3 +819,58 @@ def test_a_mark_is_read_from_its_metadata() -> None:
     assert str(failed.value) == (
         f"the key service at {ADDRESS} gave an answer Ventoux can't read for claim-7"
     )
+
+
+@contextmanager
+def proxy() -> Iterator[list[bytes]]:
+    """A listener named as the environment's proxy would be, for the length of the block: what
+    each connection to it sent first."""
+    listening = socket.socket()
+    listening.bind(("127.0.0.1", 0))
+    listening.listen()
+    listening.settimeout(0.1)
+    received: list[bytes] = []
+    stop = threading.Event()
+
+    def listen() -> None:
+        while not stop.is_set():
+            try:
+                connection, _ = listening.accept()
+            except TimeoutError:
+                continue
+            connection.settimeout(1)
+            try:
+                received.append(connection.recv(65536))
+            except TimeoutError:
+                received.append(b"")
+            connection.close()
+
+    thread = threading.Thread(target=listen)
+    thread.start()
+    received.append(f"127.0.0.1:{listening.getsockname()[1]}".encode())  # its address, first
+    try:
+        yield received
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+        listening.close()
+
+
+def test_vault_is_reached_directly_never_through_the_environments_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A proxy named in the environment would carry the token: in clear over http, and through a
+    # TLS-inspecting proxy over https. Vault is reached directly; the proxy receives nothing
+    # (brief, D78) (tutor review of #92).
+    monkeypatch.setenv("VAULT_TOKEN", TOKEN)
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    Vault.seen.clear()
+    with proxy() as received, serving(Vault) as address:
+        named = f"http://{received.pop(0).decode()}"
+        for name in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy"):
+            monkeypatch.setenv(name, named)
+        keys = VaultKeys(address, "transit", "secret", timeout=1)
+        assert keys.state("claim-7") == "never made"
+    assert received == []
+    assert len(Vault.seen) == 2  # Vault itself was asked
