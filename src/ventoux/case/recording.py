@@ -62,6 +62,19 @@ def decided_start(state: CaseState, name: str, step: Step, entry: str) -> None:
     state.deciding.append(Decision("started", step=name, entry=entry, rule=rule, read=read))
 
 
+def decided_stop(
+    state: CaseState, step: str | None, target: str, by: str | None, rule: str | None, why: str
+) -> None:
+    """Say that `target` (a run, an approval, a rule's firing, a change request) was stopped, why,
+    and by what: a rule's firing `by`, under its rule, or the close, under its `rule` if the
+    definition has one (brief, D40)."""
+    if by is not None:
+        [firing] = [each for each in state.firings if each.entry == by]
+        rule = f"rules.{firing.rule}"
+    decision = Decision("stopped", step=step, entry=by, rule=rule, target=target, reason=why)
+    state.deciding.append(decision)
+
+
 def decided_failure(state: CaseState, step: str, entry: str, reason: str) -> None:
     """Say that `step`'s run `entry` failed, and why: the run's own reason, which names what
     failed and the type of what it raised, never what it said (brief, D31) (brief, D76)."""

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from cases.refund import refund
+from test_rules import DUPLICATE, WITHDRAWS, withdrawable
 from test_sensitive import FILE, NATIONAL_ID, OPENING, claim, lookup
 from test_set import APPROVED, with_owed
 from test_set import FILE as WITH_FEE
@@ -21,7 +22,7 @@ from ventoux.case.state import Answered
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
-from ventoux.testing import CATALOG, AnswerRefused, retry, run_case
+from ventoux.testing import CATALOG, AnswerRefused, close, retry, run_case
 
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 LARGE = {"order_id": "ord-2", "amount": 250}
@@ -240,6 +241,35 @@ def test_a_rule_that_sets_and_reaches_says_what_it_wrote_on_what_it_read() -> No
         wrote=Fact("owed", ("person:ana", "system:opener"), Decimal(35)),
     )
     assert reached == Decision("reached", entry="work_out_owed#1", rule=rule, target="owed_known")
+
+
+def test_a_rules_stop_and_a_persons_close_say_what_they_stopped() -> None:
+    # The withdrawal's answer reaches `withdrawn`, whose rule stops the waiting review (brief, D40).
+    run = run_case(withdrawable(), {"order_id": "ord-1", "amount": 40}, WITHDRAWS, PEOPLE, engine=3)
+    logged = run.audit[-1]
+    assert [(each.kind, each.target, each.rule) for each in logged.decisions] == [
+        ("answered", None, "steps.log_withdrawal.outcomes.logged"),
+        ("reached", "withdrawn", "steps.log_withdrawal.outcomes.logged"),
+        ("stopped", "review#1", "rules.withdraw"),
+        ("closed", None, None),
+    ]
+    stopped = logged.decisions[2]
+    assert (stopped.step, stopped.entry, stopped.reason) == (
+        "review",
+        "withdraw#1",
+        "stopped by withdraw#1",
+    )
+    # Ana closes it as a duplicate while the review waits: her close stops it, then it closes.
+    staying = withdrawable() | {"stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+    run = run_case(
+        staying, {"order_id": "ord-1", "amount": 40}, [close("duplicate", "ana")], PEOPLE, engine=3
+    )
+    closing = run.audit[-1]
+    assert closing.act == Act("closed", by="ana", roles=("support",), outcome="duplicate")
+    assert [(each.kind, each.step, each.target, each.rule) for each in closing.decisions] == [
+        ("stopped", "review", "review#1", "close_reasons.duplicate"),
+        ("closed", None, None, None),
+    ]
 
 
 def known(inputs: dict[str, Any]) -> dict[str, Any]:

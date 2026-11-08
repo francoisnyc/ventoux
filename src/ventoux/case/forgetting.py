@@ -83,7 +83,7 @@ def forget(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Forg
     )
     if state.phase == "closing":
         return  # already closing, with its own reason: it closes, then the key goes
-    begin_closing(state, "the case is being forgotten", "forgotten")
+    begin_closing(state, "the case is being forgotten", "forgotten", None)
 
 
 # What a definition may say of forgetting, from the loosest to the strictest (brief, D32).

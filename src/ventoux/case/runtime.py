@@ -235,7 +235,10 @@ def decide(
     elif isinstance(event, ClosedByParent):
         # Closed as a person's close is, saying its parent asked (brief, D74).
         begin_closing(
-            state, f"closed by its parent: {event.reason}", f"by its parent: {event.reason}"
+            state,
+            f"closed by its parent: {event.reason}",
+            f"by its parent: {event.reason}",
+            None,
         )
     elif isinstance(event, WorkflowCancelled):
         workflow_cancelled(state, event)
@@ -265,7 +268,7 @@ def decide(
         why = f"closed as {event.reason} by {event.by}"
         state.closed_as = event.reason  # a child reports it as its outcome (brief, D74)
         state.closed_by = event.by
-        begin_closing(state, why, f"{event.reason}, by {event.by}")
+        begin_closing(state, why, f"{event.reason}, by {event.by}", f"close_reasons.{event.reason}")
     else:
         complete(case, catalog, state, event)
     decide_again(case, catalog, state, commands, event.at, was_open)

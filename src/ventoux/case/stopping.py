@@ -10,6 +10,7 @@ from ventoux.case.approvals import with_given
 from ventoux.case.closing import close_held
 from ventoux.case.definition import CallStep, CaseDefinition, CaseStep, PlanStep, WorkflowStep
 from ventoux.case.freshness import stale_facts
+from ventoux.case.recording import decided_stop
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     CLOSING,
@@ -59,6 +60,7 @@ def stop_step(
         latest.status = "cancelled"
         del state.waiting[latest.entry]
         state.history.append(f"cancelled {latest.entry}: stopped by {by}")
+        decided_stop(state, name, latest.entry, by, None, f"stopped by {by}")
         return
     if not stop_coming_run(case, state, name, by, at):
         state.history.append(f"{said}: {name} not stopped: no run of {name} is going on")
@@ -91,6 +93,7 @@ def stop_items(
             latest.status = "cancelled"
             del state.waiting[latest.entry]
             state.history.append(f"cancelled {latest.entry}: stopped by {by}")
+            decided_stop(state, name, latest.entry, by, None, f"stopped by {by}")
     if not going_on:
         state.history.append(f"{said}: {name} not stopped: no run of {name} is going on")
 
@@ -107,6 +110,7 @@ def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str, 
         del state.waiting[approval.entry]
         state.withdrawn[approval.entry] = why  # an answer to it is refused, saying why
         state.history.append(f"cancelled {approval.entry}: {why}{with_given(approval)}")
+        decided_stop(state, name, approval.entry, by, None, why)
     given = state.given.pop(name, None)  # approved, and waiting for its fact: it lapses
     proposed = name in state.waiting_to_start
     if proposed:
@@ -119,6 +123,7 @@ def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str, 
     state.proposers.pop(name, None)
     state.proposed_by_rules.pop(name, None)
     state.history.append(f"{entry} cancelled: {why}")
+    decided_stop(state, name, entry, by, None, why)
     return True
 
 
@@ -138,6 +143,7 @@ def stop_running(
         return
     run.stop_requested = by
     state.history.append(f"{run.entry}: stop requested by {by}")
+    decided_stop(state, run.step, run.entry, by, None, f"stop requested by {by}")
     ask_to_stop(case, catalog, run, f"stopped by {by}", commands)
 
 

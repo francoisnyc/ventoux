@@ -13,6 +13,7 @@ from ventoux.case.approvals import with_given
 from ventoux.case.audit import Decision
 from ventoux.case.definition import EACH, ActivityStep, CaseDefinition, TaskStep
 from ventoux.case.owed import owed
+from ventoux.case.recording import decided_stop
 from ventoux.case.state import CaseState, CloseAsked
 from ventoux.case.timers import cancel_timers
 from ventoux.case.writers import read_sources, untrusted_of
@@ -54,10 +55,13 @@ def refuse_to_close(
     return role
 
 
-def begin_closing(state: CaseState, cancelled_because: str, closed_because: str) -> None:
+def begin_closing(
+    state: CaseState, cancelled_because: str, closed_because: str, rule: str | None
+) -> None:
     """Put the case in closing: cancel every open task, approval, failed run, failed rule and
     timer, saying why, so the people they were assigned to see it; running activities finish
-    (brief, D10)."""
+    (brief, D10). `rule` is where the definition says the case closes, if it does: a close
+    reason, `closes_when`."""
     state.phase = "closing"
     state.closed_because = closed_because
     for run in state.runs:
@@ -65,16 +69,19 @@ def begin_closing(state: CaseState, cancelled_because: str, closed_because: str)
             run.status = "cancelled"
             state.waiting.pop(run.entry, None)
             state.history.append(f"cancelled {run.entry}: {cancelled_because}")
+            decided_stop(state, run.step, run.entry, None, rule, cancelled_because)
     for firing in state.firings:
         if firing.status == "failed":  # a rule waiting for a person, as a failed run does
             firing.status = "cancelled"
             state.history.append(f"cancelled {firing.entry}: {cancelled_because}")
+            decided_stop(state, None, firing.entry, None, rule, cancelled_because)
     for approval in list(state.approvals.values()):
         del state.approvals[approval.step]
         del state.waiting[approval.entry]
         state.history.append(
             f"cancelled {approval.entry}: {cancelled_because}{with_given(approval)}"
         )
+        decided_stop(state, approval.step, approval.entry, None, rule, cancelled_because)
     state.given.clear()  # an approval not yet spent starts nothing now
     state.proposers.clear()
     state.proposed_by_rules.clear()
@@ -91,6 +98,7 @@ def cancel_changes(state: CaseState, because: str) -> None:
         del state.changes[entry]
         del state.waiting[entry]
         state.history.append(f"cancelled {entry}: {because}")
+        decided_stop(state, None, entry, None, None, because)
 
 
 def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
@@ -205,7 +213,8 @@ def close_when_reached(case: CaseDefinition, state: CaseState) -> None:
     if all(milestone in state.milestones for milestone in case.closes_when):
         names = " and ".join(case.closes_when)
         verb = "are" if len(case.closes_when) > 1 else "is"
-        begin_closing(state, f"the case closes when {names} {verb} reached", f"{names} reached")
+        why = f"the case closes when {names} {verb} reached"
+        begin_closing(state, why, f"{names} reached", "closes_when")
 
 
 def close_held(case: CaseDefinition, state: CaseState) -> bool:
