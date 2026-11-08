@@ -2,6 +2,23 @@
   "engine": 3,
   "entries": [
     {
+      "name": "a condition reads a field the case doesn't declare",
+      "kind": "package",
+      "case": "cases/a-condition-reads-an-undeclared-field.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.when",
+            "code": "EXPRESSION_INVALID",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
       "name": "APPROVAL_ELSEWHERE: only a read needing no approval is fetched again (test_case_validation)",
       "kind": "package",
       "case": "cases/approval-elsewhere.json",

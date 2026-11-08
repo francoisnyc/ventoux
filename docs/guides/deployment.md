@@ -235,8 +235,8 @@ engine decides about it. It ships in the package, as data, in `ventoux/conforman
 ```
 catalogs/development.json     a catalog: its contracts as `ventoux promises` writes them, roles,
                               systems, labels, option checks, document stores
-cases/unknown-field.json      a definition
-plans/...
+cases/…, plans/…              the definitions, each a file
+examples/…                    every definition committed in the repository, as committed
 suite.json                    the engine version; each entry: a definition, its catalog, and what
                               it must give; and the changes made to results, each saying why
 ```
@@ -244,15 +244,22 @@ suite.json                    the engine version; each entry: a definition, its 
 ```json
 {
   "name": "a condition reads a field the case doesn't declare",
-  "definition": "cases/unknown-field.json",
-  "catalog": "catalogs/development.json",
-  "expected": [{ "path": "steps.pay.when", "code": "UNKNOWN_FIELD", "severity": "error" }]
+  "kind": "package",
+  "case": "cases/a-condition-reads-an-undeclared-field.json",
+  "plans": [],
+  "cases": {},
+  "catalog": "development",
+  "expected": {
+    "issues": [{ "path": "steps.pay.when", "code": "EXPRESSION_INVALID", "severity": "error" }]
+  }
 }
 ```
 
 An implementation conforms when, for every entry, it gives exactly the expected issues: the same
 paths, codes and severities, in any order, and none more. Messages are wording and are never
 compared. A definition refused when read is expected as `{"read": "refused", "at": [paths]}`, by
-path alone. Run results (what a case does, not only whether it is valid) come after v1.0. `ventoux conformance --export DIR` writes the suite out; CI runs it on every change, so
-a change that alters a result fails until the suite is changed with it, in the same pull request,
-with a line in its `changes` list saying why.
+path alone. Run results (what a case does, not only whether it is valid) come after v1.0.
+
+`ventoux conformance --export DIR` writes the suite out. CI runs `ventoux conformance --unchanged`
+on every change, so a change that alters a result fails until the suite is changed with it, in
+the same pull request, with a line in its `changes` list saying why.

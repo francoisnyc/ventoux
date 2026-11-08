@@ -23,7 +23,7 @@ from ventoux.tooling.conformance import (
     uncovered,
     unrecorded,
 )
-from ventoux.tooling.suite import Entry, Suite
+from ventoux.tooling.suite import Entry, PackageEntry, Suite
 
 ROOT = Path(__file__).parent.parent
 REFUND = ROOT / "examples" / "refund" / "refund.json"  # a valid case with no plan step
@@ -447,3 +447,30 @@ def test_ci_checks_the_suite_and_every_change_to_it_against_the_base() -> None:
     assert ci_runs("- run: uv run ventoux conformance --unchanged")
     changes = WORKFLOW.read_text().split("\n  changes:")[1]
     assert "- run: uv run ventoux conformance --since base/src/ventoux/conformance" in changes
+
+
+def test_every_committed_definition_is_an_entry_its_file_equal() -> None:
+    # The schema's corpus: every case and plan committed, each read by the schema and the parser.
+    from test_schema import CASES, PLANS
+
+    in_suite = {
+        name
+        for entry in COMMITTED.entries
+        if isinstance(entry, PackageEntry)
+        for name in (entry.case, *entry.plans)
+    }
+    for path in (*CASES, *PLANS):
+        written = str(path.relative_to(ROOT))
+        assert written in in_suite, f"{written} is no entry's"
+        assert (SUITE / written).read_bytes() == path.read_bytes(), f"{written} differs"
+
+
+GUIDE = ROOT / "docs" / "guides" / "deployment.md"
+
+
+def test_the_guides_example_entry_is_in_the_suite_as_written_and_this_engine_gives_it() -> None:
+    section = GUIDE.read_text().split("## Another implementation: the conformance suite")[1]
+    example = json.loads(section.split("```json\n")[1].split("```")[0])
+    entry = next(entry for entry in COMMITTED.entries if entry.name == example["name"])
+    assert entry.model_dump(mode="json", exclude_defaults=True) == example
+    assert differences(entry, given(entry, SUITE)) == []
