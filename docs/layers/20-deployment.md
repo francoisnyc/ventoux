@@ -343,3 +343,73 @@ to a known value and asserts doctor's whole output, failures included, never hol
   diff's `excluded` reading through a child's report. Each changes validation, so each would change
   a conformance result. *Recommended: out of scope here,* carried on as said, each a decision when
   it comes; the suite records whatever they change when they do.
+
+## Seams and tests for 20a (curriculum step 4, proposed)
+
+**What an entry is.** The one check (`issues_of`, `case/checked.py`, D50) reads a *package*: a
+case, its plans and its child cases. So an entry is a package or a plan alone, and the runner
+gives it exactly what `ventoux check` and `ventoux release` refuse on, never a second set of rules:
+
+```json
+{ "name": "a condition reads a field the case doesn't declare",
+  "kind": "package",
+  "case": "cases/unknown-field.json",
+  "plans": ["plans/refund-order.json"],
+  "cases": {},
+  "catalog": "development",
+  "expected": { "issues": [{ "path": "steps.pay.when", "code": "UNKNOWN_FIELD", "severity": "error" }] } }
+```
+
+A plan entry has `"kind": "plan"` and `"plan": "plans/…"`. `"catalog"` names a file,
+`catalogs/development.json`. A definition refused when read gives `{"read": "refused", "at":
+[paths]}`: the paths `parse_case` or `parse_plan` refuse, case and plans each read on its own
+first. A package that reads but can't be put together (a plan named twice, a plan step's plan
+missing) is a broken entry, said as one, never a result: those refusals have no path or code.
+
+**The seams the tests use:**
+
+| Seam | What it is |
+|---|---|
+| `ventoux.core.validate.ISSUE_CODES` | every code validation can give, a `frozenset[str]` |
+| `CaseInvalid.paths`, `PlanInvalid.paths` | the paths of the problems, as their lines say them, so a read refusal is compared without reading its wording |
+| `ventoux.tooling.conformance.SUITE` | the suite's folder in the package |
+| `catalog_data(catalog)` | the catalog as data: contracts as `ventoux promises` writes them, roles, systems, labels, option checks, document stores |
+| `given(entry, folder)` | what this engine gives for one entry: the issues, or the paths refused when read |
+| `mismatches(folder)` | every problem with a suite, each a line naming the entry and both sides; empty means this engine conforms. Also: a code given that `ISSUE_CODES` doesn't list, a listed code no entry expects, a file an entry names that isn't there, a catalog file not as generated |
+| `unrecorded(base, head)` | each result changed or removed between two `suite.json`s with no `changes` line naming it |
+| `ventoux conformance --write` | writes the catalog files only, never an `expected`: those are written by a person |
+| `ventoux conformance --unchanged` | exit 1 and every mismatch, or 0 |
+| `ventoux conformance --since BASE` | exit 1 on each change `unrecorded` finds against the base's `suite.json` |
+| `ventoux conformance --export DIR` | the suite's files, as the package holds them |
+
+The catalog an entry names is mapped to Python's catalog in the runner (`development` is
+`ventoux.testing:CATALOG`), never named by the suite: the data says nothing about Python.
+
+**The tests, in the order they would be written** (each watched failing first):
+
+1. **Negative first:** a suite in a temporary folder whose entry expects `UNKNOWN_FIELD` where the
+   definition is valid: `mismatches` names the entry, what it expected and that it was given none.
+2. Both ways: an entry expected valid whose definition gives an issue is a mismatch; an extra
+   issue and a missing one are each said; the order of issues and their messages change nothing.
+3. A read refusal, both ways: expected refused and read fine; expected at one path and refused at
+   another.
+4. **The committed suite conforms,** one test per entry (`given` against `expected`), so a failure
+   names its entry; and `mismatches(SUITE)` is empty as a whole.
+5. **The curriculum's negative test:** a copy of the committed suite with one result changed makes
+   `ventoux conformance --unchanged` exit 1 naming it; and CI runs `ventoux conformance
+   --unchanged` in its `check` job. A change to validation is the same mismatch seen from the
+   other side.
+6. `ISSUE_CODES`, both ways: a code given that isn't listed is a mismatch; a listed code no entry
+   expects is one.
+7. The catalog: `--write` writes it; `--unchanged` fails when the file differs from what
+   `catalog_data` gives, naming the file and the first line that differs, and writes nothing.
+8. `unrecorded`: a changed result with no line, said; with a line naming it, nothing; a new entry,
+   nothing; a removed entry, said. CI's `changes` job runs `--since` against the base.
+9. Every committed definition (the schema corpus's list) is an entry, its file equal.
+10. The guide's example entry runs (docs/guides/deployment.md), as written there.
+11. `--export` writes every file of the suite, byte for byte, and nothing else.
+
+**Files:** `src/ventoux/conformance/` (data: `suite.json`, `catalogs/`, `cases/`, `plans/`);
+`src/ventoux/tooling/conformance.py`; the command in `cli.py`; `tests/test_conformance.py`; two
+lines in `ci.yml`. **Size, said now:** about sixty refusing entries (one per code at least, each
+a small definition written by hand), the committed examples, and the schema corpus's wrong shapes.
