@@ -10,9 +10,13 @@ from typing import Any
 import pytest
 from cases.refund import refund
 from test_case import REFUND
+from test_change_requests import FORGETTERS, OPERATING, TYPED_WRONG, account_closed
 from test_change_requests import LARGE as LARGE_ORD_1
-from test_change_requests import OPERATING, TYPED_WRONG, account_closed
 from test_change_requests import PEOPLE as CHANGERS
+from test_child_cases import PEOPLE as REPAIRERS
+from test_child_cases import claim as claim_with_repair
+from test_child_cases import repair
+from test_events import RECEIPT, waiting_for_a_receipt
 from test_migrations import REFUND_1, on_refund_1
 from test_migrations import REVIEWED as REVIEWED_250
 from test_rules import DUPLICATE, WITHDRAWS, withdrawable
@@ -28,7 +32,20 @@ from ventoux.case.state import Answered
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
-from ventoux.testing import CATALOG, AnswerRefused, close, edit, migrate, retry, run_case, skip
+from ventoux.testing import (
+    CATALOG,
+    AnswerRefused,
+    close,
+    edit,
+    forget,
+    migrate,
+    retry,
+    run_case,
+    skip,
+)
+from ventoux.testing import (
+    claim as claim_entry,
+)
 
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 LARGE = {"order_id": "ord-2", "amount": 250}
@@ -350,6 +367,63 @@ def test_a_case_before_engine_3_records_nothing_until_it_migrates_to_it() -> Non
         target="refund 1",
         reason="what came before engine 3 was not recorded",
     )
+
+
+def test_forgetting_approved_is_recorded_with_both_people() -> None:
+    run = run_case(claim(), FILE, [forget("pia", "olu")], FORGETTERS, engine=3)
+    forgetting = run.audit[-1]
+    assert forgetting.act == Act("forget approved", by="olu", roles=("privacy",))
+    assert [(each.kind, each.reason) for each in forgetting.decisions] == [
+        ("forgotten", "proposed by pia as privacy, approved by olu as privacy"),
+        ("stopped", "the case is being forgotten"),
+        ("closed", "forgotten"),
+    ]
+
+
+def test_a_child_case_is_started_and_read_by_its_parent_and_records_its_own() -> None:
+    # The guide's claim and its repair: the parent records the child's start and its end as its
+    # own decisions; the child, a case of its own, records its own acts (brief, D74).
+    run = run_case(
+        claim_with_repair(),
+        {"order_id": "ord-1", "vehicle": "veh-9"},
+        [("assess", "accept", "ana", {"payout": 900})],
+        REPAIRERS,
+        cases={"repair@3": repair()},
+        case_answers={"repair": [("fix", "fixed", "lee", {"cost": 640})]},
+        engine=3,
+    )
+    parent = [(d.kind, d.entry) for each in run.audit for d in each.decisions]
+    assert ("started", "repair#1") in parent and ("completed", "repair#1") in parent
+    ended = next(each for each in run.audit if each.act.kind == "child ended")
+    assert ended.act.values["cost"] == Decimal(640)
+    child = run.children["repair#1"].audit
+    assert child[0].act.kind == "opened" and child[-1].decisions[-1].kind == "closed"
+
+
+def test_an_event_and_a_claim_are_acts_with_what_they_caused() -> None:
+    # The receipt the wait waits for arrives: the wait is done, and pay starts (brief, D41).
+    script = [
+        claim_entry("review#1", "ana"),
+        ("review", "approve", "ana", {"approved_amount": 40}),
+        RECEIPT,
+    ]
+    run = run_case(waiting_for_a_receipt(), {"order_id": "ord-1", "amount": 40}, script, PEOPLE)
+    assert run.audit == []  # engine 2: nothing recorded
+    run = run_case(
+        waiting_for_a_receipt(), {"order_id": "ord-1", "amount": 40}, script, PEOPLE, engine=3
+    )
+    claimed = run.audit[1]
+    # A claim decides nothing about the case: the act, and its line (brief, D69).
+    assert claimed.act == Act("claimed", by="ana", roles=("support",), entry="review#1")
+    assert claimed.decisions == [] and claimed.lines != []
+    receipt = run.audit[3]
+    assert receipt.act == Act(
+        "event", by="system:portal", entry="receipt_sent", values={"receipt": "doc-7"}
+    )
+    assert [(each.kind, each.entry, each.rule) for each in receipt.decisions] == [
+        ("completed", "wait_for_receipt#1", "steps.wait_for_receipt"),
+        ("started", "pay#1", "steps.pay.when"),
+    ]
 
 
 def known(inputs: dict[str, Any]) -> dict[str, Any]:

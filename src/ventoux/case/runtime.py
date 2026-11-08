@@ -415,6 +415,8 @@ def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None
             run.status = "done"
             del state.waiting[run.entry]
             state.history.append(f"{run.entry} done: {entry} arrived")
+            done = Decision("completed", step=run.step, entry=run.entry, rule=f"steps.{run.step}")
+            state.deciding.append(done)
             reach_unless_steered(state, run, waits.reaches)
 
 
@@ -2286,6 +2288,8 @@ def child_ended(state: CaseState, run: StepRun, step: CaseStep, event: CaseEnded
         return
     route = f"case:{step.case.split('@')[0]}"
     run.status = "done"
+    completed = Decision("completed", step=run.step, entry=run.entry, rule=f"steps.{run.step}")
+    state.deciding.append(completed)
     state.values[f"{run.step}.outcome"] = event.outcome
     # Trusted: the child's reviewed release declares its close reasons, as a plan its outcomes.
     # But which reason was chosen is a person's act, as a task's outcome is: who closed it decided

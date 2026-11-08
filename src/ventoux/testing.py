@@ -559,7 +559,7 @@ def run_case(
     bound = {**WORKFLOW_FAKES, **workflows}
     ran: dict[str, CaseRun] = {}
     children = child_runner(
-        case_answers or {}, people, catalog, implementations, bound, ran, runner
+        case_answers or {}, people, catalog, implementations, bound, ran, runner, engine
     )
     run = run_case_in_memory(
         case,
@@ -583,11 +583,12 @@ def child_runner(
     workflows: Mapping[str, Activity],
     ran: dict[str, CaseRun],
     plans: PlanRunner,
+    engine: int = ENGINE,
 ) -> ChildRunner:
     """Opens a case step's child in memory, plays its script, and says how it ended as an event;
     or None while it is open (brief, D74). Each child's run is kept in `ran`, by entry. The child
     reads `catalog`, and calls `activities`, `workflows` and `plans`, as its parent does: one
-    reference is one plan."""
+    reference is one plan. It opens at `engine`, as its parent did: the same code opens both."""
 
     def run(
         command: OpenCase | CloseCase | ReadChild, at: int
@@ -611,6 +612,7 @@ def child_runner(
             parent=(parent, command.entry),
             sources={name: given.sources for name, given in command.fields.items()},
             excluded=command.excluded,
+            engine=engine,
         )
         try:
             # The opening alone first: a child that refuses it never opened, and the parent's
