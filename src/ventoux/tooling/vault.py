@@ -244,9 +244,11 @@ class VaultKeys:
         answer with a status in `expected`: never read as a key destroyed or never made."""
         try:
             status, answer = self.transport(method, path, body)
-        except Unreachable:
+        except Unreachable as why:
+            # Its kind is safe to say, and tells a refused connection from a certificate Ventoux
+            # doesn't trust (`SSLCertVerificationError`) or a name with no address (`gaierror`).
             raise KeyUnavailable(
-                f"the key service at {self.address} can't be reached: {self.now(case)}"
+                f"the key service at {self.address} can't be reached ({why}): {self.now(case)}"
             ) from None
         except TimedOut:
             raise KeyUnavailable(
@@ -258,7 +260,9 @@ class VaultKeys:
                 f"the key service refused Ventoux's token for {case}: check the token's policy"
             )
         if status not in expected:
-            raise self.unreadable(case)
+            # A status is safe to say: `503` is a sealed Vault, `307` a redirect not followed.
+            said = "not HTTP, or cut short" if status == UNREADABLE else f"status {status}"
+            raise self.unreadable(case, said)
         return status, answer
 
     def read(self, case: str, body: dict[str, Any], *keys: str) -> Any:
@@ -277,10 +281,12 @@ class VaultKeys:
             raise self.unreadable(case)
         return value
 
-    def unreadable(self, case: str) -> KeyUnavailable:
-        # Never what Vault said: an error's text is Vault's, and unread here.
+    def unreadable(self, case: str, said: str = "") -> KeyUnavailable:
+        """An answer Ventoux can't read, with what is safe to say about it (its status), never
+        what Vault said: an error's text is Vault's, and unread here."""
+        about = f" ({said})" if said else ""
         return KeyUnavailable(
-            f"the key service at {self.address} gave an answer Ventoux can't read for {case}"
+            f"the key service at {self.address} gave an answer Ventoux can't read for {case}{about}"
         )
 
     @staticmethod
@@ -372,8 +378,14 @@ class Https:
             with self.opener.open(request, timeout=self.timeout) as response:
                 return response.status, as_json(response.read())
         except urllib.error.HTTPError as error:
-            # Vault's answer with an error's status (404, 403, 400): an answer, read as such.
-            return error.code, as_json(error.read())
+            # Vault's answer with an error's status (404, 403, 400): an answer, read as such. Its
+            # body is read here, outside the handlers below, so it is guarded on its own.
+            try:
+                return error.code, as_json(error.read())
+            except TimeoutError:
+                raise TimedOut() from None
+            except (OSError, http.client.HTTPException):
+                return UNREADABLE, {}  # cut short
         except urllib.error.URLError as error:
             # No connection made, even one that timed out connecting: Vault can't be reached.
             raise Unreachable(type(error.reason).__name__) from None
@@ -382,7 +394,8 @@ class Https:
         except OSError as error:  # hung up on, or reset, before Vault answered
             raise Unreachable(type(error).__name__) from None
         except http.client.HTTPException:
-            # Something answered that isn't HTTP: an answer Ventoux can't read, said so.
+            # Something answered that isn't HTTP, or cut its answer short: one Ventoux can't
+            # read, said so.
             return UNREADABLE, {}
 
 
@@ -394,7 +407,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-UNREADABLE = 0  # the status given to an answer that wasn't HTTP: Ventoux expects none such
+# The status given to an answer that wasn't HTTP, or was cut short: Ventoux expects none such.
+UNREADABLE = 0
 
 
 def as_json(data: bytes) -> dict[str, Any]:

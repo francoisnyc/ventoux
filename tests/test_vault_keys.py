@@ -288,9 +288,9 @@ def unavailable(name: str) -> dict[str, tuple[Answer | Exception, str]]:
     """Each way Vault can fail to answer, as the transport meets it, and what the case is told."""
     return {
         "unreachable": (
-            Unreachable("connection refused"),
+            Unreachable("ConnectionRefusedError"),
             (
-                f"the key service at {ADDRESS} can't be reached: {name}'s sensitive values can't "
+                f"the key service at {ADDRESS} can't be reached (ConnectionRefusedError): {name}'s sensitive values can't "
                 "be read or written now"
             ),
         ),
@@ -307,7 +307,7 @@ def unavailable(name: str) -> dict[str, tuple[Answer | Exception, str]]:
         ),
         "a status it doesn't expect": (
             (503, {"errors": ["Vault is sealed"]}),
-            f"the key service at {ADDRESS} gave an answer Ventoux can't read for {name}",
+            f"the key service at {ADDRESS} gave an answer Ventoux can't read for {name} (status 503)",
         ),
         "a body it can't read": (
             (200, {"warnings": []}),
@@ -421,7 +421,7 @@ def test_the_https_transport_sends_the_token_only_to_vault_and_never_says_it(
         with pytest.raises(KeyUnavailable) as failed:
             moved.state("claim-7")
         assert str(failed.value) == (
-            f"the key service at {address} gave an answer Ventoux can't read for claim-7"
+            f"the key service at {address} gave an answer Ventoux can't read for claim-7 (status 307)"
         )
         said.append(str(failed.value))
         assert len(Vault.seen) == 3  # the redirect not followed
@@ -431,7 +431,7 @@ def test_the_https_transport_sends_the_token_only_to_vault_and_never_says_it(
     with pytest.raises(KeyUnavailable) as failed:
         VaultKeys(address, "transit", "secret").state("claim-7")
     assert str(failed.value) == (
-        f"the key service at {address} can't be reached: claim-7's sensitive values can't be read "
+        f"the key service at {address} can't be reached (ConnectionRefusedError): claim-7's sensitive values can't be read "
         "or written now"
     )
     said.append(str(failed.value))
@@ -514,7 +514,7 @@ def test_destroying_marks_the_case_first_and_destroying_again_finishes() -> None
     # case reads as destroyed, whatever fails after. A destroy cut short at any step is finished by
     # the next, which writes nothing twice it doesn't need and takes a key already gone as deleted
     # (brief, D32) (brief, D78).
-    down = Unreachable("connection refused")
+    down = Unreachable("ConnectionRefusedError")
     vault(no_mark(), key(), write_mark(), allow_deletion(), delete()).destroy("claim-7")
     # Cut short at the mark: nothing changed, so destroying again does it all.
     with pytest.raises(KeyUnavailable):
@@ -552,11 +552,11 @@ def test_read_audit_with_vault_down_fails_never_saying_forgotten(tmp_path: Path)
     store.append(
         exported("claim-7", records, sensitive_fields(parse_case(definition)), {}, sealing)
     )
-    down = vault(replace(no_mark(), answer=Unreachable("connection refused")))
+    down = vault(replace(no_mark(), answer=Unreachable("ConnectionRefusedError")))
     with pytest.raises(KeyUnavailable) as failed:
         read_audit(store, "claim-7", ["claims-sensitive"], down)
     assert str(failed.value) == (
-        f"the key service at {ADDRESS} can't be reached: claim-7's sensitive values can't be read "
+        f"the key service at {ADDRESS} can't be reached (ConnectionRefusedError): claim-7's sensitive values can't be read "
         "or written now"
     )
 
@@ -710,17 +710,21 @@ def test_the_guides_policy_is_all_ventoux_needs(
 
 
 @contextmanager
-def answering(reply: bytes) -> Iterator[str]:
+def answering(reply: bytes, stalling: bool = False) -> Iterator[str]:
     """A port that accepts one connection, sends `reply` (or nothing) and hangs up, for the length
-    of the block: its address."""
+    of the block: its address. `stalling`, it holds the connection open after `reply` until the
+    block ends."""
     listening = socket.socket()
     listening.bind(("127.0.0.1", 0))
     listening.listen()
+    done = threading.Event()
 
     def serve() -> None:
         connection, _ = listening.accept()
         connection.recv(65536)
         connection.sendall(reply)
+        if stalling:
+            done.wait(timeout=5)
         connection.close()
 
     thread = threading.Thread(target=serve)
@@ -728,6 +732,7 @@ def answering(reply: bytes) -> Iterator[str]:
     try:
         yield f"http://127.0.0.1:{listening.getsockname()[1]}"
     finally:
+        done.set()
         thread.join(timeout=5)
         listening.close()
 
@@ -742,13 +747,14 @@ def test_a_connection_dropped_or_an_answer_not_http_is_unavailable(
     with answering(b"") as address, pytest.raises(KeyUnavailable) as failed:
         VaultKeys(address, "transit", "secret").state("claim-7")
     assert str(failed.value) == (
-        f"the key service at {address} can't be reached: claim-7's sensitive values can't be read "
+        f"the key service at {address} can't be reached (RemoteDisconnected): claim-7's sensitive values can't be read "
         "or written now"
     )
     with answering(b"SSH-2.0-OpenSSH_9.6\r\n") as address, pytest.raises(KeyUnavailable) as failed:
         VaultKeys(address, "transit", "secret").state("claim-7")
     assert str(failed.value) == (
-        f"the key service at {address} gave an answer Ventoux can't read for claim-7"
+        f"the key service at {address} gave an answer Ventoux can't read for claim-7 (not HTTP, or "
+        "cut short)"
     )
 
 
@@ -878,3 +884,35 @@ def test_vault_is_reached_directly_never_through_the_environments_proxy(
         assert keys.state("claim-7") == "never made"
     assert received == []
     assert len(Vault.seen) == 2  # Vault itself was asked
+
+
+NOT_FOUND_HEADERS = (
+    b"HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n"
+)
+
+
+def test_an_error_answer_cut_short_or_stalled_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An error's status read, and its body never coming, or cut short: unavailable, never the
+    # standard library's exception escaping, which the export would say as the store's
+    # (brief, D78) (tutor review of #92).
+    monkeypatch.setenv("VAULT_TOKEN", TOKEN)
+    with (
+        answering(NOT_FOUND_HEADERS, stalling=True) as address,
+        pytest.raises(KeyUnavailable) as failed,
+    ):
+        VaultKeys(address, "transit", "secret", timeout=0.5).state("claim-7")
+    assert str(failed.value) == (
+        f"the key service at {address} didn't answer within 0.5 seconds: claim-7's sensitive "
+        "values can't be read or written now"
+    )
+    with (
+        answering(NOT_FOUND_HEADERS + b'{"err') as address,
+        pytest.raises(KeyUnavailable) as failed,
+    ):
+        VaultKeys(address, "transit", "secret", timeout=0.5).state("claim-7")
+    assert str(failed.value) == (
+        f"the key service at {address} gave an answer Ventoux can't read for claim-7 (not HTTP, or "
+        "cut short)"
+    )
