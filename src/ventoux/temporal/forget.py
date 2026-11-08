@@ -239,7 +239,7 @@ class ForgetWorkflow:
                 return
             sending = list(self.unwritten)
             sent = ExportSent(
-                workflow.info().workflow_id, [record_as_data(each) for each in sending], {}
+                workflow.info().workflow_id, [record_as_data(each) for each in sending], {}, {}
             )
             await workflow.execute_activity(
                 "ventoux.audit.append",

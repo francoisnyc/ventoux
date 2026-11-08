@@ -41,7 +41,7 @@ from ventoux.case.audit import AuditRecord
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import ExportRetried
-from ventoux.temporal.audit import ExportRefused, exported, sensitive_fields
+from ventoux.temporal.audit import ExportRefused, exported, restricted_fields, sensitive_fields
 from ventoux.temporal.cases import (
     CaseReport,
     CaseStart,
@@ -66,7 +66,7 @@ from ventoux.testing import (
     release_of,
     run_case,
 )
-from ventoux.tooling.audit import AuditRefused, FileAudit
+from ventoux.tooling.audit import AuditRefused, FileAudit, read_audit
 from ventoux.tooling.keys import FileKeys, KeyRefused
 
 
@@ -100,13 +100,13 @@ def test_a_sensitive_value_in_clear_fails_the_export(tmp_path: Path) -> None:
     keys.create("claim-7")
     sensitive = sensitive_fields(parse_case(definition))
     with pytest.raises(ExportRefused) as refused:
-        exported("claim-7", [unwrapped(records[0]), *records[1:]], sensitive, keys)
+        exported("claim-7", [unwrapped(records[0]), *records[1:]], sensitive, {}, keys)
     assert str(refused.value) == (
         "audit record claim-7/1 holds national_id, a sensitive field, in clear: nothing was written"
     )
     assert NATIONAL_ID not in str(refused.value)
     # Wrapped, it is sealed under the case's key, for its own place, where alone it opens.
-    [opening, *_] = exported("claim-7", records, sensitive, keys)
+    [opening, *_] = exported("claim-7", records, sensitive, {}, keys)
     sealed = opening["act"]["values"]["national_id"]
     assert NATIONAL_ID not in str(opening)
     assert sealed["part"] == "audit/claim-7/1/act/values/national_id"
@@ -115,6 +115,49 @@ def test_a_sensitive_value_in_clear_fails_the_export(tmp_path: Path) -> None:
     assert keys.open("claim-7", ciphertext, sealed["part"]) == f'"{NATIONAL_ID}"'.encode()
     with pytest.raises(KeyRefused):
         keys.open("claim-7", ciphertext, "audit/claim-7/2/act/values/national_id")
+
+
+def test_read_audit_opens_a_value_only_for_a_role_that_may_see_it(tmp_path: Path) -> None:
+    # Filtered as the case file is: a value whose `visible_to` excludes every role given is said
+    # hidden, with the roles that would see it, sealed or not; a sealed one is opened only for a
+    # role in it, while the key exists, and said forgotten after. A sealed value that doesn't
+    # open is an error, never a guess (brief, D30) (brief, D31) (brief, D77).
+    definition, _ = claim_records()
+    definition["fields"]["policy_id"]["visible_to"] = ["claims-lead"]  # narrowed, not sensitive
+    run = run_case(
+        definition, FILE, [], {"ana": ["adjuster"]}, activities={"orders.lookup@1": known}, engine=3
+    )
+    case = parse_case(definition)
+    keys = FileKeys(tmp_path / "keys.json")
+    keys.create("claim-7")
+    store = FileAudit(tmp_path / "audit")
+    sight = sensitive_fields(case), restricted_fields(case)
+    store.append(exported("claim-7", run.audit, *sight, keys))
+
+    def opening(roles: list[str]) -> dict[str, Any]:
+        [first, *_] = read_audit(store, "claim-7", roles, keys)
+        values: dict[str, Any] = first["act"]["values"]
+        return values
+
+    adjuster = opening(["adjuster"])
+    assert adjuster["national_id"] == "hidden (needs claims-sensitive)"
+    assert adjuster["policy_id"] == "hidden (needs claims-lead)"
+    assert adjuster["customer_id"] == "cus-7"
+    assert NATIONAL_ID not in str(read_audit(store, "claim-7", ["adjuster"], keys))
+    both = opening(["claims-lead", "claims-sensitive"])
+    assert (both["national_id"], both["policy_id"]) == (NATIONAL_ID, "pol-3")
+    keys.destroy("claim-7")
+    assert opening(["claims-sensitive"])["national_id"] == "‹forgotten›"
+    assert opening(["adjuster"])["national_id"] == "hidden (needs claims-sensitive)"
+    # Moved to another place in the store, a sealed value doesn't open: an error, saying so.
+    other = FileAudit(tmp_path / "other")
+    keys.create("claim-8")
+    [first, second, *_] = exported("claim-8", run.audit, *sight, keys)
+    second["act"]["values"]["national_id"] = first["act"]["values"]["national_id"]
+    second["act"]["values"]["national_id"]["visible_to"] = ["claims-sensitive"]
+    other.append([first, second])
+    with pytest.raises(KeyRefused, match="a sealed part of claim-8 doesn't open"):
+        read_audit(other, "claim-8", ["claims-sensitive"], keys)
 
 
 def numbered(stream: str, number: int, said: str = "") -> dict[str, Any]:

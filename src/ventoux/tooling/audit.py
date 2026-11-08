@@ -8,12 +8,17 @@ development store. Ventoux never deletes from a store: its retention is the plat
 See docs/layers/19-audit-keys.md (19b) and docs/guides/audit.md.
 """
 
+import base64
+import copy
 import fcntl
 import json
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol
+
+from ventoux.temporal.codec import case_of
+from ventoux.tooling.keys import KeyProvider
 
 # What a record is, to a store: the JSON object the export writes (`ventoux.temporal.audit`).
 type Written = dict[str, Any]
@@ -123,3 +128,58 @@ def by_place(value: object) -> object:
     if isinstance(value, list):
         return [by_place(each) for each in value]
     return value
+
+
+# What a reader is shown where a sealed value was, once its case's key is gone (brief, D32).
+FORGOTTEN = "‹forgotten›"
+SEALED = {"sealed", "part", "visible_to"}  # a sensitive value, as the export writes it
+NARROWED = {"value", "visible_to"}  # a value in clear whose field narrows who sees it
+
+
+def read_audit(
+    store: AuditStore, case: str, roles: Iterable[str], keys: KeyProvider
+) -> list[Written]:
+    """The records of `case`, its children's and its forget request's, as a person holding `roles`
+    may read them: filtered as the case file is. A value whose field narrows who sees it is said
+    hidden, with the roles that would, unless they hold one; a sealed one is opened for them while
+    its case's key exists, and said forgotten after (brief, D30) (brief, D77)."""
+    held = frozenset(roles)
+    return [readable(record, held, keys) for record in store.read(case)]
+
+
+def readable(record: Written, held: frozenset[str], keys: KeyProvider) -> Written:
+    """`record` with each value as `held` may read it: what the act gave, what each decision read
+    and wrote. Each is opened for the place it is found at, as the export sealed it, never the
+    place written beside it: a sealed value moved elsewhere doesn't open (brief, D31)."""
+    record = copy.deepcopy(record)  # the store's own rows are never changed
+    owner = case_of(record["stream"])  # a child's values are sealed under its case's key (D75)
+    place = f"audit/{record['stream']}/{record['number']}"
+
+    def read(value: object, at: str) -> object:
+        return shown(value, owner, at, held, keys)
+
+    act = record["act"]
+    act["values"] = {
+        name: read(value, f"{place}/act/values/{name}") for name, value in act["values"].items()
+    }
+    for index, decision in enumerate(record["decisions"]):
+        at = f"{place}/decisions/{index}"
+        for fact in decision["read"]:
+            fact["value"] = read(fact["value"], f"{at}/read/{fact['field']}")
+        if decision["wrote"] is not None:
+            decision["wrote"]["value"] = read(decision["wrote"]["value"], f"{at}/wrote")
+    return record
+
+
+def shown(value: object, case: str, place: str, held: frozenset[str], keys: KeyProvider) -> object:
+    """`value`, found at `place`, as a person holding `held` reads it. A sealed value that doesn't
+    open there is `KeyRefused`, saying why: never a guess at what it held (fail closed)."""
+    if not isinstance(value, dict) or set(value) not in (SEALED, NARROWED):
+        return value  # in clear: seen by whoever reads the case's records
+    if held.isdisjoint(value["visible_to"]):
+        return f"hidden (needs {' or '.join(value['visible_to'])})"
+    if set(value) == NARROWED:
+        return value["value"]
+    if keys.state(case) == "destroyed":
+        return FORGOTTEN
+    return json.loads(keys.open(case, base64.b64decode(value["sealed"]), place))

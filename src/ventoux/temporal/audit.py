@@ -28,9 +28,9 @@ from ventoux.temporal.converter import keys_of
 from ventoux.tooling.audit import AuditStore
 from ventoux.tooling.keys import KeyProvider
 
-# Who may see each sensitive field, by field: what the export checks, and writes beside each
-# sealed value so a reader can filter it (brief, D30).
-type SensitiveFields = Mapping[str, tuple[str, ...]]
+# Who may see each field, by field, for the fields that narrow it: written beside each such value,
+# sealed or not, so a reader can filter it (brief, D30).
+type FieldRoles = Mapping[str, tuple[str, ...]]
 
 
 class ExportRefused(Exception):
@@ -46,18 +46,36 @@ def sensitive_fields(case: CaseDefinition) -> dict[str, tuple[str, ...]]:
     }
 
 
+def restricted_fields(case: CaseDefinition) -> dict[str, tuple[str, ...]]:
+    """Each field of `case` that isn't sensitive but narrows who sees it, with the roles that do:
+    written in clear, saying who may see it, so reading the store filters it (brief, D30)."""
+    return {
+        name: tuple(field.visible_to)
+        for name, field in case.fields.items()
+        if not field.sensitive and field.visible_to is not None
+    }
+
+
 def exported(
-    stream: str, records: list[AuditRecord], sensitive: SensitiveFields, keys: KeyProvider
+    stream: str,
+    records: list[AuditRecord],
+    sensitive: FieldRoles,
+    restricted: FieldRoles,
+    keys: KeyProvider,
 ) -> list[dict[str, Any]]:
     """`records` of the workflow `stream` as the export writes them, each sensitive value sealed
-    with `keys` under its case's key; `ExportRefused` if any holds a sensitive field's value in
-    clear, before anything is sealed: nothing is written then."""
+    with `keys` under its case's key, each `restricted` one saying who may see it;
+    `ExportRefused` if any holds a sensitive field's value in clear, before anything is sealed:
+    nothing is written then."""
     for record in records:
         refuse_in_clear(stream, record, sensitive)
-    return [as_written(stream, record, sensitive, keys) for record in records]
+    return [
+        as_written(stream, record, Sealer(case_of(stream), sensitive, restricted, keys))
+        for record in records
+    ]
 
 
-def refuse_in_clear(stream: str, record: AuditRecord, sensitive: SensitiveFields) -> None:
+def refuse_in_clear(stream: str, record: AuditRecord, sensitive: FieldRoles) -> None:
     """Fail closed: a value of a field the definition says is sensitive is never written unsealed,
     whatever let it through (brief, D77)."""
     for field, value in named_values(record):
@@ -79,13 +97,10 @@ def named_values(record: AuditRecord) -> list[tuple[str, object]]:
     return named
 
 
-def as_written(
-    stream: str, record: AuditRecord, sensitive: SensitiveFields, keys: KeyProvider
-) -> dict[str, Any]:
+def as_written(stream: str, record: AuditRecord, sealer: "Sealer") -> dict[str, Any]:
     """`record` as one JSON object; each sensitive value sealed for its place, `audit/<stream>/
     <number>/<path>`, so moved anywhere else it doesn't open (brief, D31)."""
     place = f"audit/{stream}/{record.number}"
-    sealer = Sealer(case_of(stream), sensitive, keys)
     return {
         "stream": stream,
         "number": record.number,
@@ -142,14 +157,24 @@ def fact_as_written(fact: Fact, sealer: "Sealer", place: str) -> dict[str, Any]:
 class Sealer:
     """Writes a value as JSON, sealing a sensitive one with the case's key for its place."""
 
-    def __init__(self, case: str, sensitive: SensitiveFields, keys: KeyProvider) -> None:
+    def __init__(
+        self,
+        case: str,
+        sensitive: FieldRoles,
+        restricted: FieldRoles,
+        keys: KeyProvider,
+    ) -> None:
         self.case = case  # whose key seals: a child's and a plan run's are its case's (brief, D75)
-        self.sensitive = sensitive
+        self.sensitive = sensitive  # each sensitive field, with who may see it
+        self.restricted = restricted  # each other field that narrows who sees it
         self.keys = keys
 
     def written(self, field: str, value: object, place: str) -> object:
-        """`value` as JSON: plain, or sealed with who may see it (brief, D30)."""
+        """`value` as JSON: plain; in clear saying who may see it, if its field narrows that; or
+        sealed, saying who may see it (brief, D30)."""
         if not isinstance(value, Sensitive):
+            if field in self.restricted:
+                return {"value": plain_json(value), "visible_to": list(self.restricted[field])}
             return plain_json(value)
         text = json.dumps(plain_json(value.value), sort_keys=True)
         sealed = self.keys.seal(self.case, text.encode(), place)
@@ -183,6 +208,7 @@ class ExportSent:
     stream: str  # the case's workflow ID: `claim-7`, a child's `claim-7/repair#1`
     records: list[dict[str, Any]]  # each record as `carried.record_as_data` writes it
     sensitive: dict[str, list[str]]  # each sensitive field, with who may see it
+    restricted: dict[str, list[str]]  # each other field that narrows who sees it, and to whom
 
 
 class ExportActivities:
@@ -200,7 +226,8 @@ class ExportActivities:
         whole call writes nothing new, and the case retries it (brief, D77)."""
         records = [record_from_data(each, {}) for each in sent.records]
         sensitive = {name: tuple(roles) for name, roles in sent.sensitive.items()}
-        self.store.append(exported(sent.stream, records, sensitive, self.keys))
+        restricted = {name: tuple(roles) for name, roles in sent.restricted.items()}
+        self.store.append(exported(sent.stream, records, sensitive, restricted, self.keys))
 
     def all(self) -> list[Any]:
         return [self.append]

@@ -109,7 +109,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.core.sensitive import Sensitive
     from ventoux.core.workflow_contract import WorkflowContract
     from ventoux.temporal.activities import OUTCOME
-    from ventoux.temporal.audit import ExportSent, sensitive_fields
+    from ventoux.temporal.audit import ExportSent, restricted_fields, sensitive_fields
     from ventoux.temporal.bindings import Binding
     from ventoux.temporal.carried import record_as_data, state_as_data, state_from_data
     from ventoux.temporal.children import (
@@ -871,6 +871,7 @@ class CaseWorkflow:
             workflow.info().workflow_id,
             [record_as_data(each) for each in sending],
             {name: list(roles) for name, roles in sensitive_fields(self.case).items()},
+            {name: list(roles) for name, roles in restricted_fields(self.case).items()},
         )
         try:
             await workflow.execute_activity(
