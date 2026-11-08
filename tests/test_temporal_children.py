@@ -217,8 +217,10 @@ def test_the_child_outlives_its_parents_switch() -> None:
 
 async def until_switched(client: Client, id: str, first: str) -> list[str]:
     """The case's first run and its current one, once it has continued as new; asked a bounded
-    number of times."""
-    for _ in range(100):
+    number of times, for about 15 seconds: a switch waits for an export under way (brief, D77),
+    which on a loaded machine can take more than the 5 seconds this once allowed (tutor review of
+    #91), and the scenario's own bound, 20 seconds, still holds."""
+    for _ in range(300):
         _, current = await runs_of(client, id)
         if current != first:
             return [first, current]
@@ -389,6 +391,9 @@ def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> 
         # Its records written: the time-skipping server skips no time past an activity whose
         # workflow was terminated while it ran (brief, D77).
         await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
+        # The parent's too: its new run writes what it carried. Running as the time is skipped,
+        # the server waits for it, but the skip then starts quiet, as the child's.
+        await reported(parent, lambda now: now.unwritten == 0)
         await child.terminate("from outside")
         await environment.sleep(timedelta(hours=25))
         return await reported(parent, lambda now: bool(now.needs_attention))

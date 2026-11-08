@@ -730,6 +730,31 @@ every line in exactly one record; the migration's "not recorded"; a request not 
 refused proposal's step; no record renamed; `OPENING` (four release tests); on Temporal, a
 migration to a version known but not opened, and its branch for a version not known at all.
 
+### From the tutor's review of #91
+
+- **A record sent again, sealed afresh, was accepted but untested.** With `same()` changed to
+  `kept == sent`, every export, record and forget test still passed: a promise with no test. Now a
+  store test exports the same records twice (the national ID sealed with two nonces) and appends
+  both, the second accepted and the first kept; and a case test's store keeps a write, then
+  fails as if its answer were lost: the retry, sealed afresh, is accepted, and the case closes.
+  Both fail under the mutation, the case test saying `audit export failed: audit record
+  claim-7/1 is already kept, with other content`. The guide's store section says what "the same
+  content" means, and to compare with `same`: the production store is the platform team's.
+- **`test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day` failed once,** its
+  message lost. What was checked:
+  - *The parent's own export, running as the test skips 25 hours:* it can be (a probe logging
+    each write and the skip showed the new run's export under way as the skip began), but the
+    test server waits for it: with each write delayed at random up to 1.5 s, 32 runs, four at a
+    time, all passed. So it isn't this; the test now waits for the parent's records all the same,
+    so the skip starts quiet.
+  - *The daily check set too late:* it is set in the new run's first workflow task, and the server
+    skips no time while a workflow task or an activity is outstanding.
+  - *What 19b changed for this test:* the parent's switch now waits for an export under way, and
+    `until_switched` gave up after 100 tries 0.05 s apart, about 5 s. A first write slower than
+    that fails the test before the skip, `claim-14 never continued as new` (a probe delaying it
+    6 s did, every time). On a loaded full run that is the likely cause. Both switch waits
+    (`until_switched`, `continued_as_new`) now allow about 15 s, inside the scenario's 20 s.
+
 ## Promises (19b)
 
 Each claim the note, D77 and the guide make about the export, and the test that would fail if it
@@ -741,6 +766,7 @@ failing first or, for a guard, failing when switched off (said in each slice's c
 | A sensitive field's value in clear fails the export, read from the definition, never the wrapper; nothing is written; the refusal names the record and the field, never the value | `test_a_sensitive_value_in_clear_fails_the_export` |
 | A sealed value opens only at its own place, under its case's key | `test_a_sensitive_value_in_clear_fails_the_export`, `test_read_audit_opens_a_value_only_for_a_role_that_may_see_it` (a value moved in the store) |
 | The store keeps each record once: the same again accepted; a gap or other content refused, saying which; nothing of the call kept; a case's streams read in order | `test_the_store_keeps_each_record_once_in_order` |
+| A record sent again, sealed afresh (a write whose completion was lost), is the same record: each sealed value compared by its place; the store accepts it, and the case closes | `test_a_record_sealed_afresh_is_the_same_record`, `test_an_export_whose_completion_was_lost_is_retried_and_the_case_closes` (from the tutor's review of #91) |
 | A case worker without a store is refused, saying what to give | `test_a_case_worker_without_a_store_is_refused` |
 | A case at engine 3 writes every record, in order, in its stream, before it ends: the history line for line | `test_the_quickstarts_refund_is_exported_on_temporal` |
 | A case at engine 2 makes no record, schedules no export, writes nothing | `test_a_case_at_engine_2_schedules_no_export` |

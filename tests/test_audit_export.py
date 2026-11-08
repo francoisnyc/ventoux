@@ -21,8 +21,8 @@ from temporalio.client import Client, WorkflowHistory
 from temporalio.common import RetryPolicy
 from test_audit_records import checked_claim, known
 from test_case import REFUND
+from test_child_cases import CLOSABLE, repair
 from test_child_cases import claim as repair_claim
-from test_child_cases import repair
 from test_sensitive import FILE, NATIONAL_ID, claim
 from test_temporal_case import (
     LARGE,
@@ -199,6 +199,27 @@ def test_the_store_keeps_each_record_once_in_order(tmp_path: Path) -> None:
     ]
 
 
+def test_a_record_sealed_afresh_is_the_same_record(tmp_path: Path) -> None:
+    # An export whose write landed but whose completion was lost is sent again, sealed afresh:
+    # other bytes, the same value at the same place. The store takes it as the record it keeps,
+    # equal with each sealed value taken by its place, or the case could never close (brief, D77)
+    # (tutor review of #91).
+    definition, records = claim_records()
+    keys = FileKeys(tmp_path / "keys.json")
+    keys.create("claim-7")
+    sensitive = sensitive_fields(parse_case(definition))
+    first = exported("claim-7", records, sensitive, {}, keys)
+    again = exported("claim-7", records, sensitive, {}, keys)
+    sealed = [each["act"]["values"]["national_id"]["sealed"] for each in (first[0], again[0])]
+    assert sealed[0] != sealed[1]  # a fresh nonce: the bytes differ
+    store = FileAudit(tmp_path / "audit")
+    store.append(first)
+    store.append(again)  # accepted
+    kept = store.read("claim-7")
+    assert [each["number"] for each in kept] == [each["number"] for each in first]
+    assert kept == first  # the first write kept, never replaced
+
+
 def test_a_case_worker_without_a_store_is_refused() -> None:
     # A case would run with no trail (brief, D77).
     async def build() -> None:
@@ -367,6 +388,49 @@ def test_with_the_store_down_the_case_closes_only_once_its_export_is_retried(
     assert ended.history[-1] == "omar retried the audit export as operations"
     written = store.read("refund-1")
     assert [line for each in written for line in each["lines"]] == ended.history
+
+
+class LosesACompletion(FileAudit):
+    """A store that keeps the first write, then fails as if its answer were lost: the export sees
+    a failure for records it holds. A test's own."""
+
+    lost = False
+
+    def append(self, records: list[dict[str, Any]]) -> None:
+        super().append(records)
+        if not self.lost:
+            self.lost = True
+            raise ConnectionError("the audit database at db.internal timed out answering")
+
+
+def test_an_export_whose_completion_was_lost_is_retried_and_the_case_closes(
+    tmp_path: Path,
+) -> None:
+    # The first write lands, holding the national ID sealed, but its completion is lost: Temporal
+    # retries the call, which seals the records afresh. The store accepts them as the records it
+    # keeps, the case needs no attention, and once closed it ends (brief, D77) (tutor review of
+    # #91).
+    store = LosesACompletion(tmp_path / "audit")
+
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport]:
+        definition = claim() | {"close_reasons": CLOSABLE}
+        case = await start_case(
+            client, QuicklyFailingExports, definition, as_json(FILE), "claim-7", QUEUE
+        )
+        written = await reported(case, lambda now: now.unwritten == 0 or bool(now.needs_attention))
+        # Said here, before the close: refused, the case would never end, and the test time out.
+        assert written.needs_attention == [], written.needs_attention
+        await close(case, "duplicate", "ana", ["support"])
+        await reported(case, lambda now: now.status == "closed")
+        return written, await case.result()
+
+    written, ended = on_temporal(scenario, cases=QuicklyFailingExports, audit=store)
+    assert store.lost  # the first write's completion was lost
+    assert written.unwritten == 0
+    assert (ended.status, ended.unwritten) == ("closed", 0)
+    kept = store.read("claim-7")
+    assert [each["number"] for each in kept] == list(range(1, len(kept) + 1))
+    assert [line for each in kept for line in each["lines"]] == ended.history
 
 
 def test_an_export_that_hasnt_failed_is_never_retried() -> None:

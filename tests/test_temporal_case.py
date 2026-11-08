@@ -780,8 +780,9 @@ REWORKABLE["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]
 
 async def continued_as_new(client: Client, id: str) -> None:
     """Once the case has continued as new: a switch waits for nothing to run, its export
-    included (brief, D27) (brief, D77). Asked a bounded number of times."""
-    for _ in range(100):
+    included (brief, D27) (brief, D77). Asked a bounded number of times, for about 15 seconds:
+    an export under way can take more than 5 on a loaded machine (tutor review of #91)."""
+    for _ in range(300):
         first, last = await runs_of(client, id)
         if last != first:
             return

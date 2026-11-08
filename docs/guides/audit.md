@@ -103,9 +103,15 @@ worker = case_worker(
 A store is anything with two methods: `append(records)`, which keeps each record once by its
 stream and number (a record already kept with the same content is accepted; with other content,
 refused), and `read(case)`, which gives a case's records, its children's and its requests', each
-stream in order. `FileAudit` is the development store; in
-production it is yours (a database table, a bucket), written to that shape. A case worker without
-a store is refused: a case would run with no trail.
+stream in order. `FileAudit` is the development store; in production it is yours (a database
+table, a bucket), written to that shape. A case worker without a store is refused: a case would
+run with no trail.
+
+**"The same content" means equal with each sealed value taken by its place,** never its bytes.
+A write that landed but whose answer was lost is sent again, sealed afresh with a new nonce: other
+ciphertext, the same value at the same place. A store comparing bytes refuses it as other content,
+the operator's retry too, and the case never closes. Compare with `ventoux.tooling.audit.same`,
+which `FileAudit` uses.
 
 **Cases export from engine version 3,** the version new cases open at. A case opened by an earlier
 version of Ventoux decides and replays as it always did, and exports nothing. Migrating one to
