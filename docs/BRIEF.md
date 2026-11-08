@@ -3296,6 +3296,49 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   as a signal in its run's history; a plan whose workflow itself fails returns no report, so its
   events stay in its own history.
 
+### D78. The production key provider: Vault's transit engine, a mark that outlives the key
+
+*Decided 2026-11-08, in layer 19c (`docs/layers/19-audit-keys.md`, choices 14 to 20, answered
+2026-11-07, and 31 to 36). Adds to D15, D17, D31, D32, D62 and D77, whose text is kept.*
+
+- **Vault's transit engine,** behind `KeyProvider`: `VaultKeys(address, transit_mount,
+  marks_mount)`, each required, no default. A key per case, `aes256-gcm96`, made not exportable and
+  allowing no plaintext backup. Before each seal or open its configuration is read, and a key of
+  another type, or one that could leave Vault, is refused, never used. The part a value is sealed
+  for is sent as its associated data, so a value moved elsewhere doesn't open, as with `FileKeys`.
+- **Destroyed at once:** the mark is written, then the key's deletion allowed, then the key
+  deleted. The mark, `ventoux/forgotten/<name>` in a key-value engine (version 2), outlives the key:
+  from it on, the case reads as destroyed, `create` refuses its ID, and no seal or open uses a key
+  of that name, whatever Vault would let be made again. A failure between the steps leaves the case
+  destroyed, and destroying again finishes. A cloud KMS, which only schedules a deletion weeks
+  ahead, would have the case say `forgetting, key deletion scheduled for …` and be forgotten only
+  then: kept for an adapter after v1.0.
+- **A case ID as a name:** lowercase letters, digits and `-` stay; every other byte of its UTF-8,
+  capitals and `_` included, is `_` and two hex digits (`refund-A-1001` is
+  `ventoux-refund-_41-1001`). Two IDs never share a name, and no name holds a character a URL path would read. An empty ID,
+  and one whose name passes 128 characters, are refused.
+- **The client is the standard library** (`urllib.request`), no new dependency. Every call has a
+  timeout (10 seconds by default). The token is read from `VAULT_TOKEN` as each call is made, never
+  kept on the object, never said in a message, a log, a `repr` or a recording (D62); an `http://`
+  address is refused unless it is `localhost` or `127.0.0.1`.
+- **Off the event loop:** every provider call made from async code (the codec, the forget
+  request's activities, the client opening a case or a run) goes through `asyncio.to_thread`,
+  whichever provider: a call waiting on Vault never stalls a worker.
+- **Two kinds of error, never an empty value or a guess** (D17):
+  - `KeyRefused`, final: never made; destroyed (a mark); a key that can leave Vault, or of another
+    type; a part that doesn't open; an ID that can't be a name.
+  - `KeyUnavailable`, not now: Vault unreachable, timing out, refusing the token, or answering
+    something unreadable. A workflow task or an activity meeting it is retried until Vault answers.
+  - A key's state is `destroyed` or `never made` only on Vault's answer; anything else is
+    `KeyUnavailable`. `read_audit` lets it through, never saying `‹forgotten›`; the forget request
+    refuses a proposal it meets before anyone answers, and after the approval waits for Vault.
+- **The export says which service failed** (D77, made exact): the key service's errors whole, with
+  `look at the key service, then retry the export`; a final `KeyRefused` fails it at once, never
+  retried; `KeyUnavailable` is retried as a store that is down is.
+- **Tests never reach Vault:** `VaultKeys` takes a transport, and tests give it a recording of
+  Vault's answers, request by request; a request it doesn't hold is refused, saying which. One test,
+  against a development Vault, runs only where `vault` is installed.
+
 ## Concepts
 
 | Term | Meaning |
