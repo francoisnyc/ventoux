@@ -3401,9 +3401,18 @@ and D60, whose text is kept; D4 is amended below.*
   labels, option checks and document stores; written by `ventoux conformance --write`, and checked
   unchanged in CI byte for byte, as the schema is (D60). A second way to make a contract would be
   a second set of rules.
-- **Every issue code is listed, and every one has a refusing entry:** the codes validation gives
-  are a list in `core` (`ISSUE_CODES`); a code given that isn't listed fails a test, and so does a
-  listed code no entry expects. Every committed definition is an entry, valid.
+- **Every issue code is listed, and every one has an entry expecting it:** the codes validation
+  gives are a list in `core` (`ISSUE_CODES`), and an issue with a code not in it is refused when it
+  is made, so a new rule can't give a code the suite doesn't know. A listed code no entry expects
+  fails the check. Every definition committed in the repository is an entry too, expecting what
+  it gives: some exist to show an issue.
+- **A code the package refuses first is said, never left uncovered:** `UNKNOWN_PLAN`,
+  `UNKNOWN_CASE` and `NESTED_CASE` can't come out of the one check, since putting the package
+  together refuses a missing plan, a missing child or a nested child first, with no code; the
+  engine keeps them as backstops (fail closed). The suite lists them under `refused_first`, each
+  with a package that shows it, and the check fails if that package is put together after all.
+- **One catalog:** the development catalog (`ventoux.testing`), which gains `ledger.post@1`, an
+  amount taken only from the opener, so `OPENER_DECIDES` has an entry.
 - **Run both ways in CI:** a definition that must validate does; one that must be refused is, with
   exactly the issues expected. A change to validation that alters a result fails CI.
 - **A result changed on purpose is recorded:** its entry's `expected` changes in the same pull

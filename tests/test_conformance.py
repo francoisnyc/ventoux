@@ -20,6 +20,7 @@ from ventoux.tooling.conformance import (
     given,
     mismatches,
     read_suite,
+    refused_first_problems,
     uncovered,
     unrecorded,
 )
@@ -499,3 +500,36 @@ def test_export_refuses_a_folder_holding_files_and_writes_nothing(
     assert main(["conformance", "--export", str(tmp_path)]) == 2
     assert "holds files already: export into a new folder" in capsys.readouterr().out
     assert files_in(tmp_path) == {"notes.txt": b"mine"}
+
+
+def with_refused_first(suite: Path, case: str) -> Path:
+    """`suite` with UNKNOWN_PLAN said refused first, by the package of `case` given no plan."""
+    data = json.loads((suite / "suite.json").read_text())
+    data["refused_first"] = [
+        {
+            "code": "UNKNOWN_PLAN",
+            "why": "a plan step's plan not given is refused when the package is put together",
+            "case": case,
+            "plans": [],
+            "cases": {},
+        }
+    ]
+    (suite / "suite.json").write_text(json.dumps(data))
+    return suite
+
+
+def test_a_code_the_package_refuses_first_is_not_uncovered(tmp_path: Path) -> None:
+    suite = with_package(a_suite(tmp_path, refund_entry({"issues": []})))
+    with_refused_first(suite, "cases/refund-package.json")
+    assert not any(line.startswith("UNKNOWN_PLAN") for line in uncovered(suite))
+    assert refused_first_problems(suite) == []
+
+
+def test_a_code_said_refused_first_whose_package_is_put_together_is_said(tmp_path: Path) -> None:
+    suite = with_refused_first(a_suite(tmp_path, refund_entry({"issues": []})), "cases/refund.json")
+    assert refused_first_problems(suite) == [
+        (
+            "UNKNOWN_PLAN: said refused before validation, and its package is put together: "
+            "give an entry expecting it instead"
+        )
+    ]

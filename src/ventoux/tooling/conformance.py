@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from ventoux.case.checked import issues_of
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.case.releases import PackageRefused, package, read_json
+from ventoux.case.releases import Package, PackageRefused, package, read_json
 from ventoux.core.catalog import Catalog
 from ventoux.core.plan import PlanInvalid, parse_plan
 from ventoux.core.promise import promise_of
@@ -28,6 +28,7 @@ from ventoux.core.validate import ISSUE_CODES, validate
 from ventoux.tooling.check import differs, shown
 from ventoux.tooling.deployment import DEVELOPMENT, catalog_named
 from ventoux.tooling.suite import (
+    Child,
     Entry,
     Expected,
     Issues,
@@ -144,19 +145,23 @@ def package_given(entry: PackageEntry, folder: Path, catalog: Catalog) -> list[F
         parse_case(read_json(text, entry.case))
     except CaseInvalid as invalid:
         return RefusedAt(invalid.paths)
-    plans = [(folder / plan).read_text() for plan in entry.plans]
     try:
-        children = {
-            reference: package(
-                (folder / child.case).read_text(),
-                [(folder / plan).read_text() for plan in child.plans],
-            )
-            for reference, child in entry.cases.items()
-        }
-        released = package(text, plans, children)
+        released = put_together(folder, entry.case, entry.plans, entry.cases)
     except PackageRefused as refused:
         raise BrokenEntry(f"a broken entry, not a package: {refused}") from None
     return [(issue.path, issue.code, issue.severity) for issue in issues_of(released, catalog)]
+
+
+def put_together(folder: Path, case: str, plans: list[str], cases: dict[str, Child]) -> Package:
+    """The package of `case` with its `plans` and child `cases`, files in `folder`, as `ventoux
+    release` puts one together; `PackageRefused` when it can't be."""
+    children = {
+        reference: package(
+            (folder / child.case).read_text(), [(folder / plan).read_text() for plan in child.plans]
+        )
+        for reference, child in cases.items()
+    }
+    return package((folder / case).read_text(), [(folder / p).read_text() for p in plans], children)
 
 
 def mismatches(folder: Path) -> list[str]:
@@ -207,7 +212,27 @@ def uncovered(folder: Path) -> list[str]:
         if isinstance(entry.expected, Issues)
         for issue in entry.expected.issues
     }
-    return [f"{code}: listed, and no entry expects it" for code in sorted(ISSUE_CODES - expected)]
+    suite = read_suite(folder)
+    said = {refused.code for refused in suite.refused_first}
+    return [
+        f"{code}: listed, and no entry expects it" for code in sorted(ISSUE_CODES - expected - said)
+    ]
+
+
+def refused_first_problems(folder: Path) -> list[str]:
+    """Each code the suite in `folder` says the package refuses first, whose package is put
+    together all the same: the claim checked, never taken on trust."""
+    found: list[str] = []
+    for refused in read_suite(folder).refused_first:
+        try:
+            put_together(folder, refused.case, refused.plans, refused.cases)
+        except PackageRefused:
+            continue
+        found.append(
+            f"{refused.code}: said refused before validation, and its package is put together: "
+            "give an entry expecting it instead"
+        )
+    return found
 
 
 def unrecorded(base: Suite, head: Suite) -> list[str]:
@@ -272,7 +297,7 @@ def conformance_command(folder: Path, write: bool) -> int:
             gives = f"what the {Path(name).stem} catalog gives"
             problems.append(differs(shown(committed), gives, committed.read_text(), text))
     try:
-        problems += mismatches(folder) + uncovered(folder)
+        problems += mismatches(folder) + uncovered(folder) + refused_first_problems(folder)
     except SuiteUnreadable as unreadable:
         print(unreadable)
         return CANT_READ

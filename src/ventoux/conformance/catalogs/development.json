@@ -155,6 +155,65 @@
       "timeout": 600,
       "version": 1
     },
+    "ledger.post@1": {
+      "effect": "compute",
+      "idempotency_key": null,
+      "input": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount",
+            "x-input-policies": [
+              {
+                "kind": "only_from",
+                "systems": [
+                  "opener"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "title": "RecordAsked",
+        "type": "object"
+      },
+      "name": "ledger.post",
+      "outcomes": [],
+      "output": {
+        "properties": {
+          "entry_id": {
+            "title": "Entry Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "Recorded",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 3
+      },
+      "risk": "low",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 10
+      },
+      "version": 1
+    },
     "letters.draft@2": {
       "effect": "write",
       "idempotency_key": "idempotency_key",

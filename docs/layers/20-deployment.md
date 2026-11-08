@@ -413,3 +413,49 @@ The catalog an entry names is mapped to Python's catalog in the runner (`develop
 `src/ventoux/tooling/conformance.py`; the command in `cli.py`; `tests/test_conformance.py`; two
 lines in `ci.yml`. **Size, said now:** about sixty refusing entries (one per code at least, each
 a small definition written by hand), the committed examples, and the schema corpus's wrong shapes.
+
+### Decided while building 20a
+
+- **Agreed 2026-11-08: the seams as proposed.** Three changed while building, each said here:
+  - **`uncovered(folder)` is its own seam,** never part of `mismatches`: a listed code no entry
+    expects is a fact about the whole suite, and every small suite in a test would say sixty.
+  - **A code given that isn't listed is refused by `Issue` itself,** when it is made
+    (`ISSUE_CODES` in `core/validate.py`), never found by the runner: a new rule's code fails every
+    test that reaches it until it is listed. Its first run found two codes a grep couldn't see,
+    built from a field's type: `OPTION_NOT_GIVEN_BY_A_PERSON`, `ATTACHMENT_NOT_GIVEN_BY_A_PERSON`.
+  - **The catalog file is checked by `--unchanged`,** beside `mismatches`, `uncovered` and
+    `refused_first_problems`, never inside `mismatches`, which is about entries.
+- **The definitions come from the negative tests.** Each refusing entry is the JSON an existing
+  test gave the development catalog when it first gave that code, captured once (a pytest plugin
+  in a scratch folder, recording what `model_validate` read and what validation gave), and named
+  after that test: `WRONG_KIND: a step and its contract are the same kind (test_case_validation)`.
+  Each expected result is what this engine gives, reviewed: every entry gives its code, and some a
+  warning beside it (`OUTCOME_UNREAD`). Five codes were given only against a test's own catalog;
+  four give the same against the development one, and `UNCHECKED_OPTION` names `crm`, an option
+  the development catalog doesn't check. From here on `suite.json` is written by hand.
+- **Not every committed definition is valid** (D80 corrected before merge): some checks and
+  witnesses exist to show an issue. Each is an entry expecting what it gives, its file equal.
+- **Three codes are refused first** (answered 2026-11-08: "said before"): `UNKNOWN_PLAN`,
+  `UNKNOWN_CASE` and `NESTED_CASE` can't come out of `issues_of`, since `package()` refuses a
+  missing plan, a missing child or a nested child before validation runs, with no code. The
+  suite lists them under `refused_first`, each with a package that shows it; the check fails if
+  one is put together after all.
+- **`OPENER_DECIDES` gets a contract** (answered 2026-11-08: "add to the development catalog"):
+  `ledger.post@1`, an amount only from the opener; named apart from the tests' own
+  `ledger.record@1`, which they register over the development catalog with other inputs.
+  `contracts.lock.json` gains its line.
+- **The read refusal's paths:** `problem()` in `case/definition.py` and `core/plan.py` gives the
+  path and the message apart; `CaseInvalid` and `PlanInvalid` keep `paths`, and a small `line()`
+  writes them as before, used by stories and the draft sheet too. Every message is unchanged.
+- **A broken entry is said, never a result, and never stops the others:** a package that reads
+  but can't be put together gives one line, `a broken entry, not a package: …`.
+- **The suite's format is closed:** read with Pydantic models that refuse an unknown key, an
+  expected issue carrying a `message` included; an entry's shape is picked by `kind`, an
+  `expected`'s by whether it says `read`, and a problem's path is said as the file has it.
+- **`--since` with a base that has no suite** says so and passes: the first pull request has no
+  base to compare. A line of `changes` records a change only when its `was` and `now` are the
+  change made, so a stale line can't vouch for another.
+- **`--export` refuses a folder holding files,** so an export is never mixed with something else.
+- **My explanation's example was wrong** (step 1): a misspelt field in a case's condition gives
+  `EXPRESSION_INVALID`; `UNKNOWN_FIELD` is a plan's code. The guide's example now says what the
+  engine gives, and a test runs it from the guide.

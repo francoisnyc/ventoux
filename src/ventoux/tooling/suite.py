@@ -91,8 +91,19 @@ class Change(Closed):
     entry: str  # the entry's name
     was: Expected | None  # what it expected before; None for an entry that is new
     now: Expected | None  # what it expects now; None for an entry removed
-    why: str  # the reason, naming the decision or the fix: "brief, D81"
+    why: str  # the reason, naming the decision or the fix that changed it
     date: str  # when: `2026-11-08`
+
+
+class RefusedFirst(Closed):
+    """A listed code the one check can never give: putting its package together is refused first,
+    with no code. Said, with a package that shows it, never left uncovered in silence."""
+
+    code: str  # the issue code: `UNKNOWN_PLAN`
+    why: str  # which refusal comes first, and why the engine keeps the code all the same
+    case: str  # a package that shows it: its case.json
+    plans: list[str]  # its plans' files
+    cases: dict[str, Child]  # its child cases, by reference
 
 
 class Suite(Closed):
@@ -101,6 +112,7 @@ class Suite(Closed):
     engine: int  # the engine version whose validation it states (brief, D51)
     entries: list[Entry]
     changes: list[Change] = []  # oldest first; never rewritten, as the brief's decisions aren't
+    refused_first: list[RefusedFirst] = []  # codes the package refuses before validation runs
 
 
 def path_of(loc: tuple[int | str, ...]) -> str:

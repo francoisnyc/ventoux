@@ -367,8 +367,8 @@ production UI.
 A ticked item is built. An open one says what is built of it so far, if anything.
 
 - [ ] The engine in Python (Temporal Python SDK, Pydantic), with the definition format published as
-      JSON Schema and a conformance suite any implementation must pass. Built: the engine and the
-      published schema (`ventoux schema`). Left: the conformance suite.
+      JSON Schema and a conformance suite any implementation must pass. Built: the engine, the
+      published schema (`ventoux schema`) and the conformance suite (`ventoux conformance`).
 - [x] A typed Python builder that produces plans and Cases, so definitions are written as code and
       checked as data
 - [x] Existing Temporal workflows as case steps, each with a declared contract (inputs, outputs

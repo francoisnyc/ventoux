@@ -612,6 +612,23 @@
       }
     },
     {
+      "name": "OPENER_DECIDES: who opens the case decides only a warning (test_case_validation)",
+      "kind": "package",
+      "case": "cases/opener-decides.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.record.inputs.amount",
+            "code": "OPENER_DECIDES",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
       "name": "OUTCOME_UNREAD: every example is a package the check accepts (test_builder_guide)",
       "kind": "package",
       "case": "cases/outcome-unread.json",
@@ -1323,6 +1340,34 @@
           }
         ]
       }
+    }
+  ],
+  "refused_first": [
+    {
+      "code": "NESTED_CASE",
+      "why": "a child case with a case step of its own is refused when its parent's package is put together, since its own child can't be given: a child opens no case (brief, D74). Kept in validation as a backstop (fail closed).",
+      "case": "cases/nested-case.json",
+      "plans": [],
+      "cases": {
+        "repair@3": {
+          "case": "cases/nested-case-repair.json",
+          "plans": []
+        }
+      }
+    },
+    {
+      "code": "UNKNOWN_CASE",
+      "why": "a case step's child not given is refused when the package is put together, before validation runs (brief, D74). Kept in validation as a backstop (fail closed).",
+      "case": "cases/unknown-case.json",
+      "plans": [],
+      "cases": {}
+    },
+    {
+      "code": "UNKNOWN_PLAN",
+      "why": "a plan step's plan not given is refused when the package is put together, before validation runs (brief, D50). Kept in validation as a backstop (fail closed).",
+      "case": "examples/packages/refund/case.json",
+      "plans": [],
+      "cases": {}
     }
   ]
 }
