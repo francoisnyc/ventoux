@@ -431,6 +431,16 @@ class SheetAnswer:
     wording_refused: str = ""
 
 
+# The export's own call, and how often it is tried before the case is told it failed: a store
+# down for a while is waited for, a refusal (a value in clear, a gap) never retried (brief, D77).
+EXPORT_CALL = timedelta(minutes=1)
+EXPORT_RETRIES = RetryPolicy(
+    maximum_attempts=10,
+    maximum_interval=timedelta(minutes=5),
+    non_retryable_error_types=["ExportRefused", "AuditRefused"],
+)
+
+
 class CaseWorkflow:
     """The code of a case workflow. A deployment subclasses it to name its catalog and plans, and
     registers the subclass (Temporal's SDK wants `@workflow.run` on the class it registers), as
@@ -454,6 +464,9 @@ class CaseWorkflow:
     # well under Temporal's 512 KB warning for one payload, which the switch's state is
     # (brief, D77). A test's workflow lowers it, as `events_per_run`.
     audit_bound: ClassVar[int] = 256 * 1024
+    # How often the export is tried before the case is told it failed: 10 times, at most 5 minutes
+    # apart (brief, D77). A test's workflow lowers it, as `audit_bound`.
+    export_retries: ClassVar[RetryPolicy] = EXPORT_RETRIES
 
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
@@ -864,7 +877,7 @@ class CaseWorkflow:
                 "ventoux.audit.append",
                 sent,
                 start_to_close_timeout=EXPORT_CALL,
-                retry_policy=EXPORT_RETRIES,
+                retry_policy=self.export_retries,
             )
             last = sending[-1].number
             self.state.audit = [each for each in self.state.audit if each.number > last]
@@ -1440,14 +1453,6 @@ def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWor
     return f"{reference} failed with {raised(error)}: {Sensitive(said)}"
 
 
-# The export's own call, and how often it is tried before the case is told it failed: a store
-# down for a while is waited for, a refusal (a value in clear, a gap) never retried (brief, D77).
-EXPORT_CALL = timedelta(minutes=1)
-EXPORT_RETRIES = RetryPolicy(
-    maximum_attempts=10,
-    maximum_interval=timedelta(minutes=5),
-    non_retryable_error_types=["ExportRefused", "AuditRefused"],
-)
 # Ventoux's own refusals of an export, whose words never quote a value: said whole.
 EXPORT_REFUSALS = ("ExportRefused", "AuditRefused")
 

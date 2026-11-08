@@ -7,25 +7,46 @@ docs/layers/19-audit-keys.md (19b), docs/guides/audit.md and brief, D77.
 import asyncio
 import base64
 import dataclasses
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 from skipping_server import time_skipping
+from temporalio import workflow
 from temporalio.client import Client, WorkflowHistory
+from temporalio.common import RetryPolicy
 from test_audit_records import checked_claim, known
 from test_case import REFUND
 from test_sensitive import FILE, NATIONAL_ID
-from test_temporal_case import QUEUE, on_temporal
+from test_temporal_case import (
+    LARGE,
+    QUEUE,
+    REVIEW_FORM,
+    SwitchingCases,
+    on_temporal,
+    reported,
+)
 from worker_threads import worker_threads
 
+from ventoux.case.admission import RetryRefused
 from ventoux.case.audit import AuditRecord
 from ventoux.case.definition import parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import ExportRetried
 from ventoux.temporal.audit import ExportRefused, exported, sensitive_fields
-from ventoux.temporal.cases import CaseReport, answer, start_case
+from ventoux.temporal.cases import (
+    CaseReport,
+    CaseStart,
+    CaseWorkflow,
+    answer,
+    retry_export,
+    start_case,
+)
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
+    CATALOG,
     FAKES,
     DevelopmentCases,
     DevelopmentPlans,
@@ -169,3 +190,100 @@ def test_the_quickstarts_refund_is_exported_on_temporal(tmp_path: Path) -> None:
     ]
     assert [line for each in written for line in each["lines"]] == ended.history
     assert "ventoux.audit.append" in scheduled(history)
+
+
+def test_record_numbers_never_repeat_across_switches(tmp_path: Path) -> None:
+    # A case continuing as new after every two events: its records leave the state as they are
+    # written, the counter crosses each switch, and the store holds each number once, in order,
+    # the whole history line for line (brief, D27) (brief, D77).
+    store = FileAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, SwitchingCases, REFUND, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", ["support"], REVIEW_FORM)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await answer(case, "pay.approval#1", "approve", "sam", ["support", "support-lead"])
+        return await case.result()
+
+    ended = on_temporal(scenario, cases=SwitchingCases, audit=store)
+    written = store.read("refund-1")
+    assert [each["number"] for each in written] == list(range(1, len(written) + 1))
+    assert [line for each in written for line in each["lines"]] == ended.history
+
+
+class DownAudit(FileAudit):
+    """A store that can be taken down, and brought back: a test's own."""
+
+    down = False
+
+    def append(self, records: list[dict[str, Any]]) -> None:
+        if self.down:
+            raise ConnectionError("the audit database at db.internal refused ord-1's records")
+        super().append(records)
+
+
+# Temporal: the development cases, trying the export twice, quickly, before the case is told it
+# failed: a deployment keeps the default (brief, D77).
+@workflow.defn(name="ventoux.case")
+class QuicklyFailingExports(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+    export_retries = RetryPolicy(
+        maximum_attempts=2,
+        initial_interval=timedelta(milliseconds=50),
+        non_retryable_error_types=["ExportRefused", "AuditRefused"],
+    )
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+FAILED = (
+    "audit export failed: the store failed with ConnectionError: ‹sensitive›: look at the store, "
+    "then retry the export"
+)
+
+
+def test_with_the_store_down_the_case_closes_only_once_its_export_is_retried(
+    tmp_path: Path,
+) -> None:
+    # The store down: the case decides on and closes, but doesn't end; after the export's retries
+    # it needs attention, saying why but never what the store said. Only an operator retries the
+    # export; once it is written, the case ends (brief, D17) (brief, D26) (brief, D77).
+    store = DownAudit(tmp_path / "audit")
+    store.down = True
+
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport, CaseReport]:
+        case = await start_case(client, QuicklyFailingExports, REFUND, SMALL, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", ["support"], {"approved_amount": FORTY})
+        failed = await reported(case, lambda now: now.needs_attention == [FAILED])
+        await retry_export(case, "ana", ["support"])
+        refused = await reported(case, lambda now: "ana's retry" in now.history[-1])
+        store.down = False
+        await retry_export(case, "omar", ["operations"])
+        return failed, refused, await case.result()
+
+    failed, refused, ended = on_temporal(scenario, cases=QuicklyFailingExports, audit=store)
+    assert failed.status == "closed"  # closed, and waiting for its export to end
+    assert "db.internal" not in str(failed)
+    assert refused.history[-1] == (
+        "refused ana's retry of the audit export: the audit export is retried by an operating "
+        "role (operations), and ana has support"
+    )
+    assert ended.needs_attention == [] and ended.unwritten == 0
+    assert ended.history[-1] == "omar retried the audit export as operations"
+    written = store.read("refund-1")
+    assert [line for each in written for line in each["lines"]] == ended.history
+
+
+def test_an_export_that_hasnt_failed_is_never_retried() -> None:
+    # Nothing to retry: refused, saying so, as a retry of a run that hasn't failed (brief, D26).
+    run = run_case(REFUND, {"order_id": "ord-1", "amount": 40}, [], {"omar": ["operations"]})
+    with pytest.raises(RetryRefused) as refused:
+        decide(
+            run.definition,
+            CATALOG,
+            run.state,
+            ExportRetried("omar", frozenset({"operations"}), at=1_800_000_000),
+        )
+    assert str(refused.value) == "the audit export hasn't failed: nothing to retry"
