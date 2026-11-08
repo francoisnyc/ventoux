@@ -10,6 +10,9 @@ from typing import Any
 import pytest
 from cases.refund import refund
 from test_sensitive import FILE, NATIONAL_ID, OPENING, claim, lookup
+from test_set import APPROVED, with_owed
+from test_set import FILE as WITH_FEE
+from test_set import PEOPLE as SET_PEOPLE
 
 from ventoux.case.audit import Act, Decision, Fact
 from ventoux.case.recording import record_refused
@@ -211,6 +214,34 @@ def test_a_form_value_is_recorded_as_the_case_file_keeps_it() -> None:
     }
 
 
+def owed_and_known() -> dict[str, Any]:
+    """The refund whose rule works out what is owed, and then reaches `owed_known`."""
+    definition = with_owed()
+    definition["milestones"] = {"owed_known": {"display": {"title": "What is owed is known"}}}
+    definition["rules"]["work_out_owed"]["then"]["reach"] = ["owed_known"]
+    return definition
+
+
+def test_a_rule_that_sets_and_reaches_says_what_it_wrote_on_what_it_read() -> None:
+    # The rule's set and reach are decisions of the act whose moment it fired on (brief, D38).
+    run = run_case(owed_and_known(), WITH_FEE, [APPROVED], SET_PEOPLE, engine=3)
+    [answer] = [each for each in run.audit if each.act.kind == "answered"]
+    rule = "rules.work_out_owed"
+    set_, reached = [each for each in answer.decisions if each.rule == rule]
+    assert set_ == Decision(
+        "set",
+        entry="work_out_owed#1",
+        rule=rule,
+        read=(
+            Fact("approved_amount", ("person:ana",), Decimal(40)),
+            Fact("fee", ("system:opener",), Decimal(5)),
+            Fact("review.outcome", ("person:ana",), "approve"),
+        ),
+        wrote=Fact("owed", ("person:ana", "system:opener"), Decimal(35)),
+    )
+    assert reached == Decision("reached", entry="work_out_owed#1", rule=rule, target="owed_known")
+
+
 def known(inputs: dict[str, Any]) -> dict[str, Any]:
     """The orders system, which knows every order: a stand-in for any activity."""
     return {"status": "known"}
@@ -269,3 +300,12 @@ def test_records_cross_continue_as_new_as_they_were() -> None:
     back = state_from_data(ExactPayloadConverter().from_payload(payload, dict), types)
     assert back.audit == run.state.audit != []
     assert back.audit[0].act.values["national_id"] == Sensitive(NATIONAL_ID)
+    # What a rule wrote and the milestone it reached cross too.
+    run = run_case(owed_and_known(), WITH_FEE, [APPROVED], SET_PEOPLE, engine=3)
+    types = {name: field.declared for name, field in run.definition.fields.items()}
+    payload = ExactPayloadConverter().to_payload(state_as_data(run.state))
+    assert payload is not None
+    back = state_from_data(ExactPayloadConverter().from_payload(payload, dict), types)
+    assert back.audit == run.state.audit
+    assert any(each.wrote and each.target is None for r in back.audit for each in r.decisions)
+    assert any(each.target == "owed_known" for r in back.audit for each in r.decisions)

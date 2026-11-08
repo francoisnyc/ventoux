@@ -188,12 +188,15 @@ def decision_as_data(decision: Decision) -> dict[str, Any]:
         "step": decision.step,
         "entry": decision.entry,
         "rule": decision.rule,
-        "read": [
-            {"field": fact.field, "sources": list(fact.sources), "value": fact.value}
-            for fact in decision.read
-        ],
+        "read": [fact_as_data(fact) for fact in decision.read],
         "reason": decision.reason,
+        "wrote": None if decision.wrote is None else fact_as_data(decision.wrote),
+        "target": decision.target,
     }
+
+
+def fact_as_data(fact: Fact) -> dict[str, Any]:
+    return {"field": fact.field, "sources": list(fact.sources), "value": fact.value}
 
 
 def rule_start_as_data(asked: RuleStart) -> dict[str, Any]:
@@ -411,16 +414,17 @@ def decision_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> 
         step=data["step"],
         entry=data["entry"],
         rule=data["rule"],
-        read=tuple(
-            Fact(
-                fact["field"],
-                tuple(fact["sources"]),
-                read_back(fact["field"], fact["value"], types.get(fact["field"])),
-            )
-            for fact in data["read"]
-        ),
+        read=tuple(fact_from_data(fact, types) for fact in data["read"]),
         reason=data["reason"],
+        wrote=None if data["wrote"] is None else fact_from_data(data["wrote"], types),
+        target=data["target"],
     )
+
+
+def fact_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Fact:
+    """A fact read back as it was: its value by its field's declared type."""
+    value = read_back(data["field"], data["value"], types.get(data["field"]))
+    return Fact(data["field"], tuple(data["sources"]), value)
 
 
 def migration_from_data(data: dict[str, Any]) -> Migration:

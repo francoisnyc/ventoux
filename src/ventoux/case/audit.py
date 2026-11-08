@@ -80,6 +80,10 @@ class Decision:
     # Where in the definition it was decided: `steps.pay.when`, `steps.pay.approval`.
     rule: str | None = None
     read: tuple[Fact, ...] = ()  # the facts it read, in the order read
+    # What it wrote, if anything: the field a rule set or an edit changed, with its new value and
+    # sources, sensitive ones wrapped.
+    wrote: Fact | None = None
+    target: str | None = None  # what it reached or stopped, if anything: `owed_known`, `pay#1`
     # Why, for a refusal or a failure: its own words, which never quote a value (brief, D30).
     reason: str | None = None
 
@@ -91,8 +95,12 @@ class Act:
     kind: ActKind
     by: str | None = None  # who: a person, `system:portal`; None for the engine's own
     roles: tuple[str, ...] = ()  # their roles, as the trusted caller stated them, sorted
-    entry: str | None = None  # the entry or run it names, if any: `review#1`
-    outcome: str | None = None  # the outcome it gives, if any: `approve`
+    # What it names, if anything: an entry or run (`review#1`), a step proposed (`pay`), a field
+    # shown or edited (`customer_id`), an event sent (`cancelled`), a timer's rule (`chase`).
+    entry: str | None = None
+    # What it gives, if anything: an outcome (`approve`), a close reason (`duplicate`), a change's
+    # kind (`edit`), how a child's workflow ended (`it was terminated`).
+    outcome: str | None = None
     # The values it gave, by field, as the state holds them: sensitive ones wrapped.
     values: Mapping[str, object] = field(default_factory=dict[str, object])
 

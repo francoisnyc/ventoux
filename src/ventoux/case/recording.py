@@ -11,21 +11,28 @@ from ventoux.case.keeping import kept
 from ventoux.case.state import (
     Answered,
     Assigned,
+    CaseEnded,
     CaseState,
     ChangeProposed,
+    ChildNotEnded,
+    ChildRang,
     Claimed,
     CloseAsked,
+    ClosedByParent,
     Completed,
     Event,
     Failed,
     ForgetApproved,
     GivenBack,
     Opened,
+    PlanCancelled,
     Proposed,
     Retried,
     Sent,
     Shown,
+    TimerDue,
     Unassigned,
+    WorkflowCancelled,
 )
 from ventoux.core.expressions import Expression
 from ventoux.core.provenance import fields_read
@@ -121,32 +128,93 @@ def record(
 
 
 def act_of(case: CaseDefinition, event: Event) -> Act:
-    """`event` as an act: who, with which roles, on which entry, giving what. A value given for a
+    """`event` as an act: who, with which roles, what it names, giving what. A value given for a
     field of the case file is as the case file keeps it: the client wraps every value of a form,
     since it can't tell which are sensitive; the record keeps wrapped only the sensitive ones
     (brief, D31) (brief, D76)."""
-    if isinstance(event, Opened):
-        values = {name: kept(case, name, value) for name, value in event.file.items()}
-        return Act("opened", by=event.by, roles=tuple(sorted(event.roles)), values=values)
-    if isinstance(event, Answered):
-        values = {name: kept(case, name, value) for name, value in (event.form or {}).items()}
-        return Act(
-            "answered",
-            by=event.by,
-            roles=tuple(sorted(event.roles)),
-            entry=event.entry,
-            outcome=event.outcome,
-            values=values,
-        )
-    if isinstance(event, Failed):
-        # Its reason is the failed decision's: the act itself gives nothing.
-        return Act("failed", entry=event.entry)
-    if isinstance(event, Retried):
-        return Act("retried", by=event.by, roles=tuple(sorted(event.roles)), entry=event.entry)
-    if isinstance(event, Completed):
-        # What the run gave, as it gave it: its contract says where each value came from.
-        return Act("completed", entry=event.entry, outcome=event.outcome, values=event.output)
-    raise NotImplementedError(type(event).__name__)
+    roles = tuple(sorted(getattr(event, "roles", ())))  # as the trusted caller stated them
+    match event:
+        case Opened():
+            values = {name: kept(case, name, value) for name, value in event.file.items()}
+            return Act("opened", by=event.by, roles=roles, values=values)
+        case Answered():
+            values = {name: kept(case, name, value) for name, value in (event.form or {}).items()}
+            return Act(
+                "answered",
+                by=event.by,
+                roles=roles,
+                entry=event.entry,
+                outcome=event.outcome,
+                values=values,
+            )
+        case Proposed():
+            return Act("proposed", by=event.by, roles=roles, entry=event.step)
+        case Completed():
+            # What the run gave, as it gave it: its contract says where each value came from.
+            return Act("completed", entry=event.entry, outcome=event.outcome, values=event.output)
+        case Failed():
+            # Its reason is the failed decision's: the act itself gives nothing.
+            return Act("failed", entry=event.entry)
+        case Retried():
+            return Act("retried", by=event.by, roles=roles, entry=event.entry)
+        case CloseAsked():
+            return Act("closed", by=event.by, roles=roles, outcome=event.reason)
+        case PlanCancelled():
+            return Act("plan cancelled", entry=event.entry)
+        case CaseEnded():
+            # What the child reported, each value as it holds it, sensitive ones wrapped.
+            values = {name: sourced.value for name, sourced in event.report.items()}
+            return Act(
+                "child ended",
+                by=event.closed_by,
+                entry=event.entry,
+                outcome=event.outcome,
+                values=values,
+            )
+        case ChildRang():
+            return Act("child rang", entry=event.entry)
+        case ChildNotEnded():
+            return Act("child not ended", entry=event.entry, outcome=event.how)
+        case ClosedByParent():
+            return Act("closed by parent", outcome=event.reason)
+        case WorkflowCancelled():
+            return Act("workflow cancelled", entry=event.entry)
+        case Shown():
+            return Act("shown", by=event.by, roles=roles, entry=event.field)
+        case ForgetApproved():
+            # Who approved it is the act's; who proposed it, the forgotten decision's.
+            return Act("forget approved", by=event.approved_by, roles=roles_of(event))
+        case ChangeProposed():
+            given = {event.target: kept(case, event.target, event.value)}
+            values = given if event.kind == "edit" else {}  # a skip or a migration gives none
+            return Act(
+                "change proposed",
+                by=event.by,
+                roles=roles,
+                entry=event.target,
+                outcome=event.kind,
+                values=values,
+            )
+        case Sent():
+            # What the event carries, as it carried it: its sender is its source (brief, D41).
+            return Act("event", by=event.by, roles=roles, entry=event.event, values=event.payload)
+        case TimerDue():
+            return Act("timer", entry=event.rule)
+        case Claimed():
+            return Act("claimed", by=event.by, roles=roles, entry=event.entry)
+        case GivenBack():
+            return Act("given back", by=event.by, roles=roles, entry=event.entry)
+        case Assigned():
+            return Act(
+                "assigned", by=event.by, roles=roles, entry=event.entry, values={"to": event.to}
+            )
+        case Unassigned():
+            return Act("unassigned", by=event.by, roles=roles, entry=event.entry)
+
+
+def roles_of(event: ForgetApproved) -> tuple[str, ...]:
+    """The approver's roles, sorted: the proposer's are the forgotten decision's."""
+    return tuple(sorted(event.approver_roles))
 
 
 def asked(event: Event) -> str:

@@ -916,7 +916,9 @@ def take_answer(
     state.history.append(f"{run.entry} done")
     # Each answer, whatever the outcome (brief, D39).
     state.moments.append(Moment(f"answered {run.step}", entry=run.entry))
-    reach(state, (*step.outcomes[event.outcome].reaches, *step.reaches))
+    outcome = f"steps.{run.step}.outcomes.{event.outcome}"
+    reach(state, step.outcomes[event.outcome].reaches, run.entry, outcome)
+    reach(state, step.reaches, run.entry, f"steps.{run.step}.reaches")
 
 
 def as_worded(state: CaseState, event: Answered) -> str:
@@ -1174,7 +1176,7 @@ def reach_unless_steered(state: CaseState, run: StepRun, milestones: tuple[str, 
             "can't decide"
         )
         return
-    reach(state, milestones)
+    reach(state, milestones, run.entry, f"steps.{run.step}.reaches")
 
 
 def flag_if_stopping(state: CaseState, run: StepRun) -> None:

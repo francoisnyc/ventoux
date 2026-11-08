@@ -9,6 +9,7 @@ See docs/layers/11-rules.md.
 from typing import NoReturn
 
 from ventoux.case.admission import StepStopped, holds
+from ventoux.case.audit import Decision, Fact
 from ventoux.case.closing import close_held
 from ventoux.case.definition import (
     After,
@@ -18,6 +19,7 @@ from ventoux.case.definition import (
     Reached,
     Started,
 )
+from ventoux.case.recording import facts
 from ventoux.case.state import CaseState, Command, Moment, Obtained, RuleFiring, RuleStart
 from ventoux.case.stopping import stop_step
 from ventoux.case.timers import set_timer
@@ -58,13 +60,16 @@ def unknown_moment(moment: object) -> NoReturn:
     raise ValueError(f"{moment!r} is not a moment Ventoux knows")
 
 
-def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
-    """Record each milestone reached: a fact, never undone, and a moment for rules."""
+def reach(state: CaseState, milestones: tuple[str, ...], entry: str, rule: str) -> None:
+    """Record each milestone reached: a fact, never undone, and a moment for rules. `entry` and
+    `rule` say what reached it: a run or a rule's firing, and where the definition says so."""
     for milestone in milestones:
         if milestone not in state.milestones:
             state.milestones.append(milestone)
             state.history.append(f"reached {milestone}")
             state.moments.append(Moment(f"reached {milestone}"))
+            reached = Decision("reached", entry=entry, rule=rule, target=milestone)
+            state.deciding.append(reached)
 
 
 def fire_rules(
@@ -239,7 +244,7 @@ def act(
         state.history.append(
             f"{firing.entry} on {firing.moment}: reaching {' and '.join(then.reach)}"
         )
-        reach(state, then.reach)
+        reach(state, then.reach, firing.entry, f"rules.{firing.rule}")
     # Each start is the engine's proposal, with what the condition read now: admission decides,
     # once the rules on this moment have fired (brief, D39).
     read = read_sources(case, catalog, state, case.rules[firing.rule].when)
@@ -273,6 +278,7 @@ def write(
     read: dict[str, frozenset[str]] = {}
     for expression in (rule.then.set[field], rule.when):
         read |= read_sources(case, catalog, state, expression)
+    facts_read = facts(state, [rule.then.set[field], rule.when])  # before it writes
     mark = case.fields[field].source
     steered = (steering.sources for steering in firing.steered)
     sources = frozenset().union(*read.values(), *steered, {mark} if mark else set())
@@ -282,6 +288,12 @@ def write(
     state.obtained[field] = Obtained(min(ages, default=at), firing.entry)
     state.history.append(
         f"{firing.entry} on {firing.moment}: setting {field}, from {', '.join(sorted(sources))}"
+    )
+    wrote = Fact(field, tuple(sorted(sources)), value)
+    state.deciding.append(
+        Decision(
+            "set", entry=firing.entry, rule=f"rules.{firing.rule}", read=facts_read, wrote=wrote
+        )
     )
 
 
