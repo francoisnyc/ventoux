@@ -92,7 +92,7 @@ def differences(entry: Entry, got: list[Found] | RefusedAt) -> list[str]:
         if isinstance(got, RefusedAt):
             return [f"expected to be read, refused when read at {', '.join(got.paths)}"]
         # Compared as a multiset: in any order, none missing, none extra.
-        wanted = Counter((issue.path, issue.code, issue.severity) for issue in expected.issues)
+        wanted = Counter[Found]((i.path, i.code, i.severity) for i in expected.issues)
         given_ = Counter(got)
         return [
             f"expected {path} {code} ({severity}), not given"
