@@ -8,16 +8,17 @@ import copy
 import dataclasses
 import json
 import threading
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
+from temporalio.api.enums.v1 import PendingActivityState, PendingWorkflowTaskState
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
 from temporalio.exceptions import ApplicationError
@@ -156,10 +157,13 @@ def skipping[T](
     activities: Mapping[str, Activity] = FAKES,
     cases: type[CaseWorkflow] = DevelopmentCases,
     converter: DataConverter | None = None,
+    bound: float = 20,
+    described: Sequence[str] = (),
 ) -> T:
     """As `on_temporal`, for a scenario that moves time on itself: the server skips time only
     while a client waits on a workflow's result, and a case waiting for a person never ends.
-    `converter` holds the keys, for a test that replays what it recorded; else fresh ones."""
+    `converter` holds the keys, for a test that replays what it recorded; else fresh ones. Past
+    `bound` seconds the test fails, saying what each workflow in `described` was doing then."""
 
     async def go() -> T:
         async with (
@@ -175,9 +179,98 @@ def skipping[T](
                 audit=development_audit(),
             ),
         ):
-            return await asyncio.wait_for(scenario(environment), timeout=20)
+            try:
+                return await asyncio.wait_for(scenario(environment), timeout=bound)
+            except TimeoutError:
+                held = await what_held_the_clock(environment.client, described)
+                raise AssertionError(
+                    f"the scenario ran past its {bound:g} s bound; what held the clock:\n{held}"
+                ) from None
 
     return asyncio.run(go())
+
+
+async def what_held_the_clock(client: Client, ids: Sequence[str], within: float = 5) -> str:
+    """Each workflow in `ids` as the server describes it: its status, its pending activities and
+    any workflow task in flight. The time-skipping server skips no time while an activity or a
+    workflow task is pending, so a hang names what it waits on. Each describe is bounded by
+    `within` seconds, so a server that stops answering is said, never waited on."""
+    lines: list[str] = []
+    for id in ids:
+        try:
+            described = await asyncio.wait_for(
+                client.get_workflow_handle(id).describe(), timeout=within
+            )
+        except TimeoutError:
+            lines.append(f"{id}: didn't answer a describe within {within:g} s")
+            continue
+        except RPCError as error:
+            if error.status != RPCStatusCode.NOT_FOUND:
+                raise
+            lines.append(f"{id}: not found")
+            continue
+        raw = described.raw_description
+        status = described.status.name if described.status is not None else "unknown"
+        lines.append(f"{id}: {status}, run {described.run_id}")
+        activities = [
+            f"{a.activity_type.name} ({PendingActivityState.Name(a.state)}, attempt {a.attempt}"
+            + (f", last failure: {a.last_failure.message}" if a.HasField("last_failure") else "")
+            + ")"
+            for a in raw.pending_activities
+        ]
+        lines.append(f"  pending activities: {', '.join(activities) or 'none'}")
+        if raw.HasField("pending_workflow_task"):
+            task = raw.pending_workflow_task
+            lines.append(
+                f"  workflow task in flight: {PendingWorkflowTaskState.Name(task.state)}, "
+                f"attempt {task.attempt}"
+            )
+        else:
+            lines.append("  workflow task in flight: none")
+    return "\n".join(lines)
+
+
+def test_a_scenario_past_its_bound_says_what_each_workflow_it_names_was_doing() -> None:
+    # A hang says what held the clock: each named workflow's status, its pending activities and
+    # any workflow task in flight, as the server describes them; never only "TimeoutError".
+    async def scenario(environment: WorkflowEnvironment) -> None:
+        await start_case(environment.client, DevelopmentCases, REFUND, SMALL, "held-1", QUEUE)
+        await asyncio.Event().wait()  # never set: the scenario runs past its bound
+
+    with pytest.raises(AssertionError) as held:
+        skipping(scenario, bound=1, described=("held-1", "never-started"))
+    said = str(held.value)
+    assert said.startswith("the scenario ran past its 1 s bound; what held the clock:")
+    assert "held-1: RUNNING" in said
+    assert "pending activities: none" in said
+    assert "workflow task in flight: none" in said
+    assert "never-started: not found" in said
+
+
+def test_the_report_past_the_bound_is_bounded_too_a_describe_never_answered_is_said() -> None:
+    # A server that stops answering mustn't turn a bounded failure into a job killed with no
+    # summary: each describe has its own bound, and one never answered is said (tutor review
+    # of #94).
+    class Silent:
+        """A client whose describe never answers."""
+
+        def get_workflow_handle(self, id: str) -> "Silent":
+            return self
+
+        async def describe(self) -> None:
+            await asyncio.Event().wait()
+
+    # Bounded itself, so the bound removed fails this test rather than hanging it.
+    said = asyncio.run(
+        asyncio.wait_for(
+            what_held_the_clock(cast(Client, Silent()), ["claim-14", "claim-14/repair#1"], 0.1),
+            timeout=2,
+        )
+    )
+    assert said == (
+        "claim-14: didn't answer a describe within 0.1 s\n"
+        "claim-14/repair#1: didn't answer a describe within 0.1 s"
+    )
 
 
 async def past_the_retries(environment: WorkflowEnvironment, case: Case) -> CaseReport:

@@ -916,3 +916,21 @@ def test_an_error_answer_cut_short_or_stalled_is_unavailable(
         f"the key service at {address} gave an answer Ventoux can't read for claim-7 (not HTTP, or "
         "cut short)"
     )
+
+
+@pytest.mark.parametrize(
+    "failure", [Unreachable("ConnectionRefusedError"), TimedOut()], ids=["refused", "timed out"]
+)
+def test_the_guides_table_says_what_vault_unavailable_says_word_for_word(
+    failure: Exception,
+) -> None:
+    # The guide's table of what is said, as `VaultKeys` says it (docs/guides/audit.md, "A key
+    # the service can't give"), so the guide can't drift from the message.
+    def failing(method: str, path: str, body: dict[str, Any] | None) -> Answer:
+        raise failure
+
+    keys = VaultKeys("https://vault.internal:8200", "transit", "secret", transport=failing)
+    with pytest.raises(KeyUnavailable) as failed:
+        keys.state("claim-7")
+    guide = (Path(__file__).parent.parent / "docs" / "guides" / "audit.md").read_text()
+    assert f"| `{failed.value}` |" in guide
