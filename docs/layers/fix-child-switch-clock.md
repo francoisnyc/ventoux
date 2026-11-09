@@ -29,8 +29,18 @@ the pull-request run on the same commit passed). Each time the same way:
   The time-skipping server can't list workflows (`ListWorkflowExecutions` is unimplemented), so
   the test names them. A test runs a scenario that waits forever under a 1-second bound and reads
   the report.
+- **The report is bounded too** (tutor review of #94): each describe has 5 seconds, and one that
+  doesn't answer is said, `claim-14: didn't answer a describe within 5 s`, never waited on: a
+  server that stops answering would otherwise turn a 20-second failure into a job killed at CI's
+  20 minutes with no summary. Tested with a client whose describe never answers; the idle case
+  asserts every line it reports, `workflow task in flight: none` included.
 - **The failing test names its two:** `claim-14` and `claim-14/repair#1`. The 20-second bound
   stays.
+- **The plain reproductions are a script,** `scripts/clock_held.py`, outside the suite: `uv run
+  python scripts/clock_held.py` runs both, each beside a control that must move, against the
+  server the installed `temporalio` bundles; exit 0 if every case moves, 1 if a reproduction holds
+  the clock, 2 if a control does. Against 1.34.0: both controls move, both reproductions held,
+  exit 1. Type-checked with the rest (`scripts` in mypy's files, `tests` on its path).
 - **The audit guide** (`docs/guides/audit.md`, "A key the service can't give"): the unreachable
   row says `can't be reached (ConnectionRefusedError): …`, the timeout has its own row (`didn't
   answer within 10 seconds: …`), and the export's example names the reason too. A test makes each

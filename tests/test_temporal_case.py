@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from replaying import replay_history
@@ -190,14 +190,20 @@ def skipping[T](
     return asyncio.run(go())
 
 
-async def what_held_the_clock(client: Client, ids: Sequence[str]) -> str:
+async def what_held_the_clock(client: Client, ids: Sequence[str], within: float = 5) -> str:
     """Each workflow in `ids` as the server describes it: its status, its pending activities and
     any workflow task in flight. The time-skipping server skips no time while an activity or a
-    workflow task is pending, so a hang names what it waits on."""
+    workflow task is pending, so a hang names what it waits on. Each describe is bounded by
+    `within` seconds, so a server that stops answering is said, never waited on."""
     lines: list[str] = []
     for id in ids:
         try:
-            described = await client.get_workflow_handle(id).describe()
+            described = await asyncio.wait_for(
+                client.get_workflow_handle(id).describe(), timeout=within
+            )
+        except TimeoutError:
+            lines.append(f"{id}: didn't answer a describe within {within:g} s")
+            continue
         except RPCError as error:
             if error.status != RPCStatusCode.NOT_FOUND:
                 raise
@@ -237,7 +243,30 @@ def test_a_scenario_past_its_bound_says_what_each_workflow_it_names_was_doing() 
     assert said.startswith("the scenario ran past its 1 s bound; what held the clock:")
     assert "held-1: RUNNING" in said
     assert "pending activities: none" in said
+    assert "workflow task in flight: none" in said
     assert "never-started: not found" in said
+
+
+def test_the_report_past_the_bound_is_bounded_too_a_describe_never_answered_is_said() -> None:
+    # A server that stops answering mustn't turn a bounded failure into a job killed with no
+    # summary: each describe has its own bound, and one never answered is said (tutor review
+    # of #94).
+    class Silent:
+        """A client whose describe never answers."""
+
+        def get_workflow_handle(self, id: str) -> "Silent":
+            return self
+
+        async def describe(self) -> None:
+            await asyncio.Event().wait()
+
+    said = asyncio.run(
+        what_held_the_clock(cast(Client, Silent()), ["claim-14", "claim-14/repair#1"], 0.1)
+    )
+    assert said == (
+        "claim-14: didn't answer a describe within 0.1 s\n"
+        "claim-14/repair#1: didn't answer a describe within 0.1 s"
+    )
 
 
 async def past_the_retries(environment: WorkflowEnvironment, case: Case) -> CaseReport:

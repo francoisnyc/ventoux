@@ -50,10 +50,11 @@ ban-relative-imports = "all"
 [tool.mypy]
 strict = true
 # The builder files the guide and the packages are written in, type-checked as a team's would be.
-files = ["src", "tests", "examples/builder", "examples/cases"]
+files = ["src", "tests", "examples/builder", "examples/cases", "scripts"]
 plugins = ["pydantic.mypy"]
-# The quickstart's project, so its tests import `cases.refund` as the quickstart writes it.
-mypy_path = "examples/quickstart"
+# The quickstart's project, so its tests import `cases.refund` as the quickstart writes it; and
+# the tests' helpers, which `scripts/` reaches by path (scripts/clock_held.py).
+mypy_path = "examples/quickstart:tests"
 
 # `jsonschema` (tests only) ships no type stubs; its two calls are wrapped in typed helpers.
 [[tool.mypy.overrides]]
