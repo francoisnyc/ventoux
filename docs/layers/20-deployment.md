@@ -733,5 +733,5 @@ are given as `Probes` stand-ins, answering as recorded, except where the dev ser
 **Branches only a stand-in reaches,** because the dev server has no mTLS, no authorizer and no
 Vault: `temporal.mtls-required` passed; `temporal.reader-cannot-write` passed; every `keys.*`
 branch that asks Vault (`keys.reachable`, `keys.policy`). `LiveProbes`' Vault calls go through
-`VaultKeys`' own transport, tested in 18c against its recorded answers; a real Vault, as the
+`VaultKeys`' own transport, tested in 19c against recorded answers; a real Vault, as the
 three skipped tests have, isn't needed for 20b2.
