@@ -215,3 +215,50 @@ def test_every_command_that_connects_takes_an_identity_and_refuses_one_not_confi
     assert main([*command, "--identity", "nope"]) == 2
     said = capsys.readouterr()
     assert "the identity nope isn't configured" in said.out + said.err
+
+
+def offered(capsys: pytest.CaptureFixture[str], command: list[str]) -> str:
+    """What `ventoux COMMAND --help` prints."""
+    with pytest.raises(SystemExit):
+        main([*command, "--help"])
+    return capsys.readouterr().out
+
+
+def subcommands(help_text: str) -> list[str]:
+    """The names in the help's `{create,harden,check}` list of subcommands."""
+    listed = help_text.split("{", 1)[1].split("}", 1)[0]
+    return listed.split(",")
+
+
+def test_a_command_offering_an_address_is_one_the_identity_test_runs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Read from the parser, so a new command that talks to Temporal can't skip `--identity`.
+    connecting: list[list[str]] = []
+    for name in subcommands(offered(capsys, [])):
+        nested = offered(capsys, [name])
+        if nested.startswith("usage: ventoux " + name + " [-h] {"):
+            paths = [[name, action] for action in subcommands(nested)]
+        else:
+            paths = [[name]]
+        for path in paths:
+            text = offered(capsys, path)
+            if "--address" in text:
+                assert "--identity" in text, f"ventoux {' '.join(path)} has no --identity"
+                connecting.append(path)
+    assert sorted(connecting) == sorted(
+        command[:2] if command[0] == "environment" else command[:1] for command in COMMANDS
+    )
+
+
+def test_only_connecting_connects_to_temporal() -> None:
+    # Every client goes through `connect`, so it is made as an identity (brief, D81).
+    source = Path(__file__).parent.parent / "src" / "ventoux"
+    connecting = sorted(
+        [
+            str(path.relative_to(source))
+            for path in source.rglob("*.py")
+            if "Client.connect(" in path.read_text()
+        ]
+    )
+    assert connecting == ["tooling/connecting.py"]

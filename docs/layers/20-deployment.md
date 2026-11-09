@@ -516,8 +516,8 @@ before its code was written, or with its branch switched off when the code came 
 
 ## 20b: connecting as an identity, and `ventoux doctor`
 
-Status: 2026-11-09, D81 written (with a dated amendment under D54); the seams below proposed, not
-yet agreed. Branch `layer-20b-doctor`, from `main` at `778f614`. Layer 20's warm-up was done at
+Status: 2026-11-09, D81 written (with a dated amendment under D54); the split and 20b1's seams
+agreed, 20b1 built; 20b2's seams proposed, to be agreed once 20b1 is merged. Branch `layer-20b-doctor`, from `main` at `778f614`. Layer 20's warm-up was done at
 its start; learning entries 55 and 56, two questions asked in archived sessions and never logged,
 ride in this part's first pull request.
 
@@ -562,6 +562,51 @@ deployment's production providers: never in `ventoux.testing`, so no deployment 
    environment tests already connect.
 7. Every command that connects takes `--identity` and goes through `connect` (a test reads the
    argument parser, so a new command can't skip it).
+
+### Decided while building 20b1
+
+- **`ventoux advise` connects as `reader` by default,** the environment commands as `operator`:
+  advise only queries the advisor beside a case, so it needs no identity that can write. Each is
+  the command's default only when `[tool.ventoux.temporal]` is there; without it, commands connect
+  as before and refuse `--identity`, which would name an identity nothing describes.
+- **`--address` and `--namespace` have no built-in default any more.** A flag wins over the
+  section; with neither, the development server (`localhost:7233`, `default`). So a deployment
+  never has to repeat its address on every command, and development is unchanged.
+- **The identity is checked before anything else is read or connected,** in `advise` before the
+  model's settings: a command refused for its identity has done nothing.
+- **The stand-ins live in `tests/production_stand_ins.py`,** one file both production test modules
+  import, rather than a copy in each: still in `tests/` only, never in `ventoux.testing`.
+- **`provided()` raises `TypeError`** for a provider that doesn't say `development`: it is a
+  program built wrong, found when the worker starts, before anything is published.
+- **Only `connecting.py` calls `Client.connect`,** checked by a test reading the source, so a new
+  command can't make a client without an identity; another test reads the argument parser, so
+  every command offering `--address` offers `--identity` and is in the per-command test.
+
+## Promises (20b1)
+
+Each claim D81, the note and the guides make about 20b1's behaviour, and the test that would fail
+if it weren't true. Each was watched failing: before its code was written, or with its branch
+switched off when the code came first.
+
+| Promise | Test |
+|---|---|
+| In production, a case worker keeping its keys with a development provider is refused, saying which and what to deploy | `test_activation.py::test_production_refuses_a_case_worker_keeping_with_a_development_provider` (`FileKeys`) |
+| The same for its audit store, and for each not said | the same test (`FileAudit`, keys not said, audit not said) |
+| Both problems are said at once, never only the first | `test_activation.py::test_a_case_worker_wrong_on_both_counts_is_told_both` |
+| In development, the same worker is accepted | `test_activation.py::test_development_accepts_a_case_worker_keeping_with_development_providers` |
+| In production, a case worker with production providers is accepted | `test_activation.py::test_production_accepts_a_case_worker_keeping_with_production_providers` |
+| A worker serving no case (another language, a team's) is accepted without saying them | `test_activation.py::test_production_accepts_a_team_worker_that_says_neither` |
+| A manifest says what keeps its keys and records, by name and whether each is for development, and it crosses the registry | `test_temporal_registry.py::test_a_manifest_says_what_keeps_its_keys_and_its_records_by_name` |
+| A provider that doesn't say whether it is for development is refused when the worker starts, before anything is published | `test_temporal_registry.py::test_a_provider_that_doesnt_say_whether_it_is_for_development_is_refused` |
+| A production worker keeping its keys in a file never polls | `test_temporal_registry.py::test_a_production_worker_keeping_its_keys_in_a_file_never_polls` |
+| `[tool.ventoux.temporal]` is read as file paths; each wrong shape is refused naming the key | `test_connecting.py::test_the_temporal_section_is_read_as_file_paths_never_their_contents`, `test_a_temporal_section_not_as_the_format_says_is_refused_saying_which_key` (six shapes) |
+| Without the section, commands connect to `localhost:7233`, `default`, without TLS, and refuse `--identity` | `test_connecting.py::test_no_temporal_section_is_none_and_commands_connect_as_before`, `test_no_temporal_section_connects_as_before_and_refuses_an_identity_named` |
+| An identity not configured is refused, naming it | `test_connecting.py::test_an_identity_not_configured_is_refused_naming_it` |
+| A file that can't be read is refused by its path and error's kind, never its contents; nothing is connected | `test_connecting.py::test_a_file_that_cant_be_read_is_refused_naming_it_never_its_contents` |
+| An identity connects with its certificate, its key and the server CA; the flags win over the section | `test_connecting.py::test_an_identity_connects_with_its_certificate_its_key_and_the_server_ca` |
+| Every command that connects takes `--identity` and refuses one not configured, exit 2, before connecting | `test_connecting.py::test_every_command_that_connects_takes_an_identity_and_refuses_one_not_configured` (seven commands) |
+| A new command offering `--address` can't skip `--identity` | `test_connecting.py::test_a_command_offering_an_address_is_one_the_identity_test_runs` |
+| Every Temporal client is made by `connect`, as an identity | `test_connecting.py::test_only_connecting_connects_to_temporal` |
 
 ### Seams and tests for 20b2 (proposed, to be agreed before it is built)
 
