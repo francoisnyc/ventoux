@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from dev_server import cli_binary, cli_folder, dev_server
 from replaying import replay_history
+from temporalio import workflow
 from temporalio.api.enums.v1 import EventType
 from temporalio.client import Client, WorkflowHistory
 from temporalio.service import RPCError, RPCStatusCode
@@ -70,6 +71,7 @@ from ventoux.core.provenance import Sourced
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.cases import (
     CaseReport,
+    CaseStart,
     CaseWorkflow,
     answer,
     case_handle,
@@ -377,17 +379,37 @@ def test_a_child_terminated_unheard_is_noticed_within_a_day() -> None:
     assert noticed.waiting_for == []
 
 
-def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> None:
-    # A run after a switch sets its own daily check: the starting run's timer ended with it
-    # (brief, D75).
+def test_a_case_asks_how_its_open_children_stand_once_a_day() -> None:
+    # The interval the deployment runs with: a child that ended without ringing goes unnoticed a
+    # day at most (brief, D75). The test below shortens it, never this.
+    assert CaseWorkflow.child_check == timedelta(days=1)
+
+
+# Temporal: switching cases that ask how their open children stand every 2 seconds, so a check
+# fires in real time, whether or not the test server can skip time (see the test below).
+@workflow.defn(name="ventoux.case")
+class CheckingCases(SwitchingCases):
+    child_check = timedelta(seconds=2)
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+def test_after_a_switch_a_child_terminated_unheard_is_noticed_at_the_next_check() -> None:
+    # A run after a switch sets its own check of its children: the starting run's timer ended
+    # with it (brief, D75). The check is 2 seconds here, not a day: after a switch with a child
+    # starting, Temporal's time-skipping test server can stop skipping for good, and a day would
+    # then take a day; 3 seconds take 3 at most (docs/layers/fix-child-switch-clock.md). That a
+    # deployment checks once a day is the test above.
     async def scenario(environment: WorkflowEnvironment) -> CaseReport:
         client = environment.client
-        parent = await start_case(client, SwitchingCases, RELEASE, FILE, "claim-14", QUEUE)
+        parent = await start_case(client, CheckingCases, RELEASE, FILE, "claim-14", QUEUE)
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
         first, _ = await runs_of(client, "claim-14")
         await until_switched(client, "claim-14", first)
-        child = await started(client, SwitchingCases, "claim-14/repair#1")
+        child = await started(client, CheckingCases, "claim-14/repair#1")
         # Its records written: the time-skipping server skips no time past an activity whose
         # workflow was terminated while it ran (brief, D77).
         await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
@@ -395,12 +417,12 @@ def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> 
         # the server waits for it, but the skip then starts quiet, as the child's.
         await reported(parent, lambda now: now.unwritten == 0)
         await child.terminate("from outside")
-        await environment.sleep(timedelta(hours=25))
+        await environment.sleep(timedelta(seconds=3))  # past the next check
         return await reported(parent, lambda now: bool(now.needs_attention))
 
     # Past its bound, it says what held the clock: each workflow's status, pending activities and
-    # any workflow task in flight (it hung once on CI at the sleep, the clock never moving).
-    noticed = skipping(scenario, cases=SwitchingCases, described=("claim-14", "claim-14/repair#1"))
+    # any workflow task in flight.
+    noticed = skipping(scenario, cases=CheckingCases, described=("claim-14", "claim-14/repair#1"))
     assert noticed.needs_attention == [ENDED_WITHOUT]
 
 

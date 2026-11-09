@@ -474,6 +474,9 @@ class CaseWorkflow:
     # How often the export is tried before the case is told it failed: 10 times, at most 5 minutes
     # apart (brief, D77). A test's workflow lowers it, as `audit_bound`.
     export_retries: ClassVar[RetryPolicy] = EXPORT_RETRIES
+    # How often the case asks how each open child stands: a day (brief, D75). A test's workflow
+    # shortens it, as `export_retries`, to see a check fire without skipping a day.
+    child_check: ClassVar[timedelta] = CHILD_CHECK
 
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
@@ -1343,7 +1346,7 @@ class CaseWorkflow:
         while self.open_children():
             # Temporal: a durable timer, recorded in history; it holds no switch, and a run that
             # ends while it waits simply drops it.
-            await workflow.sleep(CHILD_CHECK)
+            await workflow.sleep(self.child_check)
             self.ask_open_children()
         self.checking = False
 

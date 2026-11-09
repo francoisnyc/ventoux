@@ -1,8 +1,9 @@
 # Fix: a child-case test whose clock stopped after its parent switched runs
 
-A fix, not a layer: no warm-up, and nothing new to build. Status 2026-11-09: **diagnosed in part,
-not yet fixed.** This pull request makes the next failure say what held the clock, and records
-what the investigation found; the cause's last step and the fix are still open (below).
+A fix, not a layer: no warm-up, and nothing new to build. Status 2026-11-09: **fixed, by the test
+(option (b) below), with the server's fault diagnosed in part.** The test no longer needs the test
+server to skip time after the switch; the exact trigger inside the server is still open, and
+recorded here.
 
 Also here, asked by the tutor before 20b: the audit guide's table of what Vault unavailable says
 now gives the reason a connection failed, and a timeout apart.
@@ -34,7 +35,7 @@ the pull-request run on the same commit passed). Each time the same way:
   server that stops answering would otherwise turn a 20-second failure into a job killed at CI's
   20 minutes with no summary. Tested with a client whose describe never answers; the idle case
   asserts every line it reports, `workflow task in flight: none` included.
-- **The failing test names its two:** `claim-14` and `claim-14/repair#1`. The 20-second bound
+- **The test names its two:** `claim-14` and `claim-14/repair#1`. The 20-second bound
   stays.
 - **The plain reproductions are a script,** `scripts/clock_held.py`, outside the suite: `uv run
   python scripts/clock_held.py` runs both, each beside a control that must move, against the
@@ -110,15 +111,44 @@ completion and a child's start together, then continue-as-new. Delaying the work
 slot to append an event to a scheduled task tangled with the SDK's deadlock detector and never
 took the parent's first task: not usable as written.
 
+## temporalio 1.35.0 (allowed, 2026-11-09: tried on a branch, not kept)
+
+The latest release (2026-10-28), with its own bundled test server, tried on a local branch
+(`try-temporalio-1.35`, not pushed): `scripts/clock_held.py` gave the same as on 1.34.0, both
+controls moving, both reproductions held, exit 1; the Ventoux reproduction, slowed throughout,
+gave CI's warning and failed again. The upgrade doesn't fix it, so it isn't proposed.
+
+## The fix: the test checks in seconds, not a day
+
+**What a held clock is, measured.** After a workflow terminated mid-task, the test server stops
+*skipping* time, not time itself: 2 seconds on the server took 2 seconds of real time, step after
+step, and an hour couldn't be skipped; the control (terminated idle) skipped every step at once,
+an hour included. So a short timer still fires, in real time, whether the clock is held or not.
+
+**What changed:**
+- `CaseWorkflow.child_check`, a class setting like `events_per_run`, `audit_bound` and
+  `export_retries`: how often a case asks how its open children stand. Its default is
+  `CHILD_CHECK`, a day, so a deployment, and every recorded history, is unchanged (the same timer).
+- The test's workflow, `CheckingCases` (`SwitchingCases`, its check 2 seconds), and the test, now
+  `test_after_a_switch_a_child_terminated_unheard_is_noticed_at_the_next_check`, sleeps 3 seconds
+  past the terminate, not 25 hours. The 20-second bound stays; the report past it stays.
+- `test_a_case_asks_how_its_open_children_stand_once_a_day`: the default is a day (watched failing
+  before the setting existed).
+
+**On demand, before and after.** With the server's clock held on purpose first (a plain workflow
+terminated mid-task, as `scripts/clock_held.py` does), the scenario as it was (a day's check, a
+25-hour sleep) hung past 20 seconds, 2 runs of 2: CI's failure, every time. As it is now (a
+2-second check, a 3-second sleep) the child was noticed in under 4 seconds, 3 runs of 3.
+
+**What the test no longer proves:** that the check fires after a day of skipped time across a
+switch. It proves the run after a switch sets its own check, and that the check notices a child
+terminated unheard; that the interval a deployment runs with is a day is the other test, a fact of
+the class. The timer is the same timer, its duration a setting.
+
 ## Still open
 
-- **The exact trigger** in plain Temporal: what lets the server create the parent's new run
-  without recording task 17's completion. The next CI failure now says each workflow's state at
-  the bound.
-- **The fix.** Options, none chosen: (a) a later `temporalio`, whose bundled test server may
-  behave as `master` does: a dependency change, asked first; (b) a test-side change that doesn't
-  need skipped time after a switch with a child: weakens what the test proves; (c) the case
-  waiting one more task after a child's start before it switches: an engine change behind a patch
-  marker, to suit a test server, not recommended. Reporting the plain reproductions to Temporal
-  is the maintainer's call.
-- The 20-second bound stays; the test is neither skipped nor retried.
+- **The exact trigger in the test server:** what lets it create the parent's new run without
+  recording the switching task's completion, so a later skip waits for ever. Both releases tried
+  have the fault (`scripts/clock_held.py`, exit 1). Reporting the plain reproductions to Temporal
+  is the maintainer's call. A test elsewhere that skips time after a switch with a child starting
+  could meet it; none does now.
