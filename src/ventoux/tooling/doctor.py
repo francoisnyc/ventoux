@@ -20,6 +20,7 @@ from typing import Literal
 from cryptography import x509
 
 from ventoux.case.registry import keeping_problems
+from ventoux.tooling.connecting import Unconnectable
 from ventoux.tooling.deployment import (
     DEVELOPMENT,
     Configuration,
@@ -28,7 +29,7 @@ from ventoux.tooling.deployment import (
     configuration,
     named,
 )
-from ventoux.tooling.probes import Probes
+from ventoux.tooling.probes import NEVER_MADE, READER, LiveProbes, Probes, Unanswered
 from ventoux.tooling.vault import VaultKeys, vault_name
 
 Verdict = Literal["passed", "FAILED", "unchecked"]
@@ -46,8 +47,6 @@ class Finding:
     verdict: Verdict
     said: str  # what it saw, and on a failure what to do; never a secret's value
 
-
-READER = "reader"  # the identity doctor signals as, to see a write refused (brief, D81)
 
 # How long one probe may take before doctor says its rule unchecked: never a hang (#94).
 PROBE_BOUND = 10.0  # seconds
@@ -205,9 +204,9 @@ async def mtls_is_required(context: Context) -> Seen:
 
 
 async def reader_cannot_write(context: Context) -> Seen:
-    """As `reader`, a signal to a workflow that can't exist is refused: Temporal refuses an
-    unauthorized call before it looks for the workflow, so nothing changes either way (brief,
-    D19). Without `[tool.ventoux.temporal]`, as the commands connect: with no identity."""
+    """As `reader`, a signal to a workflow that can't exist is refused (brief, D19): Temporal
+    refuses an unauthorized call before it looks for the workflow, so nothing changes either way.
+    Without `[tool.ventoux.temporal]`, as the commands connect: with no identity."""
     temporal = context.found.temporal
     if temporal is not None and READER not in temporal.identities:
         return "unchecked", (
@@ -275,8 +274,6 @@ async def providers_are_production(context: Context) -> Seen:
     )
 
 
-# A case that can't exist: its key is the one doctor asks about, never made (brief, D81).
-NEVER_MADE = "doctor-never-made"
 NOT_VAULT = "the key service named isn't VaultKeys: keys.named says what it is"
 
 
@@ -386,8 +383,7 @@ RULES: tuple[Rule, ...] = (
         "temporal.only-caller-writes",
         None,
         "The rule everything rests on: one caller writes",
-        "the identities doctor holds are refused, but Temporal doesn't tell a client who else "
-        "may write",
+        "Temporal doesn't tell a client which other identities may write",
     ),
     Rule(
         "temporal.resets-restricted",
@@ -437,6 +433,9 @@ async def finding_of(rule: Rule, context: Context) -> Finding:
         verdict, said = await rule.check(context)
     except NoAnswer:
         return Finding(rule.name, "unchecked", f"no answer within {context.bound:g} s")
+    except (Unanswered, Unconnectable) as unanswered:
+        # Doctor's and connecting's own words, naming a file or a status, never what it holds.
+        return Finding(rule.name, "unchecked", str(unanswered))
     except Exception as error:  # noqa: BLE001 (every kind: none may pass or vanish)
         # Fail closed, and say no secret: an error a rule doesn't expect is unchecked, by its kind
         # alone (its message may hold anything), never passed and never dropped (brief, D81).
@@ -472,7 +471,8 @@ def doctor_command(arguments: argparse.Namespace) -> int:
     except Unconfigured as refused:
         print(refused, file=sys.stderr)
         return CANT_RUN
-    findings = asyncio.run(diagnose(found, arguments.environment))
+    probes = LiveProbes(found, arguments.environment)
+    findings = asyncio.run(diagnose(found, arguments.environment, probes))
     for line in said(findings, arguments.environment):
         print(line)
     return outcome(findings, arguments.strict)

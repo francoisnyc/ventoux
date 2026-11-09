@@ -18,10 +18,12 @@ from test_activation import FILE_AUDIT, FILE_KEYS, STORE, VAULT, keeping, produc
 
 from ventoux.case.activation import Provided
 from ventoux.case.registry import Registry
+from ventoux.tooling import doctor
 from ventoux.tooling.cli import main
-from ventoux.tooling.vault import VaultKeys
+from ventoux.tooling.connecting import Unconnectable
 from ventoux.tooling.deployment import Configuration, read
 from ventoux.tooling.doctor import RULES, Finding, diagnose, outcome, said
+from ventoux.tooling.vault import VaultKeys
 
 # A deployment doctor finds healthy: each setting it reads, named as the platform team would.
 HEALTHY = """
@@ -672,3 +674,87 @@ def test_a_rule_no_client_can_see_is_unchecked_naming_a_section_the_guide_has(
         assert rule.section in sections, f"{rule.name} names no section of the guide"
         assert seen[rule.name].verdict == "unchecked"
         assert seen[rule.name].said.endswith(f'the deployment guide, "{rule.section}"')
+
+
+def test_an_identity_that_cant_connect_is_unchecked_saying_which_file(tmp_path: Path) -> None:
+    said = "the identity reader's key, /etc/r.key, can't be read (FileNotFoundError): nothing was connected"
+    rule = "temporal.reader-cannot-write"
+    assert verdict(deployment(tmp_path), rule, Answering(reader=Unconnectable(said))) == Finding(
+        rule, "unchecked", said
+    )
+
+
+def test_no_secret_is_said_a_failure_included(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token, api_key = "hvs.never-said-token", "sk-ant-never-said-key"
+    monkeypatch.setenv("VAULT_TOKEN", token)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", api_key)
+    with_operator(tmp_path, datetime(2020, 1, 1, tzinfo=UTC), mode=0o644)  # key file: SECRET
+    found = deployment(
+        tmp_path,
+        '[tool.ventoux]\ncatalog = "doctor_broken:CATALOG"\nkeys = "doctor_deployment:KEYS"\n'
+        'model = "m"\n'
+        + IDENTITIES.format(cert=tmp_path / "operator.pem", key=tmp_path / "operator.key"),
+    )
+    leaking = RuntimeError(f"{token} {api_key} {SECRET}")  # what an error's message may hold
+    probes = Answering(**{field: leaking for field in PROBING.values()})
+    text = "\n".join(said(findings(found, probes), "production"))
+    assert "FAILED" in text and "unchecked" in text  # through failing branches
+    for secret in (token, api_key, SECRET, "never-said"):
+        assert secret not in text
+
+
+def guide_rules() -> list[str]:
+    """The rules the deployment guide's table lists, in its order: the first cell of each row,
+    under "Checking the deployment"."""
+    section = GUIDE.read_text().split("## Checking the deployment", 1)[1].split("\n## ", 1)[0]
+    return [
+        line.split("|")[1].strip().strip("`")
+        for line in section.splitlines()
+        if line.startswith("| `")
+    ]
+
+
+def test_the_guide_lists_every_rule_doctor_checks_and_no_other() -> None:
+    assert guide_rules() == [rule.name for rule in RULES]
+
+
+def test_the_guides_example_output_names_only_rules_doctor_has() -> None:
+    section = GUIDE.read_text().split("## Checking the deployment", 1)[1].split("\n## ", 1)[0]
+    names = {rule.name for rule in RULES}
+    for line in section.splitlines():
+        words = line.split()
+        if words and words[0] in ("passed", "FAILED", "unchecked") and len(words) > 1:
+            assert words[1].rstrip(":") in names, line
+
+
+def test_the_guides_failed_example_is_what_doctor_says(tmp_path: Path) -> None:
+    section = GUIDE.read_text().split("## Checking the deployment", 1)[1]
+    example = section.split("FAILED     temporal.reader-cannot-write: ", 1)[1].split("```")[0]
+    reader = deployment(
+        tmp_path,
+        HEALTHY
+        + IDENTITIES.format(cert="o.pem", key="o.key")
+        + '[tool.ventoux.temporal.identities.reader]\ncert = "r.pem"\nkey = "r.key"\n',
+    )
+    seen = verdict(reader, "temporal.reader-cannot-write", Answering(reader="allowed"))
+    assert " ".join(example.split()) == seen.said
+
+
+def test_the_command_says_each_finding_and_exits_as_its_verdicts_say(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deployment(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VAULT_TOKEN", SECRET)
+    monkeypatch.setattr(doctor, "LiveProbes", lambda found, environment: Answering())
+    assert main(["doctor", "production"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert (
+        len(printed) == len(RULES) + 1
+        and printed[-1] == "production: 12 passed, 0 failed, 6 unchecked"
+    )
+    assert main(["doctor", "production", "--strict"]) == 1  # 6 unchecked
+    monkeypatch.delenv("VAULT_TOKEN")
+    assert main(["doctor", "production"]) == 1  # keys.token-present failed
