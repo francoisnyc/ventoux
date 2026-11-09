@@ -10,8 +10,8 @@ now gives the reason a connection failed, and a timeout apart.
 ## The failure
 
 `tests/test_temporal_children.py::test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day`
-failed three times on CI, never locally (37 runs alone or four at a time, here and in the tutor's
-review): runs 968 and 980 (`layer-19c-vault-keys`) and 1005 (`layer-20a-conformance`, a push run;
+failed three times on CI, never locally (41 runs alone or four at a time: 32 in the tutor's
+review, 9 here): runs 968 and 980 (`layer-19c-vault-keys`) and 1005 (`layer-20a-conformance`, a push run;
 the pull-request run on the same commit passed). Each time the same way:
 
 - it hung in `await environment.sleep(timedelta(hours=25))`, the first step that needs the
