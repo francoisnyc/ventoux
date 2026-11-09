@@ -18,6 +18,7 @@ from typing import Literal
 
 from cryptography import x509
 
+from ventoux.case.registry import keeping_problems
 from ventoux.tooling.deployment import (
     DEVELOPMENT,
     Configuration,
@@ -26,6 +27,7 @@ from ventoux.tooling.deployment import (
     configuration,
     named,
 )
+from ventoux.tooling.probes import Probes
 
 Verdict = Literal["passed", "FAILED", "unchecked"]
 
@@ -43,12 +45,33 @@ class Finding:
     said: str  # what it saw, and on a failure what to do; never a secret's value
 
 
+READER = "reader"  # the identity doctor signals as, to see a write refused (brief, D81)
+
+# How long one probe may take before doctor says its rule unchecked: never a hang (#94).
+PROBE_BOUND = 10.0  # seconds
+
+
 @dataclass(frozen=True)
 class Context:
-    """What a rule reads: the configuration, and the environment checked."""
+    """What a rule reads: the configuration, the environment checked, and the world, asked."""
 
     found: Configuration
     environment: str  # `production`
+    probes: Probes  # what doctor asks Temporal, the registry and the key service
+    bound: float  # how long one probe may take, in seconds
+
+
+class NoAnswer(Exception):
+    """A probe that didn't answer within its bound."""
+
+
+async def asked[T](context: Context, probe: Awaitable[T]) -> T:
+    """What `probe` answers within the bound; `NoAnswer` otherwise. Every probe goes through
+    here, so none can hang doctor (brief, D81)."""
+    try:
+        return await asyncio.wait_for(probe, context.bound)
+    except TimeoutError:
+        raise NoAnswer() from None
 
 
 Seen = tuple[Verdict, str]  # a rule's verdict, and what it says
@@ -168,11 +191,98 @@ def certificate_problems(what: str, path: str) -> list[str]:
     return []
 
 
+async def mtls_is_required(context: Context) -> Seen:
+    """A connection without a client certificate is refused, with TLS and without (brief, D19)."""
+    answered = await asked(context, context.probes.unauthenticated())
+    if answered:
+        return "FAILED", (
+            "Temporal answered a connection without a client certificate, "
+            f"{' and '.join(answered)}: require mTLS on the namespace's frontend"
+        )
+    return "passed", "a connection without a client certificate is refused, with TLS and without"
+
+
+async def reader_cannot_write(context: Context) -> Seen:
+    """As `reader`, a signal to a workflow that can't exist is refused: Temporal refuses an
+    unauthorized call before it looks for the workflow, so nothing changes either way (brief,
+    D19). Without `[tool.ventoux.temporal]`, as the commands connect: with no identity."""
+    temporal = context.found.temporal
+    if temporal is not None and READER not in temporal.identities:
+        return "unchecked", (
+            f"no {READER} identity is configured: name one in pyproject.toml, "
+            f"[tool.ventoux.temporal.identities.{READER}]"
+        )
+    who = f"identity {READER}" if temporal is not None else "a connection with no identity"
+    if await asked(context, context.probes.reader_signal()) == "refused":
+        return "passed", f"{who} is refused a signal (PermissionDenied)"
+    return "FAILED", (
+        f"{who} sent a signal and Temporal let it through (the workflow doesn't exist, so nothing "
+        "changed): give people read-only access (brief, D19)"
+    )
+
+
+async def environment_is_production(context: Context) -> Seen:
+    """The environment's registry exists, and is production: doctor never hardens (brief, D81)."""
+    here = context.environment
+    registry = await asked(context, context.probes.registry())
+    if registry is None:
+        return "FAILED", (
+            f"{here}'s registry doesn't exist: create it, ventoux environment create {here}"
+        )
+    if registry.development:
+        return "FAILED", (
+            f"{here} is a development environment, where drafts run: make it production, ventoux "
+            f"environment harden {here} --by NAME"
+        )
+    return "passed", f"{here}'s registry exists and is production"
+
+
+async def workers_can_run(context: Context) -> Seen:
+    """`environment_check`, as `ventoux environment check` runs it: every release active or with
+    open cases can run on its queue (brief, D54)."""
+    problems = await asked(context, context.probes.environment_problems())
+    if problems:
+        return "FAILED", "; ".join(problems)
+    return "passed", "every release active or with open cases can run (environment check)"
+
+
+async def providers_are_production(context: Context) -> Seen:
+    """Every case worker's manifest the registry holds says production providers: one accepted
+    before the registry's rule (`ventoux-registry-keeping`) is seen here (brief, D81)."""
+    here = context.environment
+    registry = await asked(context, context.probes.registry())
+    if registry is None:
+        return "unchecked", f"{here}'s registry doesn't exist"
+    if registry.development:
+        return "unchecked", (
+            f"{here} is a development environment: its workers may use development providers"
+        )
+    case_workers = sorted(m.identity for m in registry.manifests.values() if m.case is not None)
+    # The registry's own rule, as it refuses a manifest: so the two can't disagree.
+    problems = [
+        problem
+        for identity in case_workers
+        for problem in keeping_problems(registry.manifests[identity])
+    ]
+    if problems:
+        return "FAILED", "; ".join(problems)
+    if not case_workers:
+        return "passed", "no case worker has published a manifest"
+    return "passed", (
+        f"each case worker's manifest ({', '.join(case_workers)}) says production providers"
+    )
+
+
 RULES: tuple[Rule, ...] = (
     Rule("catalog.named", catalog_is_named),
     Rule("keys.named", provider_is_named("keys", "key service")),
     Rule("audit.named", provider_is_named("audit", "audit store")),
     Rule("temporal.identities", identities_are_sound),
+    Rule("temporal.mtls-required", mtls_is_required),
+    Rule("temporal.reader-cannot-write", reader_cannot_write),
+    Rule("environment.exists-production", environment_is_production),
+    Rule("environment.workers", workers_can_run),
+    Rule("environment.production-providers", providers_are_production),
     Rule(
         "temporal.only-caller-writes",
         None,
@@ -207,9 +317,11 @@ RULES: tuple[Rule, ...] = (
 )
 
 
-async def diagnose(found: Configuration, environment: str) -> list[Finding]:
+async def diagnose(
+    found: Configuration, environment: str, probes: Probes, bound: float = PROBE_BOUND
+) -> list[Finding]:
     """Every rule's finding, in `RULES`' order: each runs whatever the others give."""
-    context = Context(found, environment)
+    context = Context(found, environment, probes, bound)
     findings: list[Finding] = []
     for rule in RULES:
         findings.append(await finding_of(rule, context))
@@ -224,6 +336,8 @@ async def finding_of(rule: Rule, context: Context) -> Finding:
         )
     try:
         verdict, said = await rule.check(context)
+    except NoAnswer:
+        return Finding(rule.name, "unchecked", f"no answer within {context.bound:g} s")
     except Exception as error:  # noqa: BLE001 (every kind: none may pass or vanish)
         # Fail closed, and say no secret: an error a rule doesn't expect is unchecked, by its kind
         # alone (its message may hold anything), never passed and never dropped (brief, D81).

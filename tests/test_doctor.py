@@ -3,15 +3,21 @@
 deployment"."""
 
 import asyncio
+import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+from test_activation import FILE_AUDIT, FILE_KEYS, STORE, VAULT, keeping, production
 
+from ventoux.case.activation import Provided
+from ventoux.case.registry import Registry
 from ventoux.tooling.cli import main
 from ventoux.tooling.deployment import Configuration, read
 from ventoux.tooling.doctor import RULES, Finding, diagnose, outcome, said
@@ -31,12 +37,47 @@ def deployment(folder: Path, text: str = HEALTHY) -> Configuration:
     return read(path)
 
 
-def findings(found: Configuration) -> list[Finding]:
-    return asyncio.run(diagnose(found, "production"))
+FOREVER = object()  # a probe's answer that never comes
 
 
-def verdict(found: Configuration, rule: str) -> Finding:
-    return next(finding for finding in findings(found) if finding.rule == rule)
+@dataclass
+class Answering:
+    """Doctor's probes, stood in for: each answers as given, raises what it is given, or never
+    answers (`FOREVER`). Healthy unless told otherwise."""
+
+    unauthenticated_answers: object = field(default_factory=list[str])  # both refused
+    reader: object = "refused"
+    registry_held: object = field(default_factory=lambda: production(keeping(VAULT, STORE)))
+    problems: object = field(default_factory=list[str])  # environment_check's
+
+    async def answer(self, given: object) -> Any:
+        if given is FOREVER:
+            await asyncio.Event().wait()  # nothing ever sets it
+        if isinstance(given, Exception):
+            raise given
+        return given
+
+    async def unauthenticated(self) -> list[str]:
+        return cast(list[str], await self.answer(self.unauthenticated_answers))
+
+    async def reader_signal(self) -> str:
+        return cast(str, await self.answer(self.reader))
+
+    async def registry(self) -> Registry | None:
+        return cast(Registry | None, await self.answer(self.registry_held))
+
+    async def environment_problems(self) -> list[str]:
+        return cast(list[str], await self.answer(self.problems))
+
+
+def findings(
+    found: Configuration, probes: Answering | None = None, bound: float = 5
+) -> list[Finding]:
+    return asyncio.run(diagnose(found, "production", probes or Answering(), bound))
+
+
+def verdict(found: Configuration, rule: str, probes: Answering | None = None) -> Finding:
+    return next(finding for finding in findings(found, probes) if finding.rule == rule)
 
 
 def test_a_configuration_doctor_cant_read_exits_2_saying_why_and_runs_no_rule(
@@ -318,3 +359,166 @@ def test_temporal_identities(tmp_path: Path) -> None:
         rule, "FAILED", f"the identity operator's key, {tmp_path / 'operator.key'}, isn't there"
     )
     assert SECRET not in "".join(finding.said for finding in findings(found))
+
+
+# The rules that ask the world, each with the stand-in's field its probe answers from.
+PROBING = {
+    "temporal.mtls-required": "unauthenticated_answers",
+    "temporal.reader-cannot-write": "reader",
+    "environment.exists-production": "registry_held",
+    "environment.workers": "problems",
+    "environment.production-providers": "registry_held",
+}
+
+
+@pytest.mark.parametrize("rule", sorted(PROBING))
+def test_a_probe_raising_what_its_rule_doesnt_expect_is_unchecked(
+    tmp_path: Path, rule: str
+) -> None:
+    probes = Answering(**{PROBING[rule]: RuntimeError(SECRET)})
+    assert verdict(deployment(tmp_path), rule, probes) == Finding(
+        rule, "unchecked", "met RuntimeError, which it doesn't expect"
+    )
+
+
+def test_a_probe_that_never_answers_is_unchecked_naming_the_bound(tmp_path: Path) -> None:
+    # Every probe bounded: one that never answers is unchecked, never a hang (#94).
+    never = Answering(**{field: FOREVER for field in PROBING.values()})
+    started = time.monotonic()
+    seen = asyncio.run(
+        asyncio.wait_for(diagnose(deployment(tmp_path), "production", never, 0.2), timeout=10)
+    )
+    assert time.monotonic() - started < 0.2 * len(PROBING) + 2
+    for rule in PROBING:
+        assert Finding(rule, "unchecked", "no answer within 0.2 s") in seen
+
+
+def test_temporal_mtls_required(tmp_path: Path) -> None:
+    rule, found = "temporal.mtls-required", deployment(tmp_path)
+    assert verdict(found, rule) == Finding(
+        rule, "passed", "a connection without a client certificate is refused, with TLS and without"
+    )
+    answered = Answering(unauthenticated_answers=["without TLS"])
+    assert verdict(found, rule, answered) == Finding(
+        rule,
+        "FAILED",
+        "Temporal answered a connection without a client certificate, without TLS: require "
+        "mTLS on the namespace's frontend",
+    )
+
+
+def test_temporal_reader_cannot_write(tmp_path: Path) -> None:
+    rule, found = "temporal.reader-cannot-write", deployment(tmp_path)
+    # Without [tool.ventoux.temporal], doctor connects as the commands do: with no identity.
+    assert verdict(found, rule) == Finding(
+        rule, "passed", "a connection with no identity is refused a signal (PermissionDenied)"
+    )
+    assert verdict(found, rule, Answering(reader="allowed")) == Finding(
+        rule,
+        "FAILED",
+        "a connection with no identity sent a signal and Temporal let it through (the workflow "
+        "doesn't exist, so nothing changed): give people read-only access (brief, D19)",
+    )
+    operator_only = with_operator(tmp_path, IN_DATE)
+    assert verdict(operator_only, rule) == Finding(
+        rule,
+        "unchecked",
+        "no reader identity is configured: name one in pyproject.toml, "
+        "[tool.ventoux.temporal.identities.reader]",
+    )
+    with_reader = deployment(
+        tmp_path,
+        (tmp_path / "pyproject.toml").read_text()
+        + '[tool.ventoux.temporal.identities.reader]\ncert = "r.pem"\nkey = "r.key"\n',
+    )
+    assert verdict(with_reader, rule) == Finding(
+        rule, "passed", "identity reader is refused a signal (PermissionDenied)"
+    )
+
+
+def test_environment_exists_production(tmp_path: Path) -> None:
+    rule, found = "environment.exists-production", deployment(tmp_path)
+    assert verdict(found, rule) == Finding(
+        rule, "passed", "production's registry exists and is production"
+    )
+    assert verdict(found, rule, Answering(registry_held=None)) == Finding(
+        rule,
+        "FAILED",
+        "production's registry doesn't exist: create it, ventoux environment create production",
+    )
+    development = Answering(registry_held=Registry("production", development=True))
+    assert verdict(found, rule, development) == Finding(
+        rule,
+        "FAILED",
+        "production is a development environment, where drafts run: make it production, ventoux "
+        "environment harden production --by NAME",
+    )
+
+
+def test_environment_workers(tmp_path: Path) -> None:
+    rule, found = "environment.workers", deployment(tmp_path)
+    assert verdict(found, rule) == Finding(
+        rule, "passed", "every release active or with open cases can run (environment check)"
+    )
+    problems = ["refund 2: no worker polls refunds", "claim 1: payments.refund@2 isn't served"]
+    assert verdict(found, rule, Answering(problems=problems)) == Finding(
+        rule, "FAILED", "refund 2: no worker polls refunds; claim 1: payments.refund@2 isn't served"
+    )
+
+
+@pytest.mark.parametrize(
+    ("keys", "audit", "said"),
+    [
+        (
+            FILE_KEYS,
+            STORE,
+            (
+                "refunds-a keeps its keys with FileKeys, which is for development: production keeps "
+                "them in the deployment's key service; deploy the worker with it"
+            ),
+        ),
+        (
+            VAULT,
+            FILE_AUDIT,
+            (
+                "refunds-a writes its audit records to FileAudit, which is for development: production "
+                "writes them to the deployment's audit store; deploy the worker with it"
+            ),
+        ),
+        (
+            None,
+            None,
+            (
+                "refunds-a doesn't say what keeps its keys: a case worker in production must; deploy a "
+                "build that does; refunds-a doesn't say where it writes its audit records: a case "
+                "worker in production must; deploy a build that does"
+            ),
+        ),
+    ],
+    ids=["FileKeys", "FileAudit", "saying neither (accepted before the patch)"],
+)
+def test_environment_production_providers_fails_a_worker_the_registry_holds(
+    tmp_path: Path, keys: Provided | None, audit: Provided | None, said: str
+) -> None:
+    # Held by a registry that accepted it before ventoux-registry-keeping (brief, D81).
+    held = Registry("production", manifests={"refunds-a": keeping(keys, audit)})
+    rule = "environment.production-providers"
+    assert verdict(deployment(tmp_path), rule, Answering(registry_held=held)) == Finding(
+        rule, "FAILED", said
+    )
+
+
+def test_environment_production_providers(tmp_path: Path) -> None:
+    rule, found = "environment.production-providers", deployment(tmp_path)
+    assert verdict(found, rule) == Finding(
+        rule, "passed", "each case worker's manifest (refunds-a) says production providers"
+    )
+    development = Answering(registry_held=Registry("production", development=True))
+    assert verdict(found, rule, development) == Finding(
+        rule,
+        "unchecked",
+        "production is a development environment: its workers may use development providers",
+    )
+    assert verdict(found, rule, Answering(registry_held=None)) == Finding(
+        rule, "unchecked", "production's registry doesn't exist"
+    )
