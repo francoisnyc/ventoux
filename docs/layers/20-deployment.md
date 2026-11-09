@@ -460,6 +460,21 @@ a small definition written by hand), the committed examples, and the schema corp
   `EXPRESSION_INVALID`; `UNKNOWN_FIELD` is a plan's code. The guide's example now says what the
   engine gives, and a test runs it from the guide.
 
+### From the tutor's review of #93
+
+- **A line of `changes` can't be removed or rewritten later.** `--since` checked that each changed
+  result had its line, not that the base's lines were kept: a later pull request could delete or
+  reword one with CI green, and the record D80 keeps for implementers would go. Now the head's
+  `changes` must start with the base's lines, each unchanged; a line removed, rewritten or moved
+  (a new one put before it) is said by its number, entry and date, and fails `--since`. D80 says
+  so, in place.
+- **`--export` into a file** ended in a `NotADirectoryError` traceback; it is refused and said,
+  exit 2, as a folder holding files is (optional).
+- **Carried, as its own pull request after 20a:** the push run on `cb06f90` hung in
+  `test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day`, at
+  `environment.sleep(timedelta(hours=25))`. First the next failure says what held the clock, then a
+  run that makes it happen on demand, then the fix; the 20-second bound stays.
+
 ## Promises (20a)
 
 Each claim the note, D80 and the guide make about 20a's behaviour, and the test that would fail if
@@ -491,9 +506,10 @@ before its code was written, or with its branch switched off when the code came 
 | **Curriculum:** a change to validation that alters a result fails `--unchanged`, naming the entry | `test_unchanged_fails_on_a_result_changed_naming_the_entry` |
 | `--unchanged` passes on the committed suite; fails on a catalog file not as generated, naming the line, writing nothing; exits 2 on a suite it can't read | `test_unchanged_passes_on_the_committed_suite`, `test_unchanged_fails_on_a_catalog_file_not_as_generated_naming_the_line`, `test_unchanged_says_a_suite_that_cant_be_read_and_exits_2` |
 | A result changed or removed with no line of `changes` saying so exactly is unrecorded; a new entry needs none; order changes nothing | `test_a_result_changed_with_no_line_naming_it_is_unrecorded`, `test_a_result_changed_with_its_line_is_recorded`, `test_a_line_that_says_another_change_records_nothing`, `test_a_new_entry_needs_no_line_and_a_removed_one_does`, `test_issues_in_another_order_are_no_change` |
+| The base's lines of `changes` are kept first, each unchanged: one dropped, rewritten or moved is said by its number, entry and date; new lines after them are accepted | `test_a_line_of_changes_the_base_holds_and_the_head_drops_is_said`, `test_a_line_of_changes_rewritten_is_said`, `test_the_bases_lines_kept_first_and_new_ones_after_are_accepted`, `test_since_fails_on_a_line_of_changes_the_head_dropped` |
 | `--since` fails on an unrecorded change; a base with no suite has nothing to compare; a base it can't read exits 2 | `test_since_fails_on_a_result_changed_with_no_line_against_the_base`, `test_since_a_base_with_no_suite_has_nothing_to_compare`, `test_since_says_a_base_suite_that_cant_be_read_and_exits_2` |
 | CI runs `--unchanged` in `check` and `--since` against the base in `changes` | `test_ci_checks_the_suite_and_every_change_to_it_against_the_base` |
 | The guide's example entry is in the suite as written, and this engine gives it | `test_the_guides_example_entry_is_in_the_suite_as_written_and_this_engine_gives_it` |
-| `--export` writes every file byte for byte and nothing else; refuses a folder holding files, writing nothing | `test_export_writes_every_file_of_the_suite_byte_for_byte_and_nothing_else`, `test_export_refuses_a_folder_holding_files_and_writes_nothing` |
+| `--export` writes every file byte for byte and nothing else; refuses a folder holding files, and a file, writing nothing, exit 2 | `test_export_writes_every_file_of_the_suite_byte_for_byte_and_nothing_else`, `test_export_refuses_a_folder_holding_files_and_writes_nothing`, `test_export_refuses_a_file_and_writes_nothing` |
 | A definition's problems are said as before, now with their paths kept | the parsing tests (`test_simulate.py`, `test_schema.py`, `test_draft_sheet.py` and others), unchanged and passing |
 | `ledger.post@1` is recorded in the lock | `test_catalog.py::test_every_development_contract_matches_its_recorded_hash` |

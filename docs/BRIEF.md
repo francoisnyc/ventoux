@@ -3420,6 +3420,9 @@ and D60, whose text is kept; D4 is amended below.*
   now, why, and the date. CI compares the suite with the base branch's and fails a changed result
   with no line naming it. The pull request's diff alone would leave nothing for an implementer
   reading the suite later.
+- **The record is only added to:** the head's `changes` starts with the base's lines, each
+  unchanged; one removed, rewritten or moved fails the same comparison, saying which line went or
+  changed (from the tutor review of #93, before merge).
 
 ## Concepts
 

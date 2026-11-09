@@ -262,4 +262,5 @@ path alone. Run results (what a case does, not only whether it is valid) come af
 
 `ventoux conformance --export DIR` writes the suite out. CI runs `ventoux conformance --unchanged`
 on every change, so a change that alters a result fails until the suite is changed with it, in
-the same pull request, with a line in its `changes` list saying why.
+the same pull request, with a line in its `changes` list saying why. Lines are only ever added:
+one removed or rewritten later fails CI too.

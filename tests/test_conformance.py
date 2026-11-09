@@ -588,3 +588,57 @@ def test_since_says_a_base_suite_that_cant_be_read_and_exits_2(
     (tmp_path / "suite.json").write_text(json.dumps({"engine": 3}))
     assert main(["conformance", "--since", str(tmp_path)]) == 2
     assert "entries: Field required" in capsys.readouterr().out
+
+
+A_LINE = change(VALID, FIRES_NEVER)
+KEPT = "a line of changes is never removed or rewritten; put it back as it was"
+
+
+def test_a_line_of_changes_the_base_holds_and_the_head_drops_is_said() -> None:
+    entries = [closed_early_entry(FIRES_NEVER)]
+    base = suite_of(entries, [A_LINE])
+    assert unrecorded(base, suite_of(entries, [])) == [
+        f"changes line 1 (closed before it acts, x) went: {KEPT}"
+    ]
+
+
+def test_a_line_of_changes_rewritten_is_said() -> None:
+    entries = [closed_early_entry(FIRES_NEVER)]
+    base = suite_of(entries, [A_LINE])
+    head = suite_of(entries, [{**A_LINE, "why": "another reason"}])
+    assert unrecorded(base, head) == [f"changes line 1 (closed before it acts, x) changed: {KEPT}"]
+
+
+def test_the_bases_lines_kept_first_and_new_ones_after_are_accepted() -> None:
+    entries = [closed_early_entry(FIRES_NEVER)]
+    base = suite_of(entries, [A_LINE])
+    later = {**A_LINE, "entry": "another entry", "date": "y"}
+    assert unrecorded(base, suite_of(entries, [A_LINE, later])) == []
+    # A new line put before the base's moves them: each is said changed, never read as kept.
+    assert unrecorded(base, suite_of(entries, [later, A_LINE])) == [
+        f"changes line 1 (closed before it acts, x) changed: {KEPT}"
+    ]
+
+
+def test_since_fails_on_a_line_of_changes_the_head_dropped(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = a_copy_of_the_suite(tmp_path)
+    data = json.loads((base / "suite.json").read_text())
+    entry = next(e for e in data["entries"] if e["name"].startswith("WRONG_KIND"))
+    data["changes"] = [
+        {"entry": entry["name"], "was": None, "now": entry["expected"], "why": "D80", "date": "x"}
+    ]
+    (base / "suite.json").write_text(json.dumps(data))
+    assert main(["conformance", "--since", str(base)]) == 1
+    assert "changes line 1 (WRONG_KIND" in capsys.readouterr().out
+
+
+def test_export_refuses_a_file_and_writes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "suite.zip"
+    out.write_text("mine")
+    assert main(["conformance", "--export", str(out)]) == 2
+    assert "is a file, not a folder: export into a new folder" in capsys.readouterr().out
+    assert out.read_text() == "mine"

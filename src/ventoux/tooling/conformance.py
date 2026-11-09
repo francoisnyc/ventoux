@@ -253,10 +253,10 @@ def refused_first_problems(folder: Path) -> list[str]:
 
 
 def unrecorded(base: Suite, head: Suite) -> list[str]:
-    """Each entry whose expected result `head` changes or removes from `base` with no line of
-    `head`'s changes saying so, exactly: what it was and what it is now. A new entry needs none
-    (brief, D80)."""
-    found: list[str] = []
+    """Each line of `base`'s changes `head` doesn't keep, and each entry whose expected result
+    `head` changes or removes from `base` with no line of `head`'s changes saying so, exactly:
+    what it was and what it is now. A new entry needs none (brief, D80)."""
+    found = dropped_lines(base, head)
     now = {entry.name: entry.expected for entry in head.entries}
     for entry in base.entries:
         after = now.get(entry.name)
@@ -272,6 +272,22 @@ def unrecorded(base: Suite, head: Suite) -> list[str]:
                 f"{entry.name}: {how}, and no line of changes names it: add one saying what it "
                 "was, what it is now, why and when"
             )
+    return found
+
+
+def dropped_lines(base: Suite, head: Suite) -> list[str]:
+    """Each line of `base`'s changes that `head` doesn't keep where it was, unchanged: the record
+    an implementer reads is never removed or rewritten, only added to (brief, D80)."""
+    found: list[str] = []
+    for number, line in enumerate(base.changes, start=1):
+        kept = head.changes[number - 1] if number <= len(head.changes) else None
+        if kept == line:
+            continue
+        how = "went" if kept is None else "changed"
+        found.append(
+            f"changes line {number} ({line.entry}, {line.date}) {how}: a line of changes is never "
+            "removed or rewritten; put it back as it was"
+        )
     return found
 
 
@@ -350,6 +366,9 @@ def export_command(folder: Path, out: Path) -> int:
     """`ventoux conformance --export OUT`: the suite's files, byte for byte, into `out`, for an
     implementer who doesn't install Python. Never into a folder holding files, so an export is
     never mixed with something else."""
+    if out.exists() and not out.is_dir():
+        print(f"{shown(out)} is a file, not a folder: export into a new folder")
+        return CANT_READ
     if out.exists() and any(out.iterdir()):
         print(f"{shown(out)} holds files already: export into a new folder")
         return CANT_READ
