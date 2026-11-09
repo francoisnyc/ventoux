@@ -239,8 +239,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     advising.add_argument("--model", help="the model to ask (else pyproject.toml's model)")
     advising.add_argument("--recording", type=Path, help="replay a recording instead of a model")
     advising.add_argument("--at", type=int, help="the time, in seconds since the epoch (now)")
-    advising.add_argument("--address", default="localhost:7233", help="Temporal's frontend")
-    advising.add_argument("--namespace", default="default")
+    connecting(advising, "reader")
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
@@ -332,8 +331,19 @@ def environments(commands: Any) -> None:
     manifest.add_argument("action", choices=["publish"])
     manifest.add_argument("file", type=Path, help="the manifest, as JSON")
     for each in (create, harden, check, activate, retire, manifest):
-        each.add_argument("--address", default="localhost:7233", help="Temporal's frontend")
-        each.add_argument("--namespace", default="default")
+        connecting(each, "operator")
+
+
+def connecting(command: Any, default: str) -> None:
+    """The flags of a command that talks to Temporal: where, and as whom (brief, D81)."""
+    command.add_argument(
+        "--address", help="Temporal's frontend (else pyproject.toml's, or localhost:7233)"
+    )
+    command.add_argument("--namespace", help="the namespace (else pyproject.toml's, or default)")
+    command.add_argument(
+        "--identity",
+        help=f"the identity to connect as, from [tool.ventoux.temporal] (else {default})",
+    )
 
 
 def releases_folder(flag: Path | None, found: Configuration) -> Path:

@@ -513,3 +513,124 @@ before its code was written, or with its branch switched off when the code came 
 | `--export` writes every file byte for byte and nothing else; refuses a folder holding files, and a file, writing nothing, exit 2 | `test_export_writes_every_file_of_the_suite_byte_for_byte_and_nothing_else`, `test_export_refuses_a_folder_holding_files_and_writes_nothing`, `test_export_refuses_a_file_and_writes_nothing` |
 | A definition's problems are said as before, now with their paths kept | the parsing tests (`test_simulate.py`, `test_schema.py`, `test_draft_sheet.py` and others), unchanged and passing |
 | `ledger.post@1` is recorded in the lock | `test_catalog.py::test_every_development_contract_matches_its_recorded_hash` |
+
+## 20b: connecting as an identity, and `ventoux doctor`
+
+Status: 2026-11-09, D81 written (with a dated amendment under D54); the split and 20b1's seams
+agreed, 20b1 built; 20b2's seams proposed, to be agreed once 20b1 is merged. Branch `layer-20b-doctor`, from `main` at `778f614`. Layer 20's warm-up was done at
+its start; learning entries 55 and 56, two questions asked in archived sessions and never logged,
+ride in this part's first pull request.
+
+**The split, proposed:** 20b is larger than 20a (every command that connects, the manifest, the
+registry, and doctor), so two pull requests:
+
+| PR | What it builds | Its negative tests |
+|---|---|---|
+| **20b1: connecting, and what a worker keeps with** | `[tool.ventoux.temporal]` and `--identity` for every command that connects (the environment commands, `ventoux advise`); a provider's `development`; the manifest's `keys` and `audit`; the registry refusing a development provider in production | an identity named but not configured, or its file unreadable, refused, never connected without; a provider that doesn't say whether it is for development refused at the worker's start; in production, a case worker with `FileKeys`, with `FileAudit`, or with neither said, refused, the worker never polling |
+| **20b2: `ventoux doctor`** | the rules, the three verdicts, exit codes, `--strict`, the guide's list kept equal | **curriculum:** doctor fails on a deployment that breaks a rule it checks, naming the rule (against the dev server: no mTLS, a reader that can write); a rule it can't check said unchecked, never passed; no secret's value in its output |
+
+**Production environments in the tests.** `test_temporal_activate.py` and
+`test_temporal_registry.py` run workers in a production environment with `FileKeys` and
+`FileAudit`, which D81's refusal would stop. *Proposed:* each defines, in the test file only,
+`FileKeys` and `FileAudit` subclasses declaring `development = False`, commented as standing for a
+deployment's production providers: never in `ventoux.testing`, so no deployment can import one.
+
+### Seams and tests for 20b1 (curriculum step 4, proposed)
+
+| Seam | What it is |
+|---|---|
+| `Configuration.temporal` (`tooling/deployment.py`) | `[tool.ventoux.temporal]` read: `address`, `namespace`, `server_ca`, `identities` (each `cert`, `key`), file paths; refused, saying which key, when not as the format says |
+| `connect(found, identity, address, namespace, converter)` (`tooling/connecting.py`) | a Temporal client as that identity, with TLS and its certificate, or as before with no section; `Unconnectable` saying which identity, which file, never its contents |
+| `--identity NAME` on `environment`, `activate`, `retire`, `manifest`, `advise` | which identity a command connects as |
+| `KeyProvider.development`, `AuditStore.development` | each provider says whether it is for development; `FileKeys` and `FileAudit` say `True`, `VaultKeys` `False` |
+| `Manifest.keys`, `Manifest.audit` (`case/activation.py`) | `Provided(name, development)`, or `None` for a worker that doesn't say (another language, an earlier one) |
+| `worker_manifest(..., keys, audit)` / `environment_worker` | fills them from the client's provider (`keys_of`) and the store it is given; a provider without `development` refused before publishing |
+| `publish(registry, manifest)` (`case/registry.py`) | refuses, in a production environment, a case worker's manifest whose `keys` or `audit` is `None` or for development, saying which and what to deploy |
+
+**The tests, in order** (each watched failing first):
+1. Negative first: `publish` in production refuses a case worker naming `FileKeys`, naming
+   `FileAudit`, and naming neither, each saying which; in development, accepts it.
+2. A non-case worker's manifest without them is accepted in production (another language).
+3. `worker_manifest` fills `keys` and `audit` from the client and the store; a provider without
+   `development` is refused before anything is published.
+4. On Temporal: a production environment's worker with `FileKeys` never polls (the activation
+   tests, with their test-file stand-ins, still pass).
+5. The configuration: `[tool.ventoux.temporal]` read; each wrong shape refused saying which key;
+   no section, the defaults as before.
+6. `connect`: an identity not configured refused naming it; a missing or unreadable file refused
+   naming the file, never reading it out; with no section, `localhost:7233` without TLS, as the
+   environment tests already connect.
+7. Every command that connects takes `--identity` and goes through `connect` (a test reads the
+   argument parser, so a new command can't skip it).
+
+### Decided while building 20b1
+
+- **`ventoux advise` connects as `reader` by default,** the environment commands as `operator`:
+  advise only queries the advisor beside a case, so it needs no identity that can write. Each is
+  the command's default only when `[tool.ventoux.temporal]` is there; without it, commands connect
+  as before and refuse `--identity`, which would name an identity nothing describes.
+- **`--address` and `--namespace` have no built-in default any more.** A flag wins over the
+  section; with neither, the development server (`localhost:7233`, `default`). So a deployment
+  never has to repeat its address on every command, and development is unchanged.
+- **The identity is checked before anything else is read or connected,** in `advise` before the
+  model's settings: a command refused for its identity has done nothing.
+- **The stand-ins live in `tests/production_stand_ins.py`,** one file both production test modules
+  import, rather than a copy in each: still in `tests/` only, never in `ventoux.testing`.
+- **`provided()` raises `TypeError`** for a provider that doesn't say `development`: it is a
+  program built wrong, found when the worker starts, before anything is published.
+- **The rule on providers is behind a patch, `ventoux-registry-keeping`** (from the tutor's review
+  of #95). A registry's requests are Updates, decided again on replay, and an Update schedules no
+  command: a production registry recorded before 20b1, replayed after a worker restart, would
+  have refused its workers' manifests (none says its providers) and then every activation
+  needing them, losing its active release with no nondeterminism error and every check green.
+  So the registry asks `workflow.patched` where the rule would apply: a history without the
+  marker decides as it was recorded (brief, D51). Temporal keeps a patch's answer for the run,
+  so a registry running at the upgrade keeps the earlier rule until it continues as new (every
+  500 requests, or sooner when Temporal suggests it); a worker it accepted stays accepted until
+  it starts again and publishes. *Proposed for 20b2:* doctor fails a production registry holding
+  a case worker's manifest that is for development or doesn't say, so that window is seen.
+- **Only `connecting.py` calls `Client.connect`,** checked by a test reading the source, so a new
+  command can't make a client without an identity; another test reads the argument parser, so
+  every command offering `--address` offers `--identity` and is in the per-command test.
+
+## Promises (20b1)
+
+Each claim D81, the note and the guides make about 20b1's behaviour, and the test that would fail
+if it weren't true. Each was watched failing: before its code was written, or with its branch
+switched off when the code came first.
+
+| Promise | Test |
+|---|---|
+| In production, a case worker keeping its keys with a development provider is refused, saying which and what to deploy | `test_activation.py::test_production_refuses_a_case_worker_keeping_with_a_development_provider` (`FileKeys`) |
+| The same for its audit store, and for each not said | the same test (`FileAudit`, keys not said, audit not said) |
+| Both problems are said at once, never only the first | `test_activation.py::test_a_case_worker_wrong_on_both_counts_is_told_both` |
+| In development, the same worker is accepted | `test_activation.py::test_development_accepts_a_case_worker_keeping_with_development_providers` |
+| In production, a case worker with production providers is accepted | `test_activation.py::test_production_accepts_a_case_worker_keeping_with_production_providers` |
+| A worker serving no case (another language, a team's) is accepted without saying them | `test_activation.py::test_production_accepts_a_team_worker_that_says_neither` |
+| A manifest says what keeps its keys and records, by name and whether each is for development, and it crosses the registry | `test_temporal_registry.py::test_a_manifest_says_what_keeps_its_keys_and_its_records_by_name` |
+| A provider that doesn't say whether it is for development is refused when the worker starts, before anything is published | `test_temporal_registry.py::test_a_provider_that_doesnt_say_whether_it_is_for_development_is_refused` |
+| A provider with no `development` setting at all, keys or audit store, is refused when the worker starts | `test_temporal_registry.py::test_a_provider_with_no_development_setting_at_all_is_refused` (both) |
+| A production worker keeping its keys in a file never polls; the rule is recorded, so its replay refuses it again | `test_temporal_registry.py::test_a_production_worker_keeping_its_keys_in_a_file_never_polls` |
+| A production registry recorded before 20b1 decides every request on replay as it was recorded: no worker refused, no release lost | `test_temporal_registry.py::test_a_production_registry_recorded_before_20b1_decides_as_recorded_on_replay` |
+| `[tool.ventoux.temporal]` is read as file paths; each wrong shape is refused naming the key | `test_connecting.py::test_the_temporal_section_is_read_as_file_paths_never_their_contents`, `test_a_temporal_section_not_as_the_format_says_is_refused_saying_which_key` (six shapes) |
+| Without the section, commands connect to `localhost:7233`, `default`, without TLS, and refuse `--identity` | `test_connecting.py::test_no_temporal_section_is_none_and_commands_connect_as_before`, `test_no_temporal_section_connects_as_before_and_refuses_an_identity_named` |
+| An identity not configured is refused, naming it | `test_connecting.py::test_an_identity_not_configured_is_refused_naming_it` |
+| A file that can't be read is refused by its path and error's kind, never its contents; nothing is connected | `test_connecting.py::test_a_file_that_cant_be_read_is_refused_naming_it_never_its_contents` |
+| An identity connects with its certificate, its key and the server CA; the flags win over the section | `test_connecting.py::test_an_identity_connects_with_its_certificate_its_key_and_the_server_ca` |
+| Every command that connects takes `--identity` and refuses one not configured, exit 2, before connecting | `test_connecting.py::test_every_command_that_connects_takes_an_identity_and_refuses_one_not_configured` (seven commands) |
+| A new command offering `--address` can't skip `--identity` | `test_connecting.py::test_a_command_offering_an_address_is_one_the_identity_test_runs` |
+| Every Temporal client is made by `connect`, as an identity | `test_connecting.py::test_only_connecting_connects_to_temporal` |
+
+### Seams and tests for 20b2 (proposed, to be agreed before it is built)
+
+| Seam | What it is |
+|---|---|
+| `ventoux.tooling.doctor`: `Verdict`, `Finding(rule, verdict, said)` | one rule's outcome |
+| `RULES` | each rule, its name, what it checks, and for an always-unchecked one the guide's section |
+| `Probes` (a protocol) and `LiveProbes` | what doctor asks the world: a connection without a certificate, a reader's signal to a workflow that can't exist, the registry's state and `environment_check`, Vault's `capabilities-self`, a key that can't exist; tests give recorded answers for the passed branches |
+| `diagnose(found, environment, probes) -> list[Finding]` | every rule, run whatever the others give |
+| `ventoux doctor ENVIRONMENT [--strict]` | prints each finding, exits 0, 1 or 2 |
+
+Its tests (each rule: passed, FAILED, unchecked, and one meeting an error it doesn't expect;
+against the dev server for Temporal's failing branches; secrets planted and never said) are
+listed when 20b1 is merged.

@@ -26,6 +26,15 @@ class Bound:
 
 
 @dataclass(frozen=True)
+class Provided:
+    """What keeps a case worker's keys, or its audit records: the class's name and whether it is
+    for development, never a setting (an address, a path, a token) (brief, D81)."""
+
+    name: str  # `VaultKeys`, `FileAudit`
+    development: bool  # True: for development and tests only, never a production environment
+
+
+@dataclass(frozen=True)
 class Manifest:
     """What one worker says it serves, published when it starts (brief, D5)."""
 
@@ -38,6 +47,10 @@ class Manifest:
     case: str | None = None  # the case workflow type among them; None: not a case worker
     # Its case workflow's bindings: each workflow contract, and where it runs (brief, D29).
     binds: dict[str, Bound] = field(default_factory=dict[str, Bound])
+    # What keeps its keys and its audit records; None: not said (a team's worker, in any
+    # language, or one built before 20b) (brief, D81).
+    keys: Provided | None = None
+    audit: Provided | None = None
 
 
 @dataclass(frozen=True)

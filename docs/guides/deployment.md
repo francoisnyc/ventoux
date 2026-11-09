@@ -97,14 +97,26 @@ them. Prefer a Ventoux operation where one exists: `retry`, `close`, a change re
   cert = "/etc/ventoux/operator.pem"
   key = "/etc/ventoux/operator.key"
 
-  [tool.ventoux.temporal.identities.reader]     # for doctor's checks only
+  [tool.ventoux.temporal.identities.reader]     # ventoux advise, which only reads
   cert = "/etc/ventoux/doctor-reader.pem"
   key = "/etc/ventoux/doctor-reader.key"
   ```
 
-  `ventoux activate`, `retire`, `environment` and `manifest publish` connect as `operator`;
-  `--identity NAME` chooses another. Without `[tool.ventoux.temporal]`, commands connect to
-  `localhost:7233` without TLS, as in development.
+  `ventoux activate`, `retire`, `environment` and `manifest publish` connect as `operator`,
+  `ventoux advise` as `reader`; `--identity NAME` chooses another, and `--address` and
+  `--namespace` win over the section's. Without `[tool.ventoux.temporal]`, commands connect to
+  `localhost:7233` (namespace `default`) without TLS, as in development, and refuse
+  `--identity`.
+
+  Refused before anything connects, exit 2:
+
+  | When | Said |
+  |---|---|
+  | an identity the section doesn't name | `the identity reader isn't configured: name its cert and key in pyproject.toml, [tool.ventoux.temporal.identities.reader]` |
+  | a file that can't be read | `the identity operator's key, /etc/ventoux/operator.key, can't be read (PermissionError): nothing was connected` |
+  | `--identity` with no section | `--identity operator names an identity, and pyproject.toml has no [tool.ventoux.temporal]: name it there, with its cert and key` |
+
+  A file is named by its path and the error's kind, never by what it holds.
 
 ## Workers
 
@@ -125,9 +137,23 @@ them. Prefer a Ventoux operation where one exists: `retry`, `close`, a change re
   ```
 
   The keys reach the worker through its client's converter, the audit store as an argument. The
-  manifest says which kind of key provider and audit store the worker was built with (never
-  their settings). In a production environment, the registry refuses a worker built with
-  `FileKeys` or `FileAudit`, so it never polls.
+  manifest says which kind of key provider and audit store the worker was built with, and
+  whether each is for development (never their settings). Your audit store says
+  `development = False`; one that doesn't say is refused when the worker starts. In a production
+  environment, the registry refuses a case worker built with `FileKeys` or `FileAudit`, or whose
+  manifest doesn't say what keeps its keys or its records (an earlier build), so it never
+  polls:
+
+  | When | Said |
+  |---|---|
+  | `FileKeys` | `refunds-a keeps its keys with FileKeys, which is for development: production keeps them in the deployment's key service; deploy the worker with it` |
+  | `FileAudit` | `refunds-a writes its audit records to FileAudit, which is for development: production writes them to the deployment's audit store; deploy the worker with it` |
+  | not said | `refunds-a doesn't say what keeps its keys: a case worker in production must; deploy a build that does` |
+
+  **Upgrading to this rule:** a registry running when you upgrade keeps deciding as before, so
+  its history replays as it was recorded, until it next continues as new (every 500 requests, or
+  sooner when Temporal suggests it). Until then it accepts a worker with `FileKeys` as it did; a
+  worker it accepted stays accepted until it starts again and publishes under the rule.
 - **Task queues:** a release is activated on its case queue; every poller there must serve the
   release's contracts with their released hashes (D54). One stray worker is enough to run other
   code, so `ventoux environment check production` belongs in your monitoring.

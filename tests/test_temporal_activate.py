@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from dev_server import cli_binary, cli_folder, dev_server
+from production_stand_ins import production_audit, production_converter
 from temporalio import workflow
 from temporalio.client import Client
 from temporalio.runtime import Runtime, TelemetryConfig
@@ -33,8 +34,6 @@ from ventoux.testing import (
     CATALOG,
     FAKES,
     DevelopmentPlans,
-    development_audit,
-    development_converter,
 )
 from ventoux.tooling.cli import main
 from ventoux.tooling.releases import FolderStore, release
@@ -52,7 +51,7 @@ def on_dev_server[T](scenario: Callable[[Client, str], Awaitable[T]], create: bo
         # Started by the harness, with its own deadline: a cold disk can outlast the SDK's 5 s
         # (12e, choice 81).
         binary = await cli_binary(cli_folder())
-        server = dev_server(binary, data_converter=development_converter())
+        server = dev_server(binary, data_converter=production_converter())
         async with server as environment, registry_worker(environment.client):
             if create:
                 await create_environment(environment.client, "production")
@@ -102,7 +101,7 @@ async def started(
             build,
             identity,
             activity_executor=threads,
-            audit=development_audit(),
+            audit=production_audit(),
         )
         async with worker:
             yield worker
@@ -113,7 +112,7 @@ async def second_client(address: str) -> Client:
     runtime, so a second worker on refunds, as from a second machine, needs its own."""
     return await Client.connect(
         address,
-        data_converter=development_converter(),
+        data_converter=production_converter(),
         runtime=Runtime(telemetry=TelemetryConfig()),
     )
 

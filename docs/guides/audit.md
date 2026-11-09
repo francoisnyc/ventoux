@@ -100,12 +100,15 @@ worker = case_worker(
 )
 ```
 
-A store is anything with two methods: `append(records)`, which keeps each record once by its
-stream and number (a record already kept with the same content is accepted; with other content,
-refused), and `read(case)`, which gives a case's records, its children's and its requests', each
-stream in order. `FileAudit` is the development store; in production it is yours (a database
-table, a bucket), written to that shape. A case worker without a store is refused: a case would
-run with no trail.
+A store is anything with two methods and one attribute: `append(records)`, which keeps each
+record once by its stream and number (a record already kept with the same content is accepted;
+with other content, refused), `read(case)`, which gives a case's records, its children's and its
+requests', each stream in order, and `development`, saying whether it is for development only.
+`FileAudit` is the development store (`development = True`); in production it is yours (a
+database table, a bucket), written to that shape, with `development = False`. A case worker
+without a store is refused: a case would run with no trail. One whose store doesn't say
+`development` is refused when it starts, and in a production environment the registry refuses one
+whose store is for development (the deployment guide, "Workers").
 
 **"The same content" means equal with each sealed value taken by its place,** never its bytes.
 A write that landed but whose answer was lost is sent again, sealed afresh with a new nonce: other

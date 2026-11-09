@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
-from temporalio.client import Client
 from temporalio.service import RPCError
 
 from ventoux.case.activation import Manifest
@@ -21,6 +20,8 @@ from ventoux.case.registry import Answer
 from ventoux.case.releases import RecordRefused
 from ventoux.temporal import registry
 from ventoux.temporal.converter import registry_converter
+from ventoux.tooling.connecting import Unconnectable, chosen, connect, connection
+from ventoux.tooling.deployment import Configuration, Unconfigured, configuration
 from ventoux.tooling.releases import FolderStore
 
 DONE = 0  # it did what it was asked, or had nothing to do
@@ -38,7 +39,15 @@ class Unreadable(Exception):
 def environment_command(arguments: argparse.Namespace) -> int:
     """Run one environment command, print what it did, and say how it ended."""
     try:
-        return asyncio.run(run(arguments))
+        found = configuration(Path.cwd())
+        identity = chosen(found, arguments.identity, "operator")
+        # Checked before anything is read or connected: an identity that can't be used is said.
+        connection(found, identity, arguments.address, arguments.namespace)
+    except (Unconfigured, Unconnectable) as refused:
+        print(refused, file=sys.stderr)
+        return CANT_READ
+    try:
+        return asyncio.run(run(arguments, found, identity))
     except (RecordRefused, registry.RegistryMissing, registry.ManifestRefused) as refused:
         print(refused, file=sys.stderr)
         return REFUSED
@@ -47,10 +56,10 @@ def environment_command(arguments: argparse.Namespace) -> int:
         return CANT_READ
 
 
-async def run(arguments: argparse.Namespace) -> int:
-    """The command, against Temporal at `--address`."""
-    client = await Client.connect(
-        arguments.address, namespace=arguments.namespace, data_converter=registry_converter()
+async def run(arguments: argparse.Namespace, found: Configuration, identity: str | None) -> int:
+    """The command, against Temporal, as `identity` (brief, D81)."""
+    client = await connect(
+        found, identity, arguments.address, arguments.namespace, registry_converter()
     )
     if arguments.command == "environment":
         if arguments.action == "create":

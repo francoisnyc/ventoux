@@ -33,6 +33,10 @@ class AuditStore(Protocol):
     when it is equal with each sealed value taken by its place, never its ciphertext: sealing the
     same value again gives other bytes (`same`)."""
 
+    # Whether it is for development and tests only: a case worker's manifest says so, and a
+    # production environment refuses one that is (brief, D81).
+    development: bool
+
     def append(self, records: list[Written]) -> None: ...
 
     def read(self, prefix: str) -> list[Written]: ...
@@ -40,6 +44,8 @@ class AuditStore(Protocol):
 
 class FileAudit:
     """Development only: one JSON Lines file per stream, in `folder`, only ever appended to."""
+
+    development = True  # records in local files: never a production environment's (brief, D81)
 
     def __init__(self, folder: Path | str) -> None:
         self.folder = Path(folder)

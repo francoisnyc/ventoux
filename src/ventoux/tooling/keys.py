@@ -43,6 +43,10 @@ class KeyProvider(Protocol):
     forgotten (brief, D15). `part` names where the data sits in its payload (`sensitive/0`), so
     sealed data moved to another place fails to open."""
 
+    # Whether it is for development and tests only: a case worker's manifest says so, and a
+    # production environment refuses one that is (brief, D81).
+    development: bool
+
     def create(self, case: str) -> None: ...
 
     def seal(self, case: str, data: bytes, part: str) -> bytes: ...
@@ -56,6 +60,8 @@ class KeyProvider(Protocol):
 
 class FileKeys:
     """Development only: a 256-bit key per case, kept in a JSON file, sealing with AES-256-GCM."""
+
+    development = True  # keys in a file: never a production environment's (brief, D81)
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)

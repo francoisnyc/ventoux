@@ -2219,6 +2219,9 @@ D29, D51 and D53, whose text is kept.*
   attention.
 - **No new engine version:** `decide` decides nothing differently; the registry's calls are in the
   driver, on new paths, behind the patch `ventoux-registry`.
+- **Amended 2026-11-09, by D81** (the text above stands; this adds to it): a case worker's
+  manifest says its key provider and audit store, by name and whether each is for development;
+  in a production environment one naming a development provider, or none, is refused.
 
 ### D55. The semantic diff: changes by effect, a verdict only where proven, every doubt read as looser
 
@@ -3423,6 +3426,52 @@ and D60, whose text is kept; D4 is amended below.*
 - **The record is only added to:** the head's `changes` starts with the base's lines, each
   unchanged; one removed, rewritten or moved fails the same comparison, saying which line went or
   changed (from the tutor review of #93, before merge).
+
+### D81. Connecting as an identity, a worker that says what it keeps with, and `ventoux doctor`
+
+*Decided 2026-11-08, in layer 20 (`docs/layers/20-deployment.md`, questions 2, 3, 6, 7 and 8);
+written 2026-11-09, before 20b is built. Adds to D19, D54, D62, D77, D78 and D79, whose text is
+kept; D54 is amended below.*
+
+- **Every command that talks to Temporal connects as an identity,** named in `pyproject.toml`:
+  `[tool.ventoux.temporal]` gives `address`, `namespace`, an optional `server_ca`, and
+  `identities`, each a `cert` and a `key` as **file paths**, never their contents. `--identity
+  NAME` chooses one (`operator` by default for the environment commands); `--address` and
+  `--namespace` still win. With no `[tool.ventoux.temporal]`, a command connects as before, to
+  `localhost:7233` without TLS: development is unchanged. mTLS only in v1.0; an identity named but
+  not configured, or a file that can't be read, is refused, saying which, never connected
+  without it.
+- **A case worker's manifest says what it keeps with:** its key provider and its audit store, each
+  by its class's name and whether it is for development, never a setting (an address, a path, a
+  token). Each provider declares which (`development`, `FileKeys` and `FileAudit` say so); one
+  that doesn't is refused when the worker starts (fail closed). **In a production environment the
+  registry refuses a case worker's manifest naming a development provider,** or naming none, so
+  the worker never polls (D54's pattern); a manifest from another language, or an earlier
+  worker, that isn't a case worker is accepted without them.
+- **`ventoux doctor ENVIRONMENT` checks a deployment,** with the rights it is given and no more:
+  configuration it reads, and the live deployment it asks. Each rule is named `area.rule`, and
+  each line says what it saw and, on a failure, what to do.
+- **Three verdicts, never two:** `passed` (seen to hold), `FAILED` (seen broken), `unchecked`
+  (couldn't be seen either way, saying why). A rule that can't run, or that meets an error it
+  doesn't expect, is unchecked with the error's kind, never passed and never dropped: every rule
+  runs, whatever the others give. Exit 0 when nothing failed, 1 when a rule failed, 2 when doctor
+  can't run at all; `unchecked` lines are said every time and fail the command only with
+  `--strict`.
+- **Doctor never changes anything, and never holds the caller's key:** every probe does no harm if
+  allowed (a signal to a workflow that can't exist; Vault's `sys/capabilities-self`, never a
+  call it asks about); it starts no workflow, writes to no registry, makes no key, appends to no
+  store. It connects as `reader`, to see a write refused, and as the configured identities only.
+- **What it checks, and what only the guide states.** Its rules are listed in the deployment
+  guide with how each is seen; the rules no client can see (only the caller writes; resets are a
+  named group's; the audit store deletes nothing; Vault's other tokens; retention) are always
+  `unchecked`, each naming the guide's section that states it, kept equal by a test.
+- **It reads the deployment's key service and audit store as it reads the catalog** (D59):
+  `[tool.ventoux] keys = "module:NAME"` and `audit = "module:NAME"`, the platform team's code,
+  imported by that name. `ventoux environment check` stays, for monitoring; doctor runs its check
+  as one rule, from the same function. Doctor never hardens.
+- **Secrets are seen present, never read out:** `VAULT_TOKEN`, `ANTHROPIC_API_KEY` (only when a
+  `model` is configured) and the identities' key files (present, readable by their owner only);
+  no output of doctor's, a failure included, holds a secret's value.
 
 ## Concepts
 
