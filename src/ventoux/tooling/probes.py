@@ -8,6 +8,7 @@ probe raises on anything it can't read as an answer, which doctor says unchecked
 from typing import Protocol
 
 from ventoux.case.registry import Registry
+from ventoux.tooling.vault import VaultKeys
 
 
 class Probes(Protocol):
@@ -30,4 +31,12 @@ class Probes(Protocol):
 
     async def environment_problems(self) -> list[str]:
         """What `environment_check` says, one problem a line; empty when every release can run."""
+        ...
+
+    async def key_state(self, keys: VaultKeys) -> str:
+        """The state `keys` gives of the key of a case that can't exist: reads only."""
+        ...
+
+    async def capabilities(self, keys: VaultKeys, paths: list[str]) -> dict[str, list[str]]:
+        """What Vault says the token could do on each of `paths` (`sys/capabilities-self`)."""
         ...

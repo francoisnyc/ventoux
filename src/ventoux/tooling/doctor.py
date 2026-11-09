@@ -9,6 +9,7 @@ others give. Doctor changes nothing, and says no secret's value. See docs/guides
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from ventoux.tooling.deployment import (
     named,
 )
 from ventoux.tooling.probes import Probes
+from ventoux.tooling.vault import VaultKeys, vault_name
 
 Verdict = Literal["passed", "FAILED", "unchecked"]
 
@@ -273,6 +275,99 @@ async def providers_are_production(context: Context) -> Seen:
     )
 
 
+# A case that can't exist: its key is the one doctor asks about, never made (brief, D81).
+NEVER_MADE = "doctor-never-made"
+NOT_VAULT = "the key service named isn't VaultKeys: keys.named says what it is"
+
+
+def vault_keys(context: Context) -> VaultKeys | None:
+    """The key service `[tool.ventoux] keys` names, when it is Vault; None otherwise (named
+    elsewhere, not at all, or not importable: `keys.named` says which)."""
+    name = context.found.keys
+    if name is None:
+        return None
+    try:
+        provider = named(name, context.found.root, "the key service", "acme_platform:KEYS")
+    except Unconfigured:
+        return None
+    return provider if isinstance(provider, VaultKeys) else None
+
+
+async def token_is_present(context: Context) -> Seen:
+    """`VAULT_TOKEN` is set: seen by its name, never read out (brief, D81)."""
+    if vault_keys(context) is None:
+        return "unchecked", NOT_VAULT
+    if os.environ.get("VAULT_TOKEN"):
+        return "passed", "VAULT_TOKEN is set"
+    return "FAILED", (
+        "VAULT_TOKEN is not set: set it in the environment of each worker, the caller and the "
+        "shell doctor runs in"
+    )
+
+
+async def keys_are_reachable(context: Context) -> Seen:
+    """The key service answers that a key that can't exist was never made: reads only."""
+    keys = vault_keys(context)
+    if keys is None:
+        return "unchecked", NOT_VAULT
+    state = await asked(context, context.probes.key_state(keys))
+    if state == "never made":
+        return "passed", (
+            f"the key service at {keys.address} answers: a key that can't exist was never made"
+        )
+    return "FAILED", (
+        f"the key service at {keys.address} says a key that can't exist is {state}: check it is "
+        f"the deployment's Vault, its transit mount {keys.transit_mount}"
+    )
+
+
+async def policy_is_narrow(context: Context) -> Seen:
+    """What the token could do, asked of Vault (`sys/capabilities-self`), never done: no delete
+    on a mark; denied a key not named `ventoux-*`; update on encrypt and decrypt (brief, D78)."""
+    keys = vault_keys(context)
+    if keys is None:
+        return "unchecked", NOT_VAULT
+    name = vault_name(NEVER_MADE)
+    marks = [
+        f"{keys.marks_mount}/data/ventoux/forgotten/{name}",
+        f"{keys.marks_mount}/metadata/ventoux/forgotten/{name}",
+    ]
+    outside = f"{keys.transit_mount}/keys/doctor-outside"
+    using = [f"{keys.transit_mount}/encrypt/{name}", f"{keys.transit_mount}/decrypt/{name}"]
+    held = await asked(context, context.probes.capabilities(keys, [*marks, outside, *using]))
+    problems = [
+        f"the token can delete a mark ({path}): never allow delete on the marks"
+        for path in marks
+        if {"delete", "root"} & set(held[path])
+    ]
+    if held[outside] != ["deny"]:
+        problems.append(f"the token isn't denied a key not named ventoux-* ({outside}): deny it")
+    problems += [
+        f"the token can't use a ventoux-* key ({path}): allow update on it"
+        for path in using
+        if not {"update", "root"} & set(held[path])
+    ]
+    if problems:
+        return "FAILED", "; ".join(problems)
+    return "passed", (
+        "the token can't delete a mark, is denied a key not named ventoux-*, and can encrypt and "
+        "decrypt with ventoux-* keys"
+    )
+
+
+async def advisor_key_is_present(context: Context) -> Seen:
+    """With a `model` configured, `ANTHROPIC_API_KEY` is set: seen by its name, never read out
+    (brief, D62). With none, no key is needed: seen in the configuration, not assumed."""
+    if context.found.model is None:
+        return "passed", "no model is configured: no key is needed"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "passed", "ANTHROPIC_API_KEY is set, for the model configured"
+    return "FAILED", (
+        "a model is configured, and ANTHROPIC_API_KEY is not set: set it where ventoux advise and "
+        "the step advisor run"
+    )
+
+
 RULES: tuple[Rule, ...] = (
     Rule("catalog.named", catalog_is_named),
     Rule("keys.named", provider_is_named("keys", "key service")),
@@ -283,6 +378,10 @@ RULES: tuple[Rule, ...] = (
     Rule("environment.exists-production", environment_is_production),
     Rule("environment.workers", workers_can_run),
     Rule("environment.production-providers", providers_are_production),
+    Rule("keys.token-present", token_is_present),
+    Rule("keys.reachable", keys_are_reachable),
+    Rule("keys.policy", policy_is_narrow),
+    Rule("advisor.key-present", advisor_key_is_present),
     Rule(
         "temporal.only-caller-writes",
         None,

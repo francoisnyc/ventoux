@@ -19,6 +19,7 @@ from test_activation import FILE_AUDIT, FILE_KEYS, STORE, VAULT, keeping, produc
 from ventoux.case.activation import Provided
 from ventoux.case.registry import Registry
 from ventoux.tooling.cli import main
+from ventoux.tooling.vault import VaultKeys
 from ventoux.tooling.deployment import Configuration, read
 from ventoux.tooling.doctor import RULES, Finding, diagnose, outcome, said
 
@@ -39,6 +40,20 @@ def deployment(folder: Path, text: str = HEALTHY) -> Configuration:
 
 FOREVER = object()  # a probe's answer that never comes
 
+# What the deployment guide's policy gives the token, on each path doctor asks about.
+MARK_DATA = "secret/data/ventoux/forgotten/ventoux-doctor-never-made"
+MARK_METADATA = "secret/metadata/ventoux/forgotten/ventoux-doctor-never-made"
+OUTSIDE = "transit/keys/doctor-outside"
+ENCRYPT = "transit/encrypt/ventoux-doctor-never-made"
+DECRYPT = "transit/decrypt/ventoux-doctor-never-made"
+SOUND_POLICY = {
+    MARK_DATA: ["create", "read", "update"],
+    MARK_METADATA: ["read"],
+    OUTSIDE: ["deny"],
+    ENCRYPT: ["update"],
+    DECRYPT: ["update"],
+}
+
 
 @dataclass
 class Answering:
@@ -49,6 +64,8 @@ class Answering:
     reader: object = "refused"
     registry_held: object = field(default_factory=lambda: production(keeping(VAULT, STORE)))
     problems: object = field(default_factory=list[str])  # environment_check's
+    state: object = "never made"  # the key service's state of a key that can't exist
+    policy: object = field(default_factory=lambda: dict(SOUND_POLICY))  # capabilities, by path
 
     async def answer(self, given: object) -> Any:
         if given is FOREVER:
@@ -68,6 +85,14 @@ class Answering:
 
     async def environment_problems(self) -> list[str]:
         return cast(list[str], await self.answer(self.problems))
+
+    async def key_state(self, keys: VaultKeys) -> str:
+        return cast(str, await self.answer(self.state))
+
+    async def capabilities(self, keys: VaultKeys, paths: list[str]) -> dict[str, list[str]]:
+        held = cast(dict[str, list[str]], await self.answer(self.policy))
+        assert sorted(held) == sorted(paths)  # asked of exactly these paths
+        return held
 
 
 def findings(
@@ -92,8 +117,9 @@ def test_a_configuration_doctor_cant_read_exits_2_saying_why_and_runs_no_rule(
 
 
 def test_a_rule_failed_exits_1_nothing_failed_exits_0_and_strict_fails_an_unchecked_one(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("VAULT_TOKEN", SECRET)
     healthy = findings(deployment(tmp_path))
     assert {finding.verdict for finding in healthy} == {"passed", "unchecked"}
     assert outcome(healthy, strict=False) == 0
@@ -368,6 +394,8 @@ PROBING = {
     "environment.exists-production": "registry_held",
     "environment.workers": "problems",
     "environment.production-providers": "registry_held",
+    "keys.reachable": "state",
+    "keys.policy": "policy",
 }
 
 
@@ -522,3 +550,125 @@ def test_environment_production_providers(tmp_path: Path) -> None:
     assert verdict(found, rule, Answering(registry_held=None)) == Finding(
         rule, "unchecked", "production's registry doesn't exist"
     )
+
+
+def test_keys_token_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rule, found = "keys.token-present", deployment(tmp_path)
+    monkeypatch.setenv("VAULT_TOKEN", SECRET)
+    assert verdict(found, rule) == Finding(rule, "passed", "VAULT_TOKEN is set")
+    monkeypatch.delenv("VAULT_TOKEN")
+    assert verdict(found, rule) == Finding(
+        rule,
+        "FAILED",
+        "VAULT_TOKEN is not set: set it in the environment of each worker, the caller and the "
+        "shell doctor runs in",
+    )
+    file_keys = deployment(tmp_path, '[tool.ventoux]\nkeys = "doctor_deployment:FILE_KEYS"\n')
+    assert verdict(file_keys, rule) == Finding(
+        rule, "unchecked", "the key service named isn't VaultKeys: keys.named says what it is"
+    )
+
+
+def test_keys_reachable(tmp_path: Path) -> None:
+    rule, found = "keys.reachable", deployment(tmp_path)
+    assert verdict(found, rule) == Finding(
+        rule,
+        "passed",
+        "the key service at https://vault.internal:8200 answers: a key that can't exist was "
+        "never made",
+    )
+    assert verdict(found, rule, Answering(state="kept")) == Finding(
+        rule,
+        "FAILED",
+        "the key service at https://vault.internal:8200 says a key that can't exist is kept: "
+        "check it is the deployment's Vault, its transit mount transit",
+    )
+    file_keys = deployment(tmp_path, '[tool.ventoux]\nkeys = "doctor_deployment:FILE_KEYS"\n')
+    assert verdict(file_keys, rule).verdict == "unchecked"
+
+
+@pytest.mark.parametrize(
+    ("path", "given", "said"),
+    [
+        (
+            MARK_METADATA,
+            ["read", "delete"],
+            f"the token can delete a mark ({MARK_METADATA}): never allow delete on the marks",
+        ),
+        (
+            MARK_DATA,
+            ["root"],
+            f"the token can delete a mark ({MARK_DATA}): never allow delete on the marks",
+        ),
+        (
+            OUTSIDE,
+            ["read"],
+            f"the token isn't denied a key not named ventoux-* ({OUTSIDE}): deny it",
+        ),
+        (
+            ENCRYPT,
+            ["read"],
+            f"the token can't use a ventoux-* key ({ENCRYPT}): allow update on it",
+        ),
+    ],
+    ids=["delete on a mark's metadata", "root on a mark", "outside not denied", "no encrypt"],
+)
+def test_keys_policy_fails(tmp_path: Path, path: str, given: list[str], said: str) -> None:
+    policy = {**SOUND_POLICY, path: given}
+    rule = "keys.policy"
+    assert verdict(deployment(tmp_path), rule, Answering(policy=policy)) == Finding(
+        rule, "FAILED", said
+    )
+
+
+def test_keys_policy(tmp_path: Path) -> None:
+    rule, found = "keys.policy", deployment(tmp_path)
+    assert verdict(found, rule) == Finding(
+        rule,
+        "passed",
+        "the token can't delete a mark, is denied a key not named ventoux-*, and can encrypt "
+        "and decrypt with ventoux-* keys",
+    )
+    file_keys = deployment(tmp_path, '[tool.ventoux]\nkeys = "doctor_deployment:FILE_KEYS"\n')
+    assert verdict(file_keys, rule).verdict == "unchecked"
+
+
+def test_advisor_key_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rule = "advisor.key-present"
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert verdict(deployment(tmp_path), rule) == Finding(
+        rule, "passed", "no model is configured: no key is needed"
+    )
+    advising = deployment(tmp_path, HEALTHY + 'model = "the-model"\n')
+    assert verdict(advising, rule) == Finding(
+        rule,
+        "FAILED",
+        "a model is configured, and ANTHROPIC_API_KEY is not set: set it where ventoux advise "
+        "and the step advisor run",
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    assert verdict(advising, rule) == Finding(
+        rule, "passed", "ANTHROPIC_API_KEY is set, for the model configured"
+    )
+
+
+GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "deployment.md"
+
+
+def test_a_rule_no_client_can_see_is_unchecked_naming_a_section_the_guide_has(
+    tmp_path: Path,
+) -> None:
+    sections = {line[3:] for line in GUIDE.read_text().splitlines() if line.startswith("## ")}
+    seen = {finding.rule: finding for finding in findings(deployment(tmp_path))}
+    unseen = [rule for rule in RULES if rule.check is None]
+    assert {rule.name for rule in unseen} == {
+        "temporal.only-caller-writes",
+        "temporal.resets-restricted",
+        "temporal.retention",
+        "audit.no-deletes",
+        "keys.other-tokens",
+    }
+    for rule in unseen:
+        assert rule.section in sections, f"{rule.name} names no section of the guide"
+        assert seen[rule.name].verdict == "unchecked"
+        assert seen[rule.name].said.endswith(f'the deployment guide, "{rule.section}"')
