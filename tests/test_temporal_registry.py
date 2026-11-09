@@ -8,6 +8,8 @@ See docs/layers/12-releases.md (12e).
 """
 
 import asyncio
+import base64
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -17,6 +19,7 @@ from typing import Any, ClassVar, cast
 import pytest
 from one_copy import put_back, second_copies
 from production_stand_ins import production_audit, production_converter
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHistory
@@ -37,7 +40,7 @@ from test_temporal_case_release import markers_of
 from worker_threads import worker_threads
 
 from ventoux.case.activation import Bound, Manifest, Provided
-from ventoux.case.registry import Activating, Answer, Opening, Released
+from ventoux.case.registry import Activating, Answer, Opening, Registry, Released
 from ventoux.case.releases import METHOD, Hash, Record
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract
@@ -56,6 +59,7 @@ from ventoux.temporal.cases import (
 )
 from ventoux.temporal.manifests import environment_worker, worker_manifest
 from ventoux.temporal.registry import (
+    KEEPING_PATCH,
     ManifestRefused,
     RegistryMissing,
     RegistryStart,
@@ -65,6 +69,7 @@ from ventoux.temporal.registry import (
     open_cases,
     publish_manifest,
     registry_handle,
+    registry_id,
     registry_of,
     registry_worker,
     released,
@@ -683,10 +688,71 @@ def test_a_provider_that_doesnt_say_whether_it_is_for_development_is_refused(
         )
 
 
+class KeysWithoutIt:
+    """A key provider written to the protocol's methods, with no `development` at all."""
+
+    def __init__(self, path: Path) -> None:
+        self.file = FileKeys(path)
+
+    def create(self, case: str) -> None:
+        self.file.create(case)
+
+    def seal(self, case: str, data: bytes, part: str) -> bytes:
+        return self.file.seal(case, data, part)
+
+    def open(self, case: str, data: bytes, part: str) -> bytes:
+        return self.file.open(case, data, part)
+
+    def destroy(self, case: str) -> None:
+        self.file.destroy(case)
+
+    def state(self, case: str) -> Any:
+        return self.file.state(case)
+
+
+class AuditWithoutIt:
+    """An audit store written to the protocol's methods, with no `development` at all."""
+
+    def __init__(self, folder: Path) -> None:
+        self.file = FileAudit(folder)
+
+    def append(self, records: Any) -> None:
+        self.file.append(records)
+
+    def read(self, case: str) -> Any:
+        return self.file.read(case)
+
+
+@pytest.mark.parametrize("which", ["keys", "audit"])
+def test_a_provider_with_no_development_setting_at_all_is_refused(
+    tmp_path: Path, which: str
+) -> None:
+    keys: Any = FileKeys(tmp_path / "keys.json")
+    audit: Any = FileAudit(tmp_path / "audit")
+    if which == "keys":
+        keys = KeysWithoutIt(tmp_path / "keys.json")
+        name = "KeysWithoutIt"
+    else:
+        audit = AuditWithoutIt(tmp_path / "audit")
+        name = "AuditWithoutIt"
+    assert not hasattr(keys if which == "keys" else audit, "development")  # not said at all
+    with pytest.raises(TypeError, match=f"^{name} doesn't say whether it is for development"):
+        worker_manifest(
+            ProductionCases,
+            DevelopmentPlans,
+            FAKES,
+            QUEUE,
+            "4f2a9c1",
+            "refunds-a",
+            keys=keys,
+            audit=audit,
+        )
+
+
 def test_a_production_worker_keeping_its_keys_in_a_file_never_polls() -> None:
     # Its client seals with `FileKeys` and it writes to `FileAudit`: production's registry
     # refuses its manifest, so the worker is never built, and nobody polls (brief, D81).
-    async def scenario(client: Client) -> tuple[str, Manifest | None]:
+    async def scenario(client: Client) -> tuple[str, Manifest | None, list[str], Answer]:
         filed = await Client.connect(
             client.service_client.config.target_host,
             namespace=client.namespace,
@@ -706,9 +772,12 @@ def test_a_production_worker_keeping_its_keys_in_a_file_never_polls() -> None:
                     audit=development_audit(),
                 )
         kept = (await registry_of(client, "production")).manifests.get("refunds-f")
-        return str(refused.value), kept
+        recorded = await registry_handle(client, "production").fetch_history()
+        Deciding.answers.clear()
+        await replay_history(recorded, [Deciding], development_converter())
+        return str(refused.value), kept, markers_of(recorded), Deciding.answers[-1]
 
-    said, kept = in_production(scenario)
+    said, kept, markers, replayed = in_production(scenario)
     assert said == (
         "refunds-f keeps its keys with FileKeys, which is for development: production keeps them "
         "in the deployment's key service; deploy the worker with it\n"
@@ -716,3 +785,54 @@ def test_a_production_worker_keeping_its_keys_in_a_file_never_polls() -> None:
         "writes them to the deployment's audit store; deploy the worker with it"
     )
     assert kept is None
+    # The rule is recorded, so a replay of this history refuses the worker again (brief, D81).
+    assert KEEPING_PATCH in markers
+    assert replayed == Answer(False, said.split("\n"))
+
+
+# --- A registry recorded before 20b1 decides on replay as it was recorded (brief, D81) ---
+
+
+# Temporal: unsandboxed, so what the replay decides is kept where the test can read it.
+@workflow.defn(name="ventoux.registry", sandboxed=False)
+class Deciding(RegistryWorkflow):
+    """The registry, keeping each answer it decides, as a replay decides it again."""
+
+    answers: ClassVar[list[Answer]] = []
+
+    @workflow.init
+    def __init__(self, start: RegistryStart) -> None:
+        super().__init__(start)
+
+    @workflow.run
+    async def run(self, start: RegistryStart) -> None:
+        await super().run(start)
+
+    def decided_with(self, after: tuple[Registry, Answer]) -> Answer:
+        answer = super().decided_with(after)
+        Deciding.answers.append(answer)
+        return answer
+
+
+def recorded_answers(text: str) -> list[Answer]:
+    """The answers a registry's history recorded, one per request, in order."""
+    found: list[Answer] = []
+    for event in json.loads(text)["events"]:
+        completed = event.get("workflowExecutionUpdateCompletedEventAttributes")
+        if completed is not None:
+            payload = completed["outcome"]["success"]["payloads"][0]
+            found.append(Answer(**json.loads(base64.b64decode(payload["data"]))))
+    return found
+
+
+def test_a_production_registry_recorded_before_20b1_decides_as_recorded_on_replay() -> None:
+    # Recorded before 20b1 (at 18d): production's registry accepts refunds-a, whose manifest says
+    # nothing of its keys or audit store, then activates claim 1 and claim 2 with refunds-a
+    # polling. An Update schedules no command, so a replay that decides one differently raises no
+    # nondeterminism error: deciding the publish under 20b1's rule would refuse it, then both
+    # activations, and the active release would be lost, silently. So the answers are compared.
+    recorded = HERE / "before_18d_registry.json"
+    history = WorkflowHistory.from_json(registry_id("production"), recorded.read_text())
+    Deciding.answers.clear()
+    asyncio.run(replay_history(history, [Deciding], fixture_converter(recorded)))
+    assert Deciding.answers == recorded_answers(recorded.read_text())

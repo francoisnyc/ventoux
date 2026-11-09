@@ -578,6 +578,17 @@ deployment's production providers: never in `ventoux.testing`, so no deployment 
   import, rather than a copy in each: still in `tests/` only, never in `ventoux.testing`.
 - **`provided()` raises `TypeError`** for a provider that doesn't say `development`: it is a
   program built wrong, found when the worker starts, before anything is published.
+- **The rule on providers is behind a patch, `ventoux-registry-keeping`** (from the tutor's review
+  of #95). A registry's requests are Updates, decided again on replay, and an Update schedules no
+  command: a production registry recorded before 20b1, replayed after a worker restart, would
+  have refused its workers' manifests (none says its providers) and then every activation
+  needing them, losing its active release with no nondeterminism error and every check green.
+  So the registry asks `workflow.patched` where the rule would apply: a history without the
+  marker decides as it was recorded (brief, D51). Temporal keeps a patch's answer for the run,
+  so a registry running at the upgrade keeps the earlier rule until it continues as new (every
+  500 requests, or sooner when Temporal suggests it); a worker it accepted stays accepted until
+  it starts again and publishes. *Proposed for 20b2:* doctor fails a production registry holding
+  a case worker's manifest that is for development or doesn't say, so that window is seen.
 - **Only `connecting.py` calls `Client.connect`,** checked by a test reading the source, so a new
   command can't make a client without an identity; another test reads the argument parser, so
   every command offering `--address` offers `--identity` and is in the per-command test.
@@ -598,7 +609,9 @@ switched off when the code came first.
 | A worker serving no case (another language, a team's) is accepted without saying them | `test_activation.py::test_production_accepts_a_team_worker_that_says_neither` |
 | A manifest says what keeps its keys and records, by name and whether each is for development, and it crosses the registry | `test_temporal_registry.py::test_a_manifest_says_what_keeps_its_keys_and_its_records_by_name` |
 | A provider that doesn't say whether it is for development is refused when the worker starts, before anything is published | `test_temporal_registry.py::test_a_provider_that_doesnt_say_whether_it_is_for_development_is_refused` |
-| A production worker keeping its keys in a file never polls | `test_temporal_registry.py::test_a_production_worker_keeping_its_keys_in_a_file_never_polls` |
+| A provider with no `development` setting at all, keys or audit store, is refused when the worker starts | `test_temporal_registry.py::test_a_provider_with_no_development_setting_at_all_is_refused` (both) |
+| A production worker keeping its keys in a file never polls; the rule is recorded, so its replay refuses it again | `test_temporal_registry.py::test_a_production_worker_keeping_its_keys_in_a_file_never_polls` |
+| A production registry recorded before 20b1 decides every request on replay as it was recorded: no worker refused, no release lost | `test_temporal_registry.py::test_a_production_registry_recorded_before_20b1_decides_as_recorded_on_replay` |
 | `[tool.ventoux.temporal]` is read as file paths; each wrong shape is refused naming the key | `test_connecting.py::test_the_temporal_section_is_read_as_file_paths_never_their_contents`, `test_a_temporal_section_not_as_the_format_says_is_refused_saying_which_key` (six shapes) |
 | Without the section, commands connect to `localhost:7233`, `default`, without TLS, and refuse `--identity` | `test_connecting.py::test_no_temporal_section_is_none_and_commands_connect_as_before`, `test_no_temporal_section_connects_as_before_and_refuses_an_identity_named` |
 | An identity not configured is refused, naming it | `test_connecting.py::test_an_identity_not_configured_is_refused_naming_it` |

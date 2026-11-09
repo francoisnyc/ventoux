@@ -9,7 +9,7 @@ See docs/layers/12-releases.md (12e).
 """
 
 import copy
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from ventoux.case.activation import Manifest, activation_problems
@@ -65,15 +65,25 @@ class Registry:
     log: list[str] = field(default_factory=list[str])  # activations and retirements, in order
 
 
-def publish(registry: Registry, manifest: Manifest) -> tuple[Registry, Answer]:
+def always() -> bool:
+    """A rule in force: what `publish` asks when nothing was recorded before the rule."""
+    return True
+
+
+def publish(
+    registry: Registry, manifest: Manifest, keeping_checked: Callable[[], bool] = always
+) -> tuple[Registry, Answer]:
     """Keep `manifest`, a worker's as it starts, in place of any earlier one of its identity;
-    refused if it moves a workflow type that open cases call (brief, D29) (brief, D54)."""
+    refused if it moves a workflow type that open cases call (brief, D29) (brief, D54).
+    `keeping_checked` says whether the rule on providers (brief, D81) is in force, asked only
+    where it would apply: on Temporal, whether the history recorded it (a registry recorded
+    before replays as it was recorded)."""
     here = registry.environment
     if manifest.environment != here:
         return registry, Answer(
             False, [f"{manifest.identity} serves {manifest.environment}, not {here}"]
         )
-    if not registry.development and manifest.case is not None:
+    if not registry.development and manifest.case is not None and keeping_checked():
         # A case worker in production keeps its keys in the deployment's key service and writes
         # its records to its audit store: one with a development provider, or that doesn't say,
         # never polls (brief, D81).

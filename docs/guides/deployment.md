@@ -149,6 +149,11 @@ them. Prefer a Ventoux operation where one exists: `retry`, `close`, a change re
   | `FileKeys` | `refunds-a keeps its keys with FileKeys, which is for development: production keeps them in the deployment's key service; deploy the worker with it` |
   | `FileAudit` | `refunds-a writes its audit records to FileAudit, which is for development: production writes them to the deployment's audit store; deploy the worker with it` |
   | not said | `refunds-a doesn't say what keeps its keys: a case worker in production must; deploy a build that does` |
+
+  **Upgrading to this rule:** a registry running when you upgrade keeps deciding as before, so
+  its history replays as it was recorded, until it next continues as new (every 500 requests, or
+  sooner when Temporal suggests it). Until then it accepts a worker with `FileKeys` as it did; a
+  worker it accepted stays accepted until it starts again and publishes under the rule.
 - **Task queues:** a release is activated on its case queue; every poller there must serve the
   release's contracts with their released hashes (D54). One stray worker is enough to run other
   code, so `ventoux environment check production` belongs in your monitoring.

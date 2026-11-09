@@ -41,6 +41,12 @@ with workflow.unsafe.imports_passed_through():
     )
     from ventoux.case.releases import Record, digest, unwritten
 
+# The patch marker a registry records the first time it decides a production case worker's
+# manifest under the rule on providers: a history without it, recorded before, decides each
+# request again as it was recorded, so no worker it accepted, nor any release it activated, is
+# lost on replay (brief, D51) (brief, D81).
+KEEPING_PATCH = "ventoux-registry-keeping"
+
 # The task queue every environment's registry runs on, served by `registry_worker`.
 REGISTRY_QUEUE = "ventoux-registry"
 # How long one call to Temporal, from an activity, may take; Temporal retries it until it answers,
@@ -131,7 +137,13 @@ class RegistryWorkflow:
     # history, so a replay decides it again at the same point.
     @workflow.update(name="publish")
     def publish(self, manifest: Manifest) -> Answer:
-        return self.decided_with(pure.publish(self.registry, manifest))
+        # Temporal: `patched` says whether the history recorded the rule. An Update schedules no
+        # command, so a request decided otherwise on replay is no nondeterminism error: without
+        # the patch, a registry recorded before 20b1 would lose its workers, silently. The answer
+        # holds for the run: one recorded before keeps the earlier rule until it continues as new.
+        return self.decided_with(
+            pure.publish(self.registry, manifest, lambda: workflow.patched(KEEPING_PATCH))
+        )
 
     @workflow.update(name="activate")
     def activate(self, asked: Activating) -> Answer:
