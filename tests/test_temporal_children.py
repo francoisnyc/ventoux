@@ -1079,17 +1079,19 @@ def test_a_history_with_a_child_replays() -> None:
     # Everything 18d adds is recorded in the histories, never read from the world on replay: the
     # child's start, its watch, the doorbell and its read, the question asked as a run starts,
     # the daily timer, and the close, across switches on both sides (brief, D17) (brief, D75).
+    # The check is 2 seconds (`CheckingCases`): the parent switches with its child starting, after
+    # which the time-skipping test server can stop skipping (docs/layers/fix-child-switch-clock.md).
     converter = development_converter()  # holds the keys the replay needs
 
     async def scenario(environment: WorkflowEnvironment) -> list[WorkflowHistory]:
         client = environment.client
-        parent = await start_case(client, SwitchingCases, CLOSING, FILE, "claim-50", QUEUE)
+        parent = await start_case(client, CheckingCases, CLOSING, FILE, "claim-50", QUEUE)
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
-        child = await started(client, SwitchingCases, "claim-50/repair#1")
+        child = await started(client, CheckingCases, "claim-50/repair#1")
         first, _ = await runs_of(client, "claim-50")
         await until_switched(client, "claim-50", first)
         await reported(child, lambda now: now.waiting_at == ["fix#1"])
-        await environment.sleep(timedelta(hours=25))  # a daily check: the child still open
+        await environment.sleep(timedelta(seconds=3))  # past a check: the child still open
         opened, _ = await runs_of(client, "claim-50/repair#1")
         for entry in ("fix#8", "fix#9"):  # two events, recorded and ignored: the child switches
             await child.signal("child_ended", entry)
@@ -1099,7 +1101,7 @@ def test_a_history_with_a_child_replays() -> None:
         await reported(child, lambda now: now.status == "closed")
         return await every_run(client, "claim-50") + await every_run(client, "claim-50/repair#1")
 
-    histories = skipping(scenario, cases=SwitchingCases, converter=converter)
+    histories = skipping(scenario, cases=CheckingCases, converter=converter)
     ids = [history.workflow_id for history in histories]
     assert ids.count("claim-50") > 1 and ids.count("claim-50/repair#1") > 1  # both switched
     # What 18d records, each there to replay: the child's start, the daily timer, the read, and
@@ -1122,4 +1124,4 @@ def test_a_history_with_a_child_replays() -> None:
         ("activity", "ventoux.child.read"),
     } <= recorded
     for history in histories:
-        asyncio.run(replay_history(history, [SwitchingCases], converter))
+        asyncio.run(replay_history(history, [CheckingCases], converter))

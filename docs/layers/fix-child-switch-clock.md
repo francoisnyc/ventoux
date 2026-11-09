@@ -140,15 +140,29 @@ terminated mid-task, as `scripts/clock_held.py` does), the scenario as it was (a
 25-hour sleep) hung past 20 seconds, 2 runs of 2: CI's failure, every time. As it is now (a
 2-second check, a 3-second sleep) the child was noticed in under 4 seconds, 3 runs of 3.
 
-**What the test no longer proves:** that the check fires after a day of skipped time across a
-switch. It proves the run after a switch sets its own check, and that the check notices a child
-terminated unheard; that the interval a deployment runs with is a day is the other test, a fact of
-the class. The timer is the same timer, its duration a setting.
+**claim-50 too** (tutor review of #94): `test_a_history_with_a_child_replays` also skipped 25
+hours after the parent switched with its child starting; in 4 of the tutor's 24 runs its switching
+task carried the child's start, the order found at the hang. It now runs on `CheckingCases`, sleeps
+3 seconds past a check, and still records the timer and the read it replays (each history replayed
+on `CheckingCases`). Held first on demand, as above: as it was, hung past 20 seconds, 2 runs of 2;
+now, closed in 4.4 seconds, 3 runs of 3. No other test skips time after a switch with a child
+case starting: only `tests/test_temporal_children.py` opens child cases, and its one other long
+skip, `test_a_child_terminated_unheard_is_noticed_within_a_day` (claim-13), runs on
+`DevelopmentCases`, which doesn't switch. Plans and workflow steps run as child workflows too,
+but a case never switches while one runs (`running`).
+
+**What the two tests no longer prove:** that the check fires after a day of skipped time across a
+switch. They prove the run after a switch sets its own check, that the check notices a child
+terminated unheard, and that its timer and read are recorded and replay. That a check comes a day
+apart in skipped time is still proven, by claim-13, without a switch; that the interval a
+deployment runs with is a day, by `test_a_case_asks_how_its_open_children_stand_once_a_day`. The
+timer is the same timer, its duration a setting.
 
 ## Still open
 
 - **The exact trigger in the test server:** what lets it create the parent's new run without
   recording the switching task's completion, so a later skip waits for ever. Both releases tried
   have the fault (`scripts/clock_held.py`, exit 1). Reporting the plain reproductions to Temporal
-  is the maintainer's call. A test elsewhere that skips time after a switch with a child starting
-  could meet it; none does now.
+  is the maintainer's call. A test that skips time after a switch with a child case starting
+  could meet it: none does now (claim-14 and claim-50 were the two, both on `CheckingCases`); a new
+  one should do as they do.

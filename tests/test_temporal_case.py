@@ -260,8 +260,12 @@ def test_the_report_past_the_bound_is_bounded_too_a_describe_never_answered_is_s
         async def describe(self) -> None:
             await asyncio.Event().wait()
 
+    # Bounded itself, so the bound removed fails this test rather than hanging it.
     said = asyncio.run(
-        what_held_the_clock(cast(Client, Silent()), ["claim-14", "claim-14/repair#1"], 0.1)
+        asyncio.wait_for(
+            what_held_the_clock(cast(Client, Silent()), ["claim-14", "claim-14/repair#1"], 0.1),
+            timeout=2,
+        )
     )
     assert said == (
         "claim-14: didn't answer a describe within 0.1 s\n"
