@@ -59,6 +59,8 @@ and record the key points. A question is closed once you can explain the answer 
 | 52 | Layer 19: what the audit export says after forgetting, and what no one can read | open |
 | 53 | Layer 19c: a mark that outlives the key, waiting or refusing, and the event loop | open |
 | 54 | Layer 20a: what the suite compares, a result changed on purpose, codes refused first | open |
+| 55 | Layer 4: provenance, and a guardrail that judges content | open |
+| 56 | Layer 10c: why the case checks a plan's reference field | open |
 
 ---
 
@@ -2272,3 +2274,19 @@ and record the key points. A question is closed once you can explain the answer 
     never the words; a result changes only by a person's edit with its reason recorded; and a code
     nothing can give is said, with the proof checked.
 - Status: open, until the three parts come back from memory.
+
+## 55. Layer 4: provenance, and a guardrail that judges content
+
+> How is this different from a guardrail that judges content?
+
+- Asked in layer 4 (provenance and sink policies), in a session now archived; logged 2026-11-09.
+- Your answer:
+- Discussion:
+
+## 56. Layer 10c: why the case checks a plan's reference field
+
+> Why does the case, not the plan, check a plan's reference field?
+
+- Asked in layer 10c (data flow), in a session now archived; logged 2026-11-09.
+- Your answer:
+- Discussion:
