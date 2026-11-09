@@ -12,10 +12,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pytest
 from one_copy import put_back, second_copies
+from production_stand_ins import production_audit, production_converter
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHistory
@@ -35,7 +36,7 @@ from test_temporal_case import (
 from test_temporal_case_release import markers_of
 from worker_threads import worker_threads
 
-from ventoux.case.activation import Bound, Manifest
+from ventoux.case.activation import Bound, Manifest, Provided
 from ventoux.case.registry import Activating, Answer, Opening, Released
 from ventoux.case.releases import METHOD, Hash, Record
 from ventoux.core.catalog import Catalog
@@ -53,7 +54,7 @@ from ventoux.temporal.cases import (
     propose_migration,
     start_case,
 )
-from ventoux.temporal.manifests import environment_worker
+from ventoux.temporal.manifests import environment_worker, worker_manifest
 from ventoux.temporal.registry import (
     ManifestRefused,
     RegistryMissing,
@@ -79,6 +80,8 @@ from ventoux.testing import (
     development_converter,
     fixture_converter,
 )
+from ventoux.tooling.audit import FileAudit
+from ventoux.tooling.keys import FileKeys
 
 HERE = Path(__file__).parent / "histories"
 
@@ -133,7 +136,7 @@ def in_production[T](
 
     async def go() -> T:
         async with (
-            time_skipping(development_converter()) as environment,
+            time_skipping(production_converter()) as environment,
             registry_worker(environment.client, registry),
         ):
             if create:
@@ -163,7 +166,7 @@ async def production_worker(
             build,
             identity,
             activity_executor=threads,
-            audit=development_audit(),
+            audit=production_audit(),
         )
         async with worker:
             yield worker
@@ -175,7 +178,8 @@ def hashed(reference: str) -> Hash:
 
 def test_a_worker_publishes_its_manifest() -> None:
     # Built from its code: each contract it has code for, hashed by its own catalog; its workflow
-    # types; its case workflow's bindings; the build and identity it was given.
+    # types; its case workflow's bindings; the build and identity it was given; and what keeps
+    # its keys and its audit records.
     async def scenario(client: Client) -> Manifest:
         async with production_worker(client):
             return (await registry_of(client, "production")).manifests["refunds-a"]
@@ -190,6 +194,9 @@ def test_a_worker_publishes_its_manifest() -> None:
         ["ventoux.case", "ventoux.plan"],
         "ventoux.case",
         {"kyc.check@1": Bound("KycCheck", "kyc")},
+        # What keeps its keys and its records, as the registry keeps them (brief, D81).
+        Provided("StandInKeys", development=False),
+        Provided("StandInAudit", development=False),
     )
 
 
@@ -634,3 +641,78 @@ def test_an_activity_nobody_picks_up_needs_attention() -> None:
     now = asyncio.run(go())
     assert now.needs_attention == ["pay#1: payments.refund@2 failed with TimeoutError: ‹sensitive›"]
     assert now.status == "open"
+
+
+# --- 20b1: what a case worker keeps with (brief, D81) ---
+
+
+def test_a_manifest_says_what_keeps_its_keys_and_its_records_by_name(tmp_path: Path) -> None:
+    manifest = worker_manifest(
+        ProductionCases,
+        DevelopmentPlans,
+        FAKES,
+        QUEUE,
+        "4f2a9c1",
+        "refunds-a",
+        keys=FileKeys(tmp_path / "keys.json"),
+        audit=FileAudit(tmp_path / "audit"),
+    )
+    assert manifest.keys == Provided("FileKeys", development=True)
+    assert manifest.audit == Provided("FileAudit", development=True)
+
+
+class Unsaid(FileKeys):
+    """A key provider that doesn't say whether it is for development."""
+
+    development = None  # type: ignore[assignment]  # what a provider written without it gives
+
+
+def test_a_provider_that_doesnt_say_whether_it_is_for_development_is_refused(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(TypeError, match="Unsaid doesn't say whether it is for development"):
+        worker_manifest(
+            ProductionCases,
+            DevelopmentPlans,
+            FAKES,
+            QUEUE,
+            "4f2a9c1",
+            "refunds-a",
+            keys=cast(Any, Unsaid(tmp_path / "keys.json")),  # as an untyped provider would be
+            audit=FileAudit(tmp_path / "audit"),
+        )
+
+
+def test_a_production_worker_keeping_its_keys_in_a_file_never_polls() -> None:
+    # Its client seals with `FileKeys` and it writes to `FileAudit`: production's registry
+    # refuses its manifest, so the worker is never built, and nobody polls (brief, D81).
+    async def scenario(client: Client) -> tuple[str, Manifest | None]:
+        filed = await Client.connect(
+            client.service_client.config.target_host,
+            namespace=client.namespace,
+            data_converter=development_converter(),
+        )
+        with pytest.raises(ManifestRefused) as refused:
+            async with worker_threads() as threads:
+                await environment_worker(
+                    filed,
+                    QUEUE,
+                    ProductionCases,
+                    DevelopmentPlans,
+                    FAKES,
+                    "4f2a9c1",
+                    "refunds-f",
+                    activity_executor=threads,
+                    audit=development_audit(),
+                )
+        kept = (await registry_of(client, "production")).manifests.get("refunds-f")
+        return str(refused.value), kept
+
+    said, kept = in_production(scenario)
+    assert said == (
+        "refunds-f keeps its keys with FileKeys, which is for development: production keeps them "
+        "in the deployment's key service; deploy the worker with it\n"
+        "refunds-f writes its audit records to FileAudit, which is for development: production "
+        "writes them to the deployment's audit store; deploy the worker with it"
+    )
+    assert kept is None

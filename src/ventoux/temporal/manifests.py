@@ -13,16 +13,18 @@ from temporalio import workflow
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from ventoux.case.activation import Bound, Manifest
+from ventoux.case.activation import Bound, Manifest, Provided
 from ventoux.case.memory import Activity
 from ventoux.case.releases import METHOD, Hash
 from ventoux.core.contract_hash import contract_hash
 from ventoux.temporal.cases import CaseWorkflow
+from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import ForgetWorkflow
 from ventoux.temporal.registry import publish_manifest
 from ventoux.temporal.worker import case_worker
 from ventoux.temporal.workflow import PlanWorkflow
 from ventoux.tooling.audit import AuditStore
+from ventoux.tooling.keys import KeyProvider
 
 
 def workflow_type(registered: type) -> str:
@@ -41,10 +43,14 @@ def worker_manifest(
     task_queue: str,
     build: str,
     identity: str,
+    *,
+    keys: KeyProvider,
+    audit: AuditStore,
 ) -> Manifest:
     """What a case worker serves: each contract it has code for, with the hash its own catalog
-    gives (which is what Temporal would run), its workflow types, and its case workflow's
-    bindings. Built from the code, never written by hand."""
+    gives (which is what Temporal would run), its workflow types, its case workflow's bindings,
+    and what keeps its keys and its audit records (brief, D81). Built from the code, never
+    written by hand."""
     if cases.environment is None:
         raise ValueError(
             f"{cases.__name__} names no environment: set its `environment` to publish a manifest"
@@ -67,7 +73,23 @@ def worker_manifest(
         [case, workflow_type(plans)],
         case,
         binds,
+        provided(keys),
+        provided(audit),
     )
+
+
+def provided(provider: KeyProvider | AuditStore) -> Provided:
+    """What a manifest says of `provider`: its class's name, and whether it is for development.
+    Fail closed: one that doesn't say is refused, never taken for a production provider
+    (brief, D81)."""
+    name = type(provider).__name__
+    development = getattr(provider, "development", None)
+    if not isinstance(development, bool):
+        raise TypeError(
+            f"{name} doesn't say whether it is for development: give it `development = True` "
+            "or `False`, so a production environment can refuse one that is"
+        )
+    return Provided(name, development)
 
 
 async def environment_worker(
@@ -89,7 +111,19 @@ async def environment_worker(
     the worker's name among a queue's pollers (the client's own by default). `activity_executor`
     is the caller's, as with `case_worker`."""
     identity = identity or client.identity
-    manifest = worker_manifest(cases, plans, implementations, task_queue, build, identity)
+    if audit is None:
+        # Fail closed: a case would run with no trail.
+        raise ValueError("a case worker needs an audit store: give case_worker audit=…")
+    manifest = worker_manifest(
+        cases,
+        plans,
+        implementations,
+        task_queue,
+        build,
+        identity,
+        keys=keys_of(client),
+        audit=audit,
+    )
     await publish_manifest(client, manifest)
     return case_worker(
         client,

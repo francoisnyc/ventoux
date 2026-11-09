@@ -460,8 +460,12 @@ def test_production_accepts_a_team_worker_that_says_neither() -> None:
 def test_a_case_worker_wrong_on_both_counts_is_told_both() -> None:
     _, answer = publish(Registry("production"), keeping(FILE_KEYS, None))
     assert answer.said == [
-        "refunds-a keeps its keys with FileKeys, which is for development: production keeps "
-        "them in the deployment's key service; deploy the worker with it",
-        "refunds-a doesn't say where it writes its audit records: a case worker in production "
-        "must; deploy a build that does",
+        (
+            "refunds-a keeps its keys with FileKeys, which is for development: production keeps "
+            "them in the deployment's key service; deploy the worker with it"
+        ),
+        (
+            "refunds-a doesn't say where it writes its audit records: a case worker in "
+            "production must; deploy a build that does"
+        ),
     ]

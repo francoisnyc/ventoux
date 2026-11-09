@@ -95,6 +95,8 @@ class VaultKeys:
     """A key per case in Vault's transit engine; the marks of forgotten cases in a key-value
     engine (version 2)."""
 
+    development = False  # the deployment's key service (brief, D78) (brief, D81)
+
     def __init__(
         self,
         address: str,
