@@ -56,6 +56,9 @@ and record the key points. A question is closed once you can explain the answer 
 | 49 | Layer 18b: how a repeated run is named, retried and migrated | open |
 | 50 | Layer 18: what a child case can never do to its parent | open |
 | 51 | Layer 19a: one act, the decisions it caused, the facts they read | open |
+| 52 | Layer 19: what the audit export says after forgetting, and what no one can read | open |
+| 53 | Layer 19c: a mark that outlives the key, waiting or refusing, and the event loop | open |
+| 54 | Layer 20a: what the suite compares, a result changed on purpose, codes refused first | open |
 
 ---
 
@@ -266,6 +269,26 @@ and record the key points. A question is closed once you can explain the answer 
   it's in the contract if a case could notice it or tighten it; where it runs is not.
 - Status: reopened; "what vs where" is solid now, the contents of a contract (D17) still need a
   retrieval. Layer 1 builds exactly that.
+- Retrieval (layer 20 warm-up, 2026-11-08), the question itself, asking a) everything each
+  activity declares and where the two differ, b) whether the Java developer reads Python and what
+  the two meet through. Your answer: asked to be told. Given:
+  - **a) The same contract, filled in differently.** Each declares `name@version`; its input and
+    output models, published as JSON Schema; an input policy on each input field (which sources it
+    accepts, D21); the source of each output field (`system:<name>` or `untrusted:<label>`); `risk`
+    and `effect`; `idempotency_key`; timeouts (start-to-close, schedule-to-start) and the retry
+    policy; its declared failure outcomes (D17); and a display (title, description, outcome
+    titles), which is outside the hash. The scorer: `effect: compute`, no idempotency key, its
+    score declared from a `system:` source (trusted). The letter: `effect: write` (it creates a draft), so an idempotency
+    key is required, and `low` risk because it drafts and never sends. Not in the contract: the
+    task queue, which is the deployment binding's (where, not what).
+  - **b) No.** They meet through the published contract (JSON Schema), the plan's JSON and a
+    Temporal task queue. The Java developer reads the contract and the definition, never the
+    engine. What the schema can't tell them is whether a definition is *valid*: that needs the
+    engine's rules, and so the engine itself, unless the rules are published as data that any
+    implementation can be checked against. That is the conformance suite D4 promises, and layer 20
+    builds it. The manifest each worker publishes (D5) is the one place a Java worker needs a small
+    Ventoux library or an equivalent.
+- Status: open, until the contents of a contract come back from memory.
 
 ## 10. Versions
 
@@ -2206,4 +2229,46 @@ and record the key points. A question is closed once you can explain the answer 
     all, for the whole timeout while Vault is down. The export activity is a plain function,
     which Temporal already runs on the activity executor's threads: off the loop, bounded by each
     call's timeout and its own minute.
+- Status: open, until the three parts come back from memory.
+
+## 54. Layer 20a: what the suite compares, a result changed on purpose, codes refused first
+
+> a) The suite compares each issue's path, code and severity, never its message, and a definition
+> refused when read by its paths alone: why each? b) A teammate changes validation so a misspelt
+> field in a case's `when` gives `UNKNOWN_FIELD` instead of `EXPRESSION_INVALID`. Which CI jobs
+> fail, what must the pull request contain to go green, and why can't `ventoux conformance
+> --write` make it green? c) Why are `UNKNOWN_PLAN`, `UNKNOWN_CASE` and `NESTED_CASE` listed under
+> `refused_first` rather than given entries, and why does the suite check that claim instead of
+> stating it?
+
+- Asked at the end of layer 20a's walk-through (2026-11-08), in place of the layer's own question,
+  which is about `ventoux doctor` and waits for 20b.
+- Your answer: asked to be told. Given:
+  - **a) Compare what another implementation must agree on, and nothing it may say its own way.**
+    The path says where, the code which rule, the severity whether it refuses: together, what the
+    engine decided. A message is wording, for a person, in this engine's English; comparing it
+    would make every rewording a conformance change, and no other implementation could pass. A
+    definition refused when read (Pydantic, before validation) gives a path and a message and no
+    code, so the path is all there is to agree on; it is still compared both ways (refused where
+    expected, at the paths expected).
+  - **b) `check` fails, then `changes` once the expected result is edited.** `ventoux conformance
+    --unchanged` in `check` says the guide's entry and the misspelt-field entries: expected
+    `EXPRESSION_INVALID`, not given; given `UNKNOWN_FIELD`, not expected (the curriculum's negative
+    test). To go green the pull request changes each entry's `expected` and adds a line to the
+    suite's `changes` naming the entry, what it was, what it is now, why (the decision recorded in
+    the brief, since a code is part of what validation promises) and the date; `--since` in
+    `changes` fails a changed result with no exact line. `--write` writes the catalog files only,
+    never an expected result: a suite regenerated from the engine would agree with any change and
+    promise nothing. Expected results are written by a person, so a change is a decision someone
+    made and reviewed, and an implementer reading the suite later sees why.
+  - **c) The one check can never give them, so an entry expecting them would be a lie.** The
+    suite's entries go through `issues_of`, which runs only on a package already put together, and
+    `package()` refuses a missing plan, a missing child or a nested child first, with no code.
+    `validate_case` keeps the three as backstops (fail closed), so they stay listed. Saying so in
+    data, with a package that shows it, keeps "every listed code is accounted for" true; checking
+    it (`refused_first_problems`: the package must be refused) means that if `package()` ever stops
+    refusing one, the check fails and asks for a real entry, instead of a claim going stale.
+  - In one line: the suite compares what was decided (where, which rule, whether it refuses),
+    never the words; a result changes only by a person's edit with its reason recorded; and a code
+    nothing can give is said, with the proof checked.
 - Status: open, until the three parts come back from memory.

@@ -71,7 +71,7 @@ from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeou
 from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, Wait, interpret
 from ventoux.core.output_sources import source
 from ventoux.core.plan import parse_plan
-from ventoux.core.policy import trusted_only
+from ventoux.core.policy import only_from, trusted_only
 from ventoux.core.provenance import Sourced
 from ventoux.core.references import reference
 from ventoux.core.sensitive import Sensitive, unwrapped
@@ -355,6 +355,32 @@ documents_issued = ActivityContract(
     ),
 )
 
+
+# A ledger that takes an amount only as the system that opened the case gave it: the input policy
+# `only_from("opener")`, so the conformance suite has an entry expecting OPENER_DECIDES
+# (brief, D36) (brief, D80). Named apart from the tests' own `ledger.record@1`.
+class RecordAsked(BaseModel):
+    amount: Annotated[Decimal, only_from("opener")]  # only an amount the opening system gave
+
+
+class Recorded(BaseModel):
+    entry_id: str  # the ledger's entry
+
+
+ledger_post = ActivityContract(
+    name="ledger.post",
+    version=1,
+    input=RecordAsked,
+    output=Recorded,
+    risk="low",
+    effect="compute",
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,
+    outcomes=[],
+    display=Display(title="Post to the ledger", description="Post an amount to the ledger."),
+)
+
 # The development catalog: what a case can call in tests and the quickstart.
 CATALOG = Catalog()
 # The labels fields and outputs may be declared untrusted with: `untrusted:llm`. First, since a
@@ -374,6 +400,7 @@ for contract in (
     kyc_check,
     branches_holds,
     documents_issued,
+    ledger_post,
 ):
     CATALOG.register(contract)
 CATALOG.register_option_check("branches", "branches.holds@1")

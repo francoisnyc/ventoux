@@ -183,6 +183,9 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 - Activities stay polyglot: Python or Java workers, connected through Temporal task queues.
 - Browser front ends (an inbox, business views) stay separate, in TypeScript, and use the JSON Schema
   and an API.
+- **Amended 2026-11-08, by D80** (the text above stands; this narrows it for v1.0): the
+  conformance suite holds definitions with their expected validation results; run histories come
+  after v1.0.
 
 ### D5. Versions and releases
 
@@ -573,6 +576,10 @@ be erased on request), has size limits, and a second copy of business records go
   elsewhere). The signature binds the approver, the case, the step, the digest of the inputs (D11)
   and an expiry, so it can't be forged by someone with signal access, or replayed on another case,
   step or amount. Verifying it is a pure calculation, safe inside the workflow.
+- **Amended 2026-11-08, by D79** (the text above stands; this makes it exact): in v1.0 the trusted
+  caller is the integrator's own service, not a Ventoux API; and "only the API's service identity
+  can write" means: people read only, the caller writes on behalf of people, workers write only
+  their own tasks and manifests, named operators do the rest.
 
 ### D20. Expressions are structured JSON with a fixed list of operators (supersedes D3)
 
@@ -3345,6 +3352,78 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   Vault's answers, request by request; a request it doesn't hold is refused, saying which. One test,
   against a development Vault, runs only where `vault` is installed.
 
+### D79. The trusted caller in v1.0: the integrator's own service, one identity that writes for people
+
+*Decided 2026-11-08, in layer 20 (`docs/layers/20-deployment.md`, questions 1 and 1b). Adds to
+D19 and D22, whose text is kept, and to "Out of scope for v1.0", amended below.*
+
+- **In v1.0 the trusted caller is the integrator's own service,** calling Ventoux's client
+  functions (`start_case`, `answer`, `close`, `propose_change` and the others in
+  `ventoux.temporal.cases`; `propose_forget` and `answer_forget`). Ventoux ships no HTTP API and no
+  inbox in v1.0; both move to "Beyond v1.0". The engine's guarantees never depended on which
+  program the caller is, only on there being one identity that writes on behalf of people, and on
+  it stating them truthfully.
+- **Where an earlier decision says "the Ventoux API" or "the API"** as the one that states who
+  acted (D19, D22, D41, D52, D70 and others), read "the trusted caller". Their text is kept, as
+  every decision's is.
+- **What the caller must do,** stated by the deployment guide, since no code of Ventoux's can
+  check it: authenticate each person; normalise their identifier as D22 writes it; take their
+  roles from its identity provider, as they are when they act; and never let a person name who
+  answered, or their roles.
+- **Who writes, made exact** (D19's "only the API's service identity can write" was too strong:
+  workers and operators write too): people read only; the caller writes on behalf of people
+  (starting cases and forget requests, signals, updates); workers write only what workers do
+  (polling, completing their own tasks, publishing their manifests); named operators create and
+  harden environments, activate, retire, terminate and reset. Each is its own identity under mTLS,
+  given only its own kind of call by Temporal's authorization.
+- **What is left for after v1.0:** the API and the reference inbox (an HTTP service, people's
+  sign-in, roles from an identity provider, an inbox drawing task forms from field types).
+
+### D80. The conformance suite: validation results as data, the catalog generated, every change recorded
+
+*Decided 2026-11-08, in layer 20a (`docs/layers/20-deployment.md`, question 4). Adds to D4, D34
+and D60, whose text is kept; D4 is amended below.*
+
+- **What it holds: validation, in v1.0.** Each entry is a definition (a case or a plan), the
+  catalog it is read against, the plans and child cases supplied, and what validation must give.
+  Run results come after v1.0, seeded by `examples/witnesses/`; a run's history is Temporal's
+  format and the engine version's, and the other implementations v1.0 needs (an inbox, a Java
+  builder) implement validation.
+- **Data, never code:** JSON files in the package (`src/ventoux/conformance/`), written out for an
+  implementer who doesn't install Python by `ventoux conformance --export DIR`. `suite.json` names
+  the engine version and lists the entries.
+- **What an entry expects:** either `{"read": "refused", "at": [paths]}`, a definition refused
+  when read, by path alone, since reading gives no code; or `{"issues": [...]}`, each a `path`, a
+  `code` and a `severity`, an empty list meaning valid. Compared as a multiset: in any order, none
+  missing, none extra. Messages are wording, never compared. Warnings are compared too.
+- **The catalog is generated from the Python catalog,** never the reverse: its contracts as
+  `ventoux promises` writes them, its roles (each with what it may approve and operate), systems,
+  labels, option checks and document stores; written by `ventoux conformance --write`, and checked
+  unchanged in CI byte for byte, as the schema is (D60). A second way to make a contract would be
+  a second set of rules.
+- **Every issue code is listed, and every one has an entry expecting it:** the codes validation
+  gives are a list in `core` (`ISSUE_CODES`), and an issue with a code not in it is refused when it
+  is made, so a new rule can't give a code the suite doesn't know. A listed code no entry expects
+  fails the check. Every definition committed in the repository is an entry too, expecting what
+  it gives: some exist to show an issue.
+- **A code the package refuses first is said, never left uncovered:** `UNKNOWN_PLAN`,
+  `UNKNOWN_CASE` and `NESTED_CASE` can't come out of the one check, since putting the package
+  together refuses a missing plan, a missing child or a nested child first, with no code; the
+  engine keeps them as backstops (fail closed). The suite lists them under `refused_first`, each
+  with a package that shows it, and the check fails if that package is put together after all.
+- **One catalog:** the development catalog (`ventoux.testing`), which gains `ledger.post@1`, an
+  amount taken only from the opener, so `OPENER_DECIDES` has an entry.
+- **Run both ways in CI:** a definition that must validate does; one that must be refused is, with
+  exactly the issues expected. A change to validation that alters a result fails CI.
+- **A result changed on purpose is recorded:** its entry's `expected` changes in the same pull
+  request, and the suite's `changes` list gains a line naming the entry, what it gave and gives
+  now, why, and the date. CI compares the suite with the base branch's and fails a changed result
+  with no line naming it. The pull request's diff alone would leave nothing for an implementer
+  reading the suite later.
+- **The record is only added to:** the head's `changes` starts with the base's lines, each
+  unchanged; one removed, rewritten or moved fails the same comparison, saying which line went or
+  changed (from the tutor review of #93, before merge).
+
 ## Concepts
 
 | Term | Meaning |
@@ -3431,6 +3510,11 @@ A visual editor, a polished production UI (v1.0 ships the API and a reference in
 task forms from field types; there is no form designer), broker connectors, BPMN, CMMN or
 Serverless Workflow import, multi-tenancy, code inside definitions (scripts, listeners), and the
 deferred features listed above.
+
+*Amended 2026-11-08, by D79* (the text above stands; this changes what v1.0 ships): v1.0 ships no
+API and no reference inbox; the trusted caller is the integrator's own service, calling Ventoux's
+client functions. The API and the inbox come after v1.0. "Where it runs" and the layers' diagram,
+which name them, are read the same way.
 
 ## Design questions (all decided)
 

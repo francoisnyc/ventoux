@@ -1,0 +1,64 @@
+{
+  "plan": "reviewing",
+  "version": 1,
+  "display": {
+    "title": "Review, then write"
+  },
+  "fields": {
+    "order_id": {
+      "type": "reference",
+      "system": "orders"
+    },
+    "approved_amount": {
+      "type": "number"
+    }
+  },
+  "initial": "review",
+  "states": {
+    "review": {
+      "wait": {
+        "outcomes": [
+          "accept",
+          "reject"
+        ],
+        "roles": [
+          "support"
+        ],
+        "sets": {
+          "acept": [
+            "approved_amount"
+          ],
+          "accept": [
+            "approved_amout"
+          ]
+        }
+      },
+      "on": {
+        "accept": "write",
+        "reject": "failed"
+      }
+    },
+    "write": {
+      "activity": "letters.draft@2",
+      "inputs": {
+        "to_customer": {
+          "string": [
+            {
+              "var": "approved_amount"
+            }
+          ]
+        },
+        "template": "refund"
+      },
+      "on": {
+        "done": "written"
+      }
+    },
+    "written": {
+      "final": "succeeded"
+    },
+    "failed": {
+      "final": "failed"
+    }
+  }
+}

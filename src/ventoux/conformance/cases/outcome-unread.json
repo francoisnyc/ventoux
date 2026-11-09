@@ -1,0 +1,149 @@
+{
+  "case": "refund",
+  "display": {
+    "title": "Customer refund"
+  },
+  "fields": {
+    "order_id": {
+      "type": "reference",
+      "system": "orders",
+      "display": {
+        "title": "Order"
+      }
+    },
+    "approved_amount": {
+      "type": "number",
+      "display": {
+        "title": "Amount approved"
+      }
+    }
+  },
+  "steps": {
+    "confirm": {
+      "kind": "task",
+      "display": {
+        "title": "Confirm the request's details"
+      },
+      "roles": [
+        "support"
+      ],
+      "outcomes": {
+        "confirmed": {
+          "display": {
+            "title": "Details confirmed"
+          }
+        }
+      },
+      "assign": {
+        "to": "opener"
+      }
+    },
+    "review": {
+      "kind": "task",
+      "display": {
+        "title": "Review the refund request"
+      },
+      "roles": [
+        "support"
+      ],
+      "requires": [
+        "confirm"
+      ],
+      "outcomes": {
+        "approve": {
+          "display": {
+            "title": "Approve the refund"
+          },
+          "sets": [
+            "approved_amount"
+          ]
+        },
+        "reject": {
+          "display": {
+            "title": "Reject the refund"
+          }
+        }
+      }
+    },
+    "triage": {
+      "kind": "task",
+      "display": {
+        "title": "Take the refund for approval"
+      },
+      "roles": [
+        "support-lead"
+      ],
+      "requires": [
+        "review"
+      ],
+      "outcomes": {
+        "taken": {
+          "display": {
+            "title": "Taken"
+          }
+        }
+      }
+    },
+    "pay": {
+      "kind": "activity",
+      "display": {
+        "title": "Refund the customer"
+      },
+      "activity": "payments.refund@2",
+      "inputs": {
+        "order_id": {
+          "var": "order_id"
+        },
+        "amount": {
+          "var": "approved_amount"
+        }
+      },
+      "requires": [
+        "triage"
+      ],
+      "when": {
+        "==": [
+          {
+            "var": "review.outcome"
+          },
+          "approve"
+        ]
+      },
+      "approval": {
+        "roles": [
+          "support-lead"
+        ],
+        "display": {
+          "reason": "Refunds need a team lead"
+        },
+        "assign": {
+          "to": "answered",
+          "step": "triage"
+        }
+      }
+    },
+    "follow_up": {
+      "kind": "task",
+      "display": {
+        "title": "Follow up with the customer"
+      },
+      "roles": [
+        "support"
+      ],
+      "requires": [
+        "pay"
+      ],
+      "outcomes": {
+        "done": {
+          "display": {
+            "title": "Done"
+          }
+        }
+      },
+      "assign": {
+        "to": "answered",
+        "step": "review"
+      }
+    }
+  }
+}

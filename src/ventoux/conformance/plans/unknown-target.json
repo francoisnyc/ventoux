@@ -1,0 +1,47 @@
+{
+  "plan": "route",
+  "version": 1,
+  "display": {
+    "title": "Route a request"
+  },
+  "fields": {
+    "note": {
+      "type": "string",
+      "source": "untrusted:customer"
+    }
+  },
+  "initial": "ask",
+  "states": {
+    "ask": {
+      "wait": {
+        "outcomes": [
+          "done"
+        ],
+        "roles": [
+          "support"
+        ]
+      },
+      "on": {
+        "done": [
+          {
+            "target": "nowhere",
+            "when": {
+              "==": [
+                {
+                  "var": "note"
+                },
+                "urgent"
+              ]
+            }
+          },
+          {
+            "target": "end"
+          }
+        ]
+      }
+    },
+    "end": {
+      "final": "succeeded"
+    }
+  }
+}

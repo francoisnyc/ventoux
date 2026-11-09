@@ -1,0 +1,162 @@
+{
+  "case": "claim",
+  "display": {
+    "title": "Insurance claim"
+  },
+  "fields": {
+    "customer_id": {
+      "type": "reference",
+      "system": "crm",
+      "display": {
+        "title": "Customer"
+      }
+    },
+    "order_id": {
+      "type": "reference",
+      "system": "orders",
+      "display": {
+        "title": "Insured order"
+      }
+    },
+    "payout": {
+      "type": "number",
+      "display": {
+        "title": "Payout"
+      }
+    }
+  },
+  "milestones": {
+    "checked": {
+      "display": {
+        "title": "Customer checked"
+      }
+    },
+    "assessed": {
+      "display": {
+        "title": "Claim assessed"
+      }
+    },
+    "paid": {
+      "display": {
+        "title": "Claim paid"
+      }
+    }
+  },
+  "steps": {
+    "check": {
+      "kind": "workflow",
+      "display": {
+        "title": "Check the customer"
+      },
+      "workflow": "kyc.check@1",
+      "inputs": {
+        "customer_id": {
+          "var": "customer_id"
+        }
+      },
+      "reaches": [
+        "checked"
+      ]
+    },
+    "assess": {
+      "kind": "task",
+      "display": {
+        "title": "Assess the claim"
+      },
+      "roles": [
+        "adjuster"
+      ],
+      "requires": [
+        "checked"
+      ],
+      "outcomes": {
+        "accept": {
+          "display": {
+            "title": "Accept the claim"
+          },
+          "sets": [
+            "payout"
+          ],
+          "reaches": [
+            "assessed"
+          ]
+        },
+        "deny": {
+          "display": {
+            "title": "Deny the claim"
+          }
+        }
+      }
+    },
+    "pay": {
+      "kind": "activity",
+      "display": {
+        "title": "Pay the claim"
+      },
+      "activity": "payments.refund@2",
+      "requires": [
+        "assessed"
+      ],
+      "inputs": {
+        "order_id": {
+          "var": "order_id"
+        },
+        "amount": {
+          "var": "payout"
+        }
+      },
+      "approval": {
+        "roles": [
+          "support-lead"
+        ],
+        "display": {
+          "reason": "Every payout needs a team lead"
+        }
+      },
+      "reaches": [
+        "paid"
+      ]
+    },
+    "call_customer": {
+      "kind": "task",
+      "display": {
+        "title": "Call the customer about the declined payout"
+      },
+      "roles": [
+        "adjuster"
+      ],
+      "requires": [
+        "pay"
+      ],
+      "when": {
+        "==": [
+          {
+            "var": "pay.outcome"
+          },
+          "declined"
+        ]
+      },
+      "outcomes": {
+        "called": {
+          "display": {
+            "title": "Customer called"
+          }
+        }
+      }
+    }
+  },
+  "closes_when": [
+    "paid"
+  ],
+  "stays_open": true,
+  "close_reasons": {
+    "duplicate": {
+      "display": {
+        "title": "Duplicate claim"
+      },
+      "roles": [
+        "supprt"
+      ]
+    }
+  }
+}

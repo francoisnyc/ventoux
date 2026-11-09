@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from ventoux.authoring.approve import Drafted, NotApprovable, approve_this_plan, reference_of
 from ventoux.case.releases import PackageRefused, PackageUnreadable
 from ventoux.core.catalog import Catalog
-from ventoux.core.plan import problem
+from ventoux.core.plan import line, problem
 from ventoux.tooling.check import shown
 from ventoux.tooling.releases import read_package
 
@@ -129,7 +129,7 @@ def record_of(draft: Path) -> Record:
         return Record.model_validate(json.loads(path.read_text(encoding="utf-8")))
     except ValueError as unread:  # not JSON, or not UTF-8: said by kind, quoting nothing
         if isinstance(unread, ValidationError):
-            lines = "; ".join(problem(error) for error in unread.errors())
+            lines = "; ".join(line(*problem(error)) for error in unread.errors())
             raise SheetRefused(f"{shown(path)} doesn't read as a draft's record: {lines}") from None
         raise SheetRefused(f"{shown(path)} doesn't read as a draft's record: not JSON") from None
 

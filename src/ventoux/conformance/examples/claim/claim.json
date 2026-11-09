@@ -1,0 +1,89 @@
+{
+  "case": "claim",
+  "display": {
+    "title": "Insurance claim"
+  },
+  "fields": {
+    "claimed": {
+      "type": "number",
+      "display": {
+        "title": "Amount claimed"
+      }
+    }
+  },
+  "steps": {
+    "assess": {
+      "kind": "task",
+      "display": {
+        "title": "Assess the claim"
+      },
+      "roles": [
+        "adjuster"
+      ],
+      "repeatable": true,
+      "proposed_by": [
+        "adjuster"
+      ],
+      "outcomes": {
+        "done": {
+          "display": {
+            "title": "Assessed"
+          }
+        }
+      }
+    },
+    "lead_review": {
+      "kind": "task",
+      "display": {
+        "title": "Review an assessment left too long"
+      },
+      "roles": [
+        "support-lead"
+      ],
+      "automatic": false,
+      "repeatable": true,
+      "outcomes": {
+        "reviewed": {
+          "display": {
+            "title": "Reviewed"
+          }
+        }
+      }
+    },
+    "settle": {
+      "kind": "task",
+      "display": {
+        "title": "Settle the claim"
+      },
+      "roles": [
+        "support-lead"
+      ],
+      "requires": [
+        "assess"
+      ],
+      "outcomes": {
+        "settled": {
+          "display": {
+            "title": "Claim settled"
+          }
+        }
+      }
+    }
+  },
+  "rules": {
+    "escalate": {
+      "display": {
+        "title": "Escalate an assessment not done within five days"
+      },
+      "sla": {
+        "step": "assess",
+        "within": "5d"
+      },
+      "then": {
+        "start": [
+          "lead_review"
+        ]
+      }
+    }
+  }
+}
