@@ -4,7 +4,11 @@ Pure: manifests, pollers and requests are data, as the registry workflow and `ve
 give them. See docs/layers/12-releases.md (12e).
 """
 
-from ventoux.case.activation import Bound, Manifest, activation_problems
+import dataclasses
+
+import pytest
+
+from ventoux.case.activation import Bound, Manifest, Provided, activation_problems
 from ventoux.case.registry import (
     Activating,
     Moving,
@@ -30,6 +34,13 @@ KYC = Hash(1, "cd" * 32)
 NEEDS = {"payments.refund@3": REFUND_3, "orders.lookup@1": LOOKUP}
 
 
+# What a case worker keeps with: a deployment's providers, and the development ones (brief, D81).
+VAULT = Provided("VaultKeys", development=False)
+STORE = Provided("WarehouseAudit", development=False)
+FILE_KEYS = Provided("FileKeys", development=True)
+FILE_AUDIT = Provided("FileAudit", development=True)
+
+
 def worker(
     identity: str,
     serves: dict[str, Hash],
@@ -43,7 +54,12 @@ def worker(
     """A worker's manifest, as it publishes it."""
     if workflows is None:
         workflows = [] if case is None else [case, "ventoux.plan"]
-    return Manifest(environment, queue, build, identity, serves, workflows, case, binds or {})
+    # A case worker keeps with a deployment's providers, as one in production must.
+    kept = VAULT if case is not None else None
+    stored = STORE if case is not None else None
+    return Manifest(
+        environment, queue, build, identity, serves, workflows, case, binds or {}, kept, stored
+    )
 
 
 def problems(
@@ -365,3 +381,87 @@ def test_a_workflow_type_never_moves_under_open_cases() -> None:
     registry, _ = closed(registry, "refund-7")
     _, taken = publish(registry, retyped)
     assert taken.done  # no open case calls it now
+
+
+# --- 20b1: what a case worker keeps with (brief, D81) ---
+
+
+def keeping(keys: Provided | None, audit: Provided | None) -> Manifest:
+    return dataclasses.replace(worker("refunds-a", NEEDS), keys=keys, audit=audit)
+
+
+@pytest.mark.parametrize(
+    ("keys", "audit", "said"),
+    [
+        (
+            FILE_KEYS,
+            STORE,
+            (
+                "refunds-a keeps its keys with FileKeys, which is for development: production keeps "
+                "them in the deployment's key service; deploy the worker with it"
+            ),
+        ),
+        (
+            VAULT,
+            FILE_AUDIT,
+            (
+                "refunds-a writes its audit records to FileAudit, which is for development: "
+                "production writes them to the deployment's audit store; deploy the worker with it"
+            ),
+        ),
+        (
+            None,
+            STORE,
+            (
+                "refunds-a doesn't say what keeps its keys: a case worker in production must; "
+                "deploy a build that does"
+            ),
+        ),
+        (
+            VAULT,
+            None,
+            (
+                "refunds-a doesn't say where it writes its audit records: a case worker in "
+                "production must; deploy a build that does"
+            ),
+        ),
+    ],
+    ids=["file keys", "file audit", "keys unsaid", "audit unsaid"],
+)
+def test_production_refuses_a_case_worker_keeping_with_a_development_provider(
+    keys: Provided | None, audit: Provided | None, said: str
+) -> None:
+    registry, answer = publish(Registry("production"), keeping(keys, audit))
+    assert not answer.done
+    assert answer.said == [said]
+    assert registry.manifests == {}  # never kept: the worker never polls
+
+
+def test_development_accepts_a_case_worker_keeping_with_development_providers() -> None:
+    registry, answer = publish(
+        Registry("staging", development=True),
+        dataclasses.replace(keeping(FILE_KEYS, FILE_AUDIT), environment="staging"),
+    )
+    assert answer.done
+    assert "refunds-a" in registry.manifests
+
+
+def test_production_accepts_a_case_worker_keeping_with_production_providers() -> None:
+    _, answer = publish(Registry("production"), keeping(VAULT, STORE))
+    assert answer.done
+
+
+def test_production_accepts_a_team_worker_that_says_neither() -> None:
+    # A team's workflow worker, in any language, keeps no case's keys and writes no records.
+    _, answer = publish(Registry("production"), team("kyc-a", {"kyc.check@1": KYC}))
+    assert answer.done
+
+
+def test_a_case_worker_wrong_on_both_counts_is_told_both() -> None:
+    _, answer = publish(Registry("production"), keeping(FILE_KEYS, None))
+    assert answer.said == [
+        "refunds-a keeps its keys with FileKeys, which is for development: production keeps "
+        "them in the deployment's key service; deploy the worker with it",
+        "refunds-a doesn't say where it writes its audit records: a case worker in production "
+        "must; deploy a build that does",
+    ]

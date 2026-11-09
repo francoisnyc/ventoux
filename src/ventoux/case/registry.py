@@ -73,6 +73,13 @@ def publish(registry: Registry, manifest: Manifest) -> tuple[Registry, Answer]:
         return registry, Answer(
             False, [f"{manifest.identity} serves {manifest.environment}, not {here}"]
         )
+    if not registry.development and manifest.case is not None:
+        # A case worker in production keeps its keys in the deployment's key service and writes
+        # its records to its audit store: one with a development provider, or that doesn't say,
+        # never polls (brief, D81).
+        kept = keeping_problems(manifest)
+        if kept:
+            return registry, Answer(False, kept)
     for reference, bound in sorted(manifest.binds.items()):
         before = registry.bindings.get(reference)
         calling = callers(registry, reference)
@@ -95,6 +102,34 @@ def publish(registry: Registry, manifest: Manifest) -> tuple[Registry, Answer]:
     for reference, bound in manifest.binds.items():
         registry.bindings[reference] = bound.workflow
     return registry, Answer(True, [f"{manifest.identity} serves {manifest.task_queue} in {here}"])
+
+
+def keeping_problems(manifest: Manifest) -> list[str]:
+    """What keeps a production case worker from polling: a provider for development, or one it
+    doesn't say. Both are said when both are wrong."""
+    who = manifest.identity
+    found: list[str] = []
+    if manifest.keys is None:
+        found.append(
+            f"{who} doesn't say what keeps its keys: a case worker in production must; deploy a "
+            "build that does"
+        )
+    elif manifest.keys.development:
+        found.append(
+            f"{who} keeps its keys with {manifest.keys.name}, which is for development: "
+            "production keeps them in the deployment's key service; deploy the worker with it"
+        )
+    if manifest.audit is None:
+        found.append(
+            f"{who} doesn't say where it writes its audit records: a case worker in production "
+            "must; deploy a build that does"
+        )
+    elif manifest.audit.development:
+        found.append(
+            f"{who} writes its audit records to {manifest.audit.name}, which is for development: "
+            "production writes them to the deployment's audit store; deploy the worker with it"
+        )
+    return found
 
 
 def callers(registry: Registry, reference: str) -> dict[str, str]:
