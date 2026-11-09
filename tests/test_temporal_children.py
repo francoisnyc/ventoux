@@ -398,7 +398,9 @@ def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> 
         await environment.sleep(timedelta(hours=25))
         return await reported(parent, lambda now: bool(now.needs_attention))
 
-    noticed = skipping(scenario, cases=SwitchingCases)
+    # Past its bound, it says what held the clock: each workflow's status, pending activities and
+    # any workflow task in flight (it hung once on CI at the sleep, the clock never moving).
+    noticed = skipping(scenario, cases=SwitchingCases, described=("claim-14", "claim-14/repair#1"))
     assert noticed.needs_attention == [ENDED_WITHOUT]
 
 
