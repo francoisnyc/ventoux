@@ -268,8 +268,8 @@ or `127.0.0.1`, for a development server.
   is never followed either. A proxy to Vault, if your network needs one, would be a setting of its
   own, named on purpose; it isn't built.
 - **An export that can't seal says so,** naming the key service, not the store: `audit export
-  failed: the key service at https://vault.internal:8200 can't be reached: …: look at the key
-  service, then retry the export`. It is retried as a store that is down is; a key Vault refuses
+  failed: the key service at https://vault.internal:8200 can't be reached (ConnectionRefusedError):
+  …: look at the key service, then retry the export`. It is retried as a store that is down is; a key Vault refuses
   for good (one that can leave it) fails the export at once.
 
 Give Ventoux's token a policy that allows only `ventoux-*` keys (creating, configuring,
@@ -310,7 +310,8 @@ Never an empty value, never a guess: an error that says why.
 |---|---|---|
 | was never made | `there is no key for claim-7, so its sensitive values can't be read or written` | refused at the opening; anywhere else, an error |
 | was destroyed | `the key of claim-7 was destroyed when it was forgotten: its sensitive values can't be read or written` | `read_audit` says `‹forgotten›`; a replay fails, the worker carries on (D32) |
-| Vault can't be reached, or doesn't answer in time | `the key service at https://vault.internal:8200 can't be reached: claim-7's sensitive values can't be read or written now` | waits: the workflow task, or the activity, is retried until Vault answers; a proposal to forget is refused, saying so; an approved one waits; `read_audit` fails, never saying `‹forgotten›` |
+| Vault can't be reached (the connection's error said by its kind: refused, a certificate not trusted, a name with no address) | `the key service at https://vault.internal:8200 can't be reached (ConnectionRefusedError): claim-7's sensitive values can't be read or written now` | waits: the workflow task, or the activity, is retried until Vault answers; a proposal to forget is refused, saying so; an approved one waits; `read_audit` fails, never saying `‹forgotten›` |
+| Vault doesn't answer in time | `the key service at https://vault.internal:8200 didn't answer within 10 seconds: claim-7's sensitive values can't be read or written now` | waits, as above |
 | Vault refuses Ventoux's token | `the key service refused Ventoux's token for claim-7: check the token's policy` | waits, as above |
 | is one Vault would let leave, or of another type | `the key of claim-7 can leave the key service (exportable): it is not used` | waits, needing a platform fix; the audit export fails at once, needing attention |
 
