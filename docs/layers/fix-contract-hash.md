@@ -86,7 +86,8 @@ fresh install, resolving the newest pydantic, is the live proof.
 1. Negative first: a contract whose field carries a constraint (`ge`, `max_length`, `pattern`),
    other metadata, a `Field(title=…)` or a `json_schema_extra`, or a `Decimal` default, is
    refused when built, naming the contract and the field and saying what to do
-   (`test_contract.py`, parametrized).
+   (`tests/test_described.py`, beside the contract field rules in
+   `test_case_validation.py`).
 2. `described` writes every allowed shape as pydantic 2.13.5 did: each shape in the table above
    (each type, optional or not, with and without a default, a description, each marker, a
    docstring), compared with a committed file recorded under 2.13.5
