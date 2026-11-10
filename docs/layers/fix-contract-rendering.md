@@ -8,7 +8,8 @@ there for the time being (brief, D82); made independent here, in its own pull re
 Status: two designs put, 2026-11-10 (a new hash method 2, or method 1 written by Ventoux itself);
 the second chosen. Choices below put, each with a recommendation; answered "1 to 7, all as
 recommended", the same day. The seams are choice 6's: `contract_schema(model)`, making a contract,
-and `contract_hash`. D83 and the dated line on D82 written before building.
+and `contract_hash`. D83 and the dated line on D82 written before building. Built test-first, the
+same day, and the Promises table checked against the tests (see "Decided while building").
 
 ## The bug
 
@@ -142,14 +143,42 @@ Answer by number.
 
    *Recommended.*
 
+## Decided while building
+
+- **The marks' pydantic hooks are gone.** Once `promise_of` and the semantic diff read
+  `contract_schema`, nothing in Ventoux asks pydantic to render a contract's model, and each mark's
+  `__get_pydantic_json_schema__` (on `Policy`, `Reference`, `OutputSource`) said "the published
+  schema, which the contract hash covers", no longer true. The writer writes each mark itself.
+- **What is refused, a little wider than choice 3 listed:** pydantic also writes or names a field
+  by a validation or serialization alias, a title generator, a deprecation and a discriminator, so
+  those are refused too. A type the writer doesn't know (a `float`, `str | bool`, a nested model)
+  is refused by the writer on its own as well: the contract's earlier checks refuse each first,
+  but `contract_schema` never guesses either.
+- **A refusal ends with what to do and its reason:** `... has a constraint or mark Ventoux doesn't
+  know: a contract's field is its type, its marks (a policy, a reference, a source) and, if it is
+  optional, `= None`. Remove it (brief, D83).` The guide's table of refusals gains the
+  constraint's row, `Field(gt=0)`, tested as every row is.
+- **pydantic 2.14 types `create_model` more strictly:** mypy refused one call in
+  `tests/test_diff.py` with an `Annotated` field; written as a plain class, under the same name.
+- **The package job, run by hand:** the wheel, installed fresh, passes `ventoux version`,
+  `schema --unchanged` and `conformance --unchanged` under 2.14.3 (what failed in 20c) and under
+  2.13.5.
+- **One Temporal test failed once in the full run** (`test_forgetting_waits_for_a_workflow_step`,
+  under load); it passes alone, with and without this change, and in the next full run.
+
 ## Promises
 
-Filled in while building: each claim this note makes, and the test that fails if it isn't true.
+Each claim this note makes, and the test that fails if it isn't true. Each new test was seen
+failing first, for its reason: accepted before the refusals, pydantic's rendering read before the
+writer; the unknown types by taking the writer's refusals out.
 
 | Promise | Test |
 |---|---|
-| A contract model holding a description, a default other than `None`, a constraint, an unknown mark or a `model_config` is refused when the contract is made, saying which field and what may be | *to write* |
-| `contract_schema` writes each shape of choice 2 as pydantic 2.13.5 did | *to write* |
-| A contract's hash doesn't depend on pydantic's rendering | *to write* |
-| No hash recorded so far changes | `test_every_development_contract_matches_its_recorded_hash` (existing) |
-| The conformance catalog file doesn't change with pydantic | `ventoux conformance --unchanged` in CI, under 2.14.3 |
+| A contract model holding a description, a default other than `None`, a `default_factory`, an alias, a title, examples, `json_schema_extra`, a constraint, an unknown mark or a `model_config` is refused when the contract is made, saying which field and what may be, input or output | `tests/test_contract_schema.py`: `test_a_field_with_a_description_is_refused_when_the_contract_is_made`, `test_anything_else_pydantic_would_write_is_refused`, `test_an_output_is_refused_the_same_way`; the guide's row, `tests/test_catalog.py::test_the_guides_refusals_are_what_the_catalog_says` |
+| The writer refuses a type it doesn't know (fail closed) | `test_a_type_the_writer_doesnt_know_is_refused` |
+| `contract_schema` writes each shape of choice 2 as pydantic 2.13.5 did | `test_each_shape_is_written_as_pydantic_2_13_wrote_it`, against `tests/rendering-2.13.json` |
+| A contract's hash doesn't depend on pydantic's rendering: 2.13's, 2.14's, or none read | `test_a_contracts_hash_doesnt_depend_on_pydantics_rendering` |
+| The semantic diff doesn't read pydantic's rendering | `tests/test_diff.py::test_a_contracts_differences_dont_read_pydantics_rendering` |
+| No hash recorded so far changes | `tests/test_catalog.py::test_every_development_contract_matches_its_recorded_hash`, and the hash test above, both against `contracts.lock.json` unchanged |
+| The conformance catalog file doesn't change with pydantic | `ventoux conformance --unchanged`, in CI under 2.14.3 and in the package job's fresh install; `development.json` unchanged |
+| pydantic is bounded below its next major only | `tests/test_package.py::test_pydantic_is_bounded_below_its_next_major_only` |

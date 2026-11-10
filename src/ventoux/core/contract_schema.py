@@ -27,14 +27,15 @@ A_FIELD = (
 
 
 class Unwritable(ValueError):
-    """A model holding something its contract's promise can't be written with."""
+    """A model holding something its contract's promise can't be written with: what, then what
+    to do, with no full stop, so the contract can add its reference and reason."""
 
 
 def contract_schema(model: type[BaseModel]) -> dict[str, object]:
     """`model` as JSON Schema, as pydantic 2.13 wrote it. `Unwritable` if it holds anything a
     contract's field may not."""
     if model.model_config:
-        raise Unwritable(f"{model.__name__} sets model_config: a contract's model sets none.")
+        raise Unwritable(f"{model.__name__} sets model_config: a contract's model sets none. Remove it")
     for name, field in model.model_fields.items():
         refuse_extras(model, name, field)
     fields = model.model_fields
@@ -72,7 +73,7 @@ def field_schema(model: type[BaseModel], name: str, field: FieldInfo) -> dict[st
     if optional:
         members = [member for member in get_args(annotation) if member is not NoneType]
         if len(members) != 1:
-            raise Unwritable(f"{name} ({model.__name__}) is {annotation}: {A_FIELD}.")
+            raise Unwritable(f"{name} ({model.__name__}) is {annotation}: {A_FIELD}")
         annotation = members[0]
     schema = type_schema(model, name, annotation)
     if optional:  # one list of choices, a decimal's two forms included, then null
@@ -110,7 +111,7 @@ def type_schema(model: type[BaseModel], name: str, annotation: Any) -> dict[str,
         if len(texts) == 1:
             return {"const": texts[0], "type": "string"}
         return {"enum": list(texts), "type": "string"}
-    raise Unwritable(f"{name} ({model.__name__}) is {annotation}: {A_FIELD}.")
+    raise Unwritable(f"{name} ({model.__name__}) is {annotation}: {A_FIELD}")
 
 
 def title(name: str) -> str:
@@ -144,12 +145,12 @@ def refuse_extras(model: type[BaseModel], name: str, field: FieldInfo) -> None:
     where = f"{name} ({model.__name__})"
     for attribute, said in EXTRAS.items():
         if getattr(field, attribute) is not None:
-            raise Unwritable(f"{where} has {said}: {A_FIELD}. Remove it.")
+            raise Unwritable(f"{where} has {said}: {A_FIELD}. Remove it")
     # Pydantic: a field with no default holds `PydanticUndefined` (`is_required()` says so).
     if not field.is_required() and field.default is not None:
-        raise Unwritable(f"{where} has a default other than None: {A_FIELD}. Remove it.")
+        raise Unwritable(f"{where} has a default other than None: {A_FIELD}. Remove it")
     # A constraint (`Field(gt=0)`) or any other `Annotated` extra lands in `metadata`, beside marks.
     if any(not isinstance(mark, MARKS) for mark in field.metadata):
         raise Unwritable(
-            f"{where} has a constraint or mark Ventoux doesn't know: {A_FIELD}. Remove it."
+            f"{where} has a constraint or mark Ventoux doesn't know: {A_FIELD}. Remove it"
         )

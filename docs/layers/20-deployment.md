@@ -927,6 +927,9 @@ No new dependency: `uv build` and `uv publish` are uv's own; no `twine`, no `bui
   (D82, a test pinning the bound to the installed minor), and make the hash independent of
   pydantic's rendering in a separate fix, its own pull request and decision. With the bound, the
   fresh install passes all three commands and every hash equals the locked environment's.
+  *Corrected 2026-11-10, in the contract rendering fix:* the other way round: 2.13 writes the
+  `pattern`, 2.14 drops it. The hash no longer depends on it, and the bound is below the next
+  major (brief, D83; `docs/layers/fix-contract-rendering.md`).
 - **A recording is a data file, never code:** `check_wheel` first refused `ventoux/case/recording.py`,
   which is the code that writes recordings. The rule leaves `.py` files alone.
 - **The forbidden folders are matched at the wheel's top only:** the suite has an `examples/` of

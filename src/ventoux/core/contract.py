@@ -253,7 +253,7 @@ class Contract(BaseModel):
             try:
                 contract_schema(model)
             except Unwritable as unwritable:
-                raise ValueError(f"{self.reference}: {side} {unwritable} (brief, D83)") from None
+                raise ValueError(f"{self.reference}: {side} {unwritable} (brief, D83).") from None
         return self
 
     @model_validator(mode="after")

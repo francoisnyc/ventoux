@@ -48,9 +48,8 @@ maintainer's,** never CI's, and nothing in the repository does either on its own
 
 ## Before raising a dependency's bound
 
-A contract's hash is made from pydantic's JSON Schema of its models, and a new minor version of
-pydantic can write that schema differently (2.14 does, for a decimal field). So the package stays
-below the next minor (`pydantic>=2.13.5,<2.14`) until the hash no longer depends on it. Raising
-the bound is a release of its own: run `ventoux hashes` against the lock and `ventoux conformance
---unchanged` under the new version first; a changed hash refuses every worker serving that
-contract (brief, D54).
+A contract's hash covers its models' JSON Schema, which Ventoux writes itself, never pydantic: so
+pydantic is bounded below its next major only (`pydantic>=2.13.5,<3`), and a new minor version
+can't change a hash (brief, D83). Raising any bound is still checked: run the tests, `ventoux
+hashes --lock contracts.lock.json` and `ventoux conformance --unchanged` under the new version
+first; a changed hash refuses every worker serving that contract (brief, D54).

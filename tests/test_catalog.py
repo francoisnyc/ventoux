@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from ventoux import testing
 from ventoux.core.catalog import Catalog, ContractConflict, NotInCatalog
@@ -323,6 +323,12 @@ class RefundOfAFloat(BaseModel):
     idempotency_key: str
 
 
+class RefundAboveZero(BaseModel):
+    order_id: str
+    amount: Annotated[Decimal, Field(gt=0)]  # what registration refuses: a constraint (brief, D83)
+    idempotency_key: str
+
+
 def kyc(output: type[BaseModel]) -> WorkflowContract:
     """The guide's workflow contract, `kyc.check@1`, with `output`."""
     fields = {name: getattr(testing.kyc_check, name) for name in WorkflowContract.model_fields}
@@ -363,6 +369,9 @@ GUIDE_REFUSALS: dict[str, Any] = {
     "An output field named `outcome`": lambda: kyc(KycNamedOutcome),
     "An output field `score: float`": lambda: kyc(KycAsFloat),
     "An input field `amount: float`": lambda: refund(input=RefundOfAFloat),
+    "An input field `amount: Annotated[Decimal, Field(gt=0)]`": lambda: refund(
+        input=RefundAboveZero
+    ),
     '`catalog.register_label("undeclared")`': lambda: Catalog().register_label("undeclared"),
     "A second, different `payments.refund@2`": lambda: catalog_of(payments_refund).register(
         refund(risk="medium")

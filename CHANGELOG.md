@@ -9,4 +9,5 @@ The first release: case definitions and plans as data, the engine on Temporal, t
 command line (`ventoux check`, `simulate`, `release`, `doctor`, `version` and the others), the
 JSON Schemas and the conformance suite. Engine version 3; schemas
 `https://ventoux.dev/schema/engine-3/`. The supported imports are listed in `ventoux/public.json`.
-pydantic is bounded below 2.14, since contracts hash from its JSON Schema.
+Contracts hash from a JSON Schema Ventoux writes itself, never from pydantic's, so pydantic is
+bounded below its next major only (`>=2.13.5,<3`).

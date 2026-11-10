@@ -83,10 +83,14 @@ What each part is for:
 - **`name` and `version`.** Together they are the reference definitions use, `name@version`. The
   version is a whole number: there are no minor versions, because every change is a new contract.
 - **`input` and `output`.** Pydantic models. Their JSON Schema is what the catalog publishes and what
-  the contract's hash covers. An input field may carry an **input policy**: see below. A case
+  the contract's hash covers, written by Ventoux itself, never by pydantic, so upgrading pydantic
+  never changes a hash. An input field may carry an **input policy**: see below. A case
   gives an input exactly what it holds, never converted: so an input is a `Decimal`, a `str`, a
   `bool` or a `Literal` of texts (`Literal["low", "high"]`), each possibly optional, and an output a
-  `Decimal`, a `str` or a `bool`. The catalog refuses any other type, such as a `float`.
+  `Decimal`, a `str`, a `bool` or a `date`. The catalog refuses any other type, such as a `float`.
+  A field is its type, its marks (a policy, a reference, a source) and, if it is optional, `= None`:
+  a description, a title, an alias, examples, a constraint such as `Field(gt=0)`, any other
+  default, or a `model_config` on the model is refused, since Ventoux couldn't write it exactly.
 - **`risk`** (`low`, `medium`, `high`): how bad a mistake would be. High-risk steps need an approval
   on every path.
 - **`effect`** (`read`, `compute`, `write`, `notify`): what the activity does to the world. `read`
@@ -382,6 +386,7 @@ writes them.
 | An output field named `outcome` | `kyc.check@1`: an output can't be named `outcome`: `<step>.outcome` is the step's outcome. Rename the field. |
 | An output field `score: float` | `kyc.check@1`: output `score` is `float`, which the case file can't hold exactly. An output is a decimal (Decimal), a text (str), true or false (bool) or a day (date): numbers are exact decimals, never binary floats (brief, D20). |
 | An input field `amount: float` | `payments.refund@2`: input `amount` is `float`, which no value of a case is. An input is a decimal (Decimal), a text (str), true or false (bool) or one of some texts (a Literal of str), each possibly optional: numbers are exact decimals, never binary floats (brief, D20). |
+| An input field `amount: Annotated[Decimal, Field(gt=0)]` | `payments.refund@2`: input amount (RefundAboveZero) has a constraint or mark Ventoux doesn't know: a contract's field is its type, its marks (a policy, a reference, a source) and, if it is optional, `= None`. Remove it (brief, D83). |
 | `reference("sail")`, a system nobody registered | `letters.draft@3`: input `customer` is a reference to `sail`, which is not a registered system. Register it first, or use one of: branches, crm, documents, kyc, orders, policies, portal. |
 | `reference("crm")` on a field that isn't a `str` | `letters.draft@3`: input `customer` is a reference, so it is a text (str), and this one is `Decimal`. |
 | `catalog.register_system("CRM")` | `'CRM'` is not a system name: a system is lowercase, such as `crm` or `claims-archive`. |
