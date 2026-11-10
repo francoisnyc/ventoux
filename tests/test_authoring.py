@@ -20,9 +20,10 @@ from ventoux.authoring.provider import Message, ProviderFailed, Recorded, Reques
 from ventoux.case.releases import Package, PackageRefused, package
 from ventoux.testing import CATALOG
 from ventoux.tooling.releases import checked
+from ventoux.tooling.schema import SCHEMAS
 
 ROOT = Path(__file__).parent.parent
-SCHEMA: dict[str, Any] = json.loads((ROOT / "schema" / "plan.schema.json").read_text())
+SCHEMA: dict[str, Any] = json.loads((SCHEMAS / "plan.schema.json").read_text())
 GOAL = "Refund the order, then draft a letter telling the customer it is on its way."
 
 

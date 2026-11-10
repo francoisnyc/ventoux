@@ -144,8 +144,8 @@ def schema_files() -> dict[str, str]:
     return files
 
 
-# What each schema's `$id` starts with: the format, named by the engine that parses it (brief, D51,
-# D60).
+# What each schema's `$id` starts with: the format, named by the engine that parses it
+# (brief, D51) (brief, D60).
 SCHEMA_BASE = f"https://ventoux.dev/schema/engine-{ENGINE}/"
 
 # Where the schemas are kept: in the package, so the wheel holds them and an installed

@@ -363,9 +363,9 @@ def connecting(command: Any, default: str) -> None:
 
 
 def print_versions() -> int:
-    """Three versions, each its own (brief, D82): the package's, from its installed metadata (so
-    it can't differ from what pyproject.toml built); the engine's that new cases open at (brief,
-    D51); the schema's `$id` (brief, D60)."""
+    """Three versions, each its own (brief, D82): the package's, from its installed metadata, so
+    it can't differ from what pyproject.toml built; the engine's that new cases open at
+    (brief, D51); the schema's `$id` (brief, D60)."""
     print(f"ventoux {metadata.version('ventoux')}")
     print(f"engine {ENGINE}")
     print(f"schema {SCHEMA_BASE}")

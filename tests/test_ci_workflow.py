@@ -28,7 +28,11 @@ def jobs(text: str) -> dict[str, list[str]]:
 
 def test_every_job_ends_within_twenty_minutes() -> None:
     found = jobs(WORKFLOW.read_text())
-    assert sorted(found) == ["changes", "check"]  # a job added is bounded too: it shows here
+    assert sorted(found) == [
+        "changes",
+        "check",
+        "package",
+    ]  # a job added is bounded too: it shows here
     for name, lines in found.items():
         assert f"    timeout-minutes: {MINUTES}" in lines, (
             f"the CI job {name} has no `timeout-minutes: {MINUTES}`: a run that hangs would go on "

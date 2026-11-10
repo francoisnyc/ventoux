@@ -319,7 +319,7 @@ def test_ci_checks_the_committed_schemas_unchanged() -> None:
     assert text.count("permissions:") == 1
     assert "  contents: read" in doing
     assert not any("pull_request_target" in l for l in doing)
-    changes = text.split("\n  changes:")[1]
+    changes = text.split("\n  changes:")[1].split("\n  package:")[0]  # that job alone
     assert "schema" not in changes
 
 

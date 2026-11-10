@@ -225,3 +225,73 @@ def imported_by_the_docs() -> set[str]:
 def test_every_name_the_docs_import_is_supported() -> None:
     supported = {f"{module}.{name}" for module, names in listed().items() for name in names}
     assert sorted(imported_by_the_docs() - supported) == []
+
+
+def test_pydantic_is_bounded_to_the_minor_version_the_hashes_were_made_with() -> None:
+    # A contract's hash is made from pydantic's JSON Schema of its models (core/promise.py), and
+    # pydantic 2.14 writes a decimal field's differently from 2.13: under another minor version,
+    # contracts would hash otherwise and the lock and the registry refuse them (brief, D54). So
+    # the package stays on the minor its hashes were made with, until the hash no longer depends
+    # on pydantic's rendering (brief, D82, as amended).
+    major, minor = (int(part) for part in metadata.version("pydantic").split(".")[:2])
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    (pydantic,) = [d for d in project["dependencies"] if d.startswith("pydantic")]
+    assert f"<{major}.{minor + 1}" in pydantic, pydantic
+
+
+WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def package_job() -> list[str]:
+    """The `package` job's lines, comments left out, read from the workflow as text."""
+    text = WORKFLOW.read_text()
+    assert "\n  package:\n" in text, "ci.yml has no package job"
+    job = text.split("\n  package:\n", 1)[1]
+    job = job.split("\n\n  ", 1)[0]  # up to the next job
+    return [line.strip() for line in job.splitlines() if not line.strip().startswith("#")]
+
+
+def test_ci_builds_the_wheel_installs_it_fresh_and_runs_it_from_outside_the_repository() -> None:
+    lines = package_job()
+    steps = [
+        "- run: uv build --out-dir dist",
+        "- run: uv run --no-project python scripts/check_wheel.py dist/ventoux-*.whl",
+        "- run: uv venv /tmp/installed",
+        "- run: uv pip install --python /tmp/installed dist/ventoux-*.whl",
+        "- run: /tmp/installed/bin/ventoux version",
+        "- run: /tmp/installed/bin/ventoux schema --unchanged",
+        "- run: /tmp/installed/bin/ventoux conformance --unchanged",
+    ]
+    found = [lines.index(step) for step in steps]  # each there,
+    assert found == sorted(found)  # in this order
+    # The installed commands run outside the repository: only what the wheel installed is read.
+    for step in steps[4:]:
+        assert lines[lines.index(step) + 1] == "working-directory: /tmp", step
+    # Built and checked, never published (brief, D82).
+    assert not any(word in line for line in lines for word in ("publish", "pypi", "git tag"))
+
+
+RELEASING = ROOT / "docs" / "guides" / "releasing-ventoux.md"
+
+
+def test_the_release_guide_names_each_step_and_leaves_the_tag_and_publish_to_the_maintainer() -> (
+    None
+):
+    guide = RELEASING.read_text()
+    for step in (
+        'version = "',  # the bump, in pyproject.toml
+        "CHANGELOG.md",
+        "`package` job",
+        "uv build",
+        "git tag v",
+        "uv publish",
+    ):
+        assert step in guide, step
+    prose = " ".join(guide.replace("**", "").split())  # as read, not as wrapped
+    assert "The tag and the publish are the maintainer's, never CI's" in prose
+
+
+def test_the_changelog_has_an_entry_for_the_version_being_released() -> None:
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    headings = [l for l in (ROOT / "CHANGELOG.md").read_text().splitlines() if l.startswith("## ")]
+    assert headings and headings[0].startswith(f"## {version}"), headings[:1]

@@ -3495,6 +3495,12 @@ whose key provider or audit store is for development, or that doesn't say, so th
   scripts, a key or certificate, a key file, or a recording: a wheel that does, or that lacks a
   file it must hold, fails CI, naming the file. `ventoux.testing` ships, for teams' tests.
 - **Extras: `anthropic` only.** Vault needs none.
+- **pydantic is bounded below its next minor version** (`>=2.13.5,<2.14`): a contract's hash is
+  made from pydantic's JSON Schema of its models, which 2.14 writes otherwise for a decimal
+  field, so under another minor version contracts would hash differently and the lock and the
+  registry refuse their workers (D54). Found by the package's fresh install in 20c. Raising the
+  bound is a release of its own, checked against the lock; making the hash independent of
+  pydantic's rendering is a later decision.
 - **The supported imports are a committed list,** `src/ventoux/public.json`: the names the guides
   tell teams to import, the builder's `__all__`, and the protocols a deployment implements.
   Everything else is internal: importable, unsupported, free to change. A listed name that
