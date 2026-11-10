@@ -1,7 +1,7 @@
 # Whole-project review of Ventoux, November 2026
 
-**Status: in progress.** Passes 1, 2, 3 and 6 are written below. Passes 4 (test strength) and 5
-(an outsider's run) are still running; the summary at the end is written when all six are.
+**Status: in progress.** Passes 1, 2, 3, 5 and 6 are written below. Pass 4 (test strength) and a
+second part of pass 6 (each decision's checkable claims) are still running; the summary at the end is written when all six are.
 
 - **A correction to the task's own numbers:** `tests/histories` holds 68 files, of which 34 are
   recorded histories and one a carried state; the other 33 are the key files beside them.
@@ -67,6 +67,7 @@
 | 3.7 | A worker's manifest file and a release record ignore unknown keys and convert loosely: a misspelt `binds` binds nothing, `"development": "no"` reads as false (D54, D81). |
 | 2.4 | The 34 kept histories leave whole areas with none: no plan run, no timer, no child case or doorbell, no registry that continued as new, no case migrated to engine 3, nine signal types; and the tests that replay them check only that no error is raised, never what the replay rebuilds (D51). |
 | 2.2 | A request to forget stamps its audit records with the code's `ENGINE` constant, not with anything recorded: with the constant moved, a recorded request replays with no error and rebuilds records that say another engine version (D51, D76, D77). |
+| 5.3 | Thirteen names the documents tell a team to use are not in `public.json`, so they are "internal: importable, unsupported, free to change": among them `ventoux.testing.run_case` and `CATALOG`, `Catalog`, `registry_worker`, and `propose`, `retry`, `close`, `view` and `propose_change` in `ventoux.temporal.cases`. A case of one's own can't be run, in a test or to its close, without them (D82). |
 
 ### Misleads
 
@@ -80,6 +81,12 @@
 | 6.1.1 | `ventoux version` prints a prefix (`https://ventoux.dev/schema/engine-3/`), not a schema's `$id` as D82 says, and `docs/guides/deployment.md` shows a one-line output the command never prints. |
 | 6.4.3 | `docs/guides/cases.md` gives the schema's `$id` as `engine-2`; the committed schemas, `ENGINE` and the conformance suite say 3 (D60). |
 | 6.2.1 | D74 adds a sixth kind of step (`case`) without saying it adds to the Simplifications' kinds or to D13, as D41 did for `wait`; the glossary's "Step" row still lists four. |
+| 5.1 | The quickstart, followed to the letter, fails in six places: three commands that don't exist, `uv run pytest` as printed, a step `ventoux check` refuses, `ventoux diff` with no arguments; and it meets twelve concepts beyond the five principle 5 promises (see also 6.4.2). |
+| 5.4 | `run_case` plays a project's own case under the development catalog unless given `catalog=`, which the cases guide never names, and the refusal ("has no role") names the wrong cause. |
+| 5.5 | `start_case` given the builder's `Case` raises a bare `AttributeError`, after the case ID is spent; `run_case` accepts the same object. |
+| 5.6 | The releases guide's `environment_worker(...)` snippet is a `TypeError`: `audit` is required and the snippet leaves it out. |
+| 5.7 | `report` just after `start_case` on a release, in an environment, says `draft` with an empty history, where the cases guide asserts the release at once. |
+| 5.2 | No document says how to install the package or start a local Temporal server (with 6.4.1). |
 
 ### Minor
 
@@ -97,6 +104,9 @@
 | 6.4.5 | Two rows of "Promises" tables (layers 18 and 20) name tests that no longer exist. |
 | 6.2.2 | The glossary's "Catalog" row lists resolvers, which D30 puts in `tooling`, and omits systems, option checks and document stores. |
 | 6.2.3 | The brief's status line says "decisions D1–D26"; it holds D1 to D83. |
+| 5.8 | With the registry's worker not running, `environment create` reports success, `activate` gives Temporal's raw words after 30 seconds, and `environment check` doesn't return. |
+| 5.9 | `report` on a handle from Temporal's client is a `CaseReport` while the case is open and a plain `dict` once closed. |
+| 5.10 | Guides run commands on the repository's `examples/` folder, which an installed wheel doesn't have, without saying so. |
 
 ### Where the brief reads against itself (found in pass 1; proposals only)
 
@@ -2306,6 +2316,397 @@ that set (core02 approver role not listed; core06 digest number/text; core22 inf
 core23 empty option fits; core24 empty attachment fits; core35 a moment as a literal). Each is being
 re-run against the wider set before it is called a survivor. Case, temporal, tooling and authoring
 are running.
+
+
+---
+
+## Pass 5: an outsider's run
+
+Everything below ran at commit `c2739ad` (source as at `3edb471`; the commits between only add
+review probes). The wheel was built with `uv build --out-dir <scratchpad>/p5/dist` (nothing was
+written inside the repository: `git status --short` was the same before and after) and installed in
+a fresh virtual environment outside the repository (`<scratchpad>/p5/project`, Python 3.13);
+`python -c "import ventoux; print(ventoux.__file__)"` pointed into that environment's
+`site-packages`. I worked from README.md, docs/QUICKSTART.md, docs/guides, CHANGELOG.md, `--help`
+and error messages only. I did not read `src/` or `tests/`; where I used introspection
+(`inspect.signature`, `dir()`), I say so. Temporal was its local development server, from the
+binary the Temporal Python SDK had already cached on this machine (no download).
+
+How long each stage of my own case took, in attempts:
+
+| Stage | Attempts | What cost the extra attempts |
+|---|---|---|
+| Catalog, contract, activity, roles | 1 | I had to guess `from ventoux.core.catalog import Catalog` (finding 3) |
+| Builder file and `ventoux check` | 1 (2 with the warning fixed) | nothing: the warning said what to add |
+| In-memory test with `run_case` | 2 | `run_case` ran under the development catalog (finding 4) |
+| On Temporal: worker, open, task, approval, close, report, audit | 3 | `start_case` wants the JSON, not the builder's `Case` (finding 5); the first ID was spent |
+| Release, environment, activation | 5 | no import for `registry_worker`, `environment_worker` needs `audit=`, commands that hang with no registry worker (findings 3, 6, 8) |
+
+### Findings
+
+#### 5.1 The quickstart, followed to the letter, fails in six places (*misleads*; it is the brief's own test of principle 5)
+
+Three of its commands do not exist (`ventoux init`, `ventoux dev`, `ventoux start`), `uv run
+pytest` as printed cannot import `cases.refund`, the step added in section 7 is refused by `ventoux
+check`, and `ventoux diff` with no arguments is refused. Sections 2, 3, 5 (with `python -m pytest`)
+and 6 work as printed, word for word, including both refusals of section 6 (the only difference:
+the line number is 21, not 19, once the two lines of the new field are added above the step).
+
+Promise touched: brief, principle 5: "**Easy to adopt.** A developer runs a first case in 15
+minutes, meeting at most five concepts." and "The quickstart (`QUICKSTART.md`) is the running test
+of this principle." CLAUDE.md: "The quickstart's acceptance tests must stay green in every layer."
+The three tests are green; the page around them is not what a newcomer can follow. The inbox is a
+recorded limit (D79: "Ventoux ships no HTTP API and no inbox in v1.0; both move to \"Beyond v1.0\""), so section 4 describes
+something v1.0 will not have, and the page was not changed.
+
+Proof (`uv run python reviews/2026-11/probes/p5_quickstart_to_the_letter.py`, trimmed):
+
+```
+$ init  -> exit 2: ventoux: error: argument command: invalid choice: 'init' (choose from 'check', ...
+$ check  -> exit 2: no catalog is named: name the deployment's in pyproject.toml, [tool.ventoux] catalog = "module:NAME", ...
+$ check  -> exit 0: ✓ refund is valid (3 steps): packages/refund/
+$ dev  -> exit 2: ventoux: error: argument command: invalid choice: 'dev' ...
+$ start refund --file order_id=ord-1 amount=250  -> exit 2: ... invalid choice: 'start' ...
+$ .../pytest -q -p no:cacheprovider  -> exit 2: 1 error in 0.77s      (ModuleNotFoundError: No module named 'cases')
+$ .../python3 -m pytest -q -p no:cacheprovider  -> exit 0: 3 passed in 0.57s
+cases/refund.py:43: steps.notify_rejection.inputs.order_id UNKNOWN_INPUT: letters.draft@2 has no input order_id: its inputs are template, to_customer
+cases/refund.py:43: steps.notify_rejection.inputs MISSING_INPUT: letters.draft@2 needs the input to_customer: add it to inputs
+cases/refund.py:43: steps.notify_rejection.inputs MISSING_INPUT: letters.draft@2 needs the input template: add it to inputs
+$ diff  -> exit 2: ventoux diff: error: the following arguments are required: old, new
+RESULT: BROKEN - 6 places where the quickstart, followed to the letter, does not work as printed
+```
+
+From the installed wheel only (not in the probe): `uv init refunds && cd refunds && uv add ventoux`
+ends with "your project's requirements are unsatisfiable" (the package is not published;
+CHANGELOG.md says "0.1.0 (not yet released)", so this one is expected, but the page does not say
+so); and in a project made by `uv init`, `uv run pytest` runs a `pytest` from outside the project
+("No module named 'ventoux'") until `uv add --dev pytest`, which the page never asks for.
+
+Other things the page says that a newcomer cannot know are untrue: its first paragraph, "**Design
+draft.** This page describes how Ventoux is meant to work; none of it is built yet"; section 1,
+"`ventoux init` creates a `cases/` folder and a development catalog" and section 3, "pyproject.toml,
+which `ventoux init` writes" (nothing writes it; the error message of `ventoux check` does say what
+to write, which is what saved me); section 7's output of `ventoux diff` ("refund: changes since the
+last release") has no command that prints it without two folders.
+
+Concepts: the page promises five ("a **case**, its **case file**, **steps**, **approvals** and
+**rules**"). To get through it I also had to take in: a reference, a task, an outcome, an activity,
+the catalog, a role, a sequence, `requires`, a package folder, an untrusted source, an input
+policy, and a release. That is twelve more than five, by my count; several are one-line mentions.
+
+Proposed fix: rewrite the quickstart against what exists (install from the built wheel until it is
+published; the `pyproject.toml` lines written by hand; `python -m pytest` or a `pythonpath`
+setting; section 4 as a first run on Temporal or dropped; `letters.draft@2` given `template` and
+`to_customer`; `ventoux diff old new`), remove the "none of it is built yet" banner, and add a test
+that runs the page's blocks and commands as printed, as the builder guide's test does for imports.
+
+Probe: `reviews/2026-11/probes/p5_quickstart_to_the_letter.py`.
+
+#### 5.2 README.md says there is no code (*misleads*)
+
+README.md, "Status": "Design stage. There is no code yet: Ventoux is being built in Python, one
+layer at a time, starting from the design documents below. Nothing here is ready to use." and
+"`docs/QUICKSTART.md`: a first case in 15 minutes, written before the code". Layers 0 to 20 are
+merged and the wheel installs and runs a case on Temporal (probe `p5_own_case.py`). The README is
+also the wheel's long description if `pyproject.toml` names it (not checked). It never says how to
+install the package or how to start a local Temporal server; no document does (see finding 7).
+
+Proof: `uv run python reviews/2026-11/probes/p5_public_names.py` prints
+`README.md still says "There is no code yet ... Nothing here is ready to use": True` and
+`some document says how to start a local Temporal server: False`.
+
+Proposed fix: a README for 0.1.0: what works, how to install, the first page to read.
+
+#### 5.3 Thirteen names the documents tell a team to use are not in `public.json` (*weakens one*)
+
+To run my own case I needed two names outside the supported list, and the guides name eleven more
+that a deployment cannot do without (closing a case for a reason, proposing a step, retrying a
+failed run, reading the case file by role, the registry's worker).
+
+Promise touched: D82: "**The supported imports are a committed list,** `src/ventoux/public.json`:
+the names the guides tell teams to import, the builder's `__all__`, and the protocols a deployment
+implements. Everything else is internal: importable, unsupported, free to change. A listed name
+that disappears fails a test ... a name a guide imports that the list doesn't hold fails too." The
+test reads `import` lines in docs/guides; these names are told in prose, in a snippet with no
+import line, or in the quickstart, so nothing notices.
+
+Proof (`uv run python reviews/2026-11/probes/p5_public_names.py`, trimmed to module.name and where
+it is said; each line ends "exists: True; in public.json: False"):
+
+```
+ventoux.testing.run_case            docs/QUICKSTART.md: 'from ventoux.testing import run_case'
+ventoux.testing.CATALOG             docs/QUICKSTART.md: 'catalog = "ventoux.testing:CATALOG"'
+ventoux.core.catalog.Catalog        docs/guides/activities.md: 'catalog.register(payments_refund)'
+ventoux.temporal.registry.registry_worker   docs/guides/releases.md: 'registry_worker(client)'
+ventoux.temporal.registry.open_cases        docs/guides/releases.md: 'open_cases(client,'
+ventoux.temporal.cases.propose / retry / close / view / shown   docs/guides/cases.md
+ventoux.temporal.cases.propose_change       docs/guides/deployment.md
+ventoux.temporal.sandbox.SANDBOX            docs/guides/case-data.md
+ventoux.tooling.audit.same                  docs/guides/audit.md
+RESULT: BROKEN - 13 names the documents tell a team to use exist and are not in public.json
+```
+
+`Catalog` is the worst for a newcomer: every guide writes `catalog.register(...)`,
+`catalog.register_role(...)` or `from refunds.catalog import CATALOG`, and none shows how a catalog
+is made or where the class is imported from. I guessed `ventoux.core.catalog.Catalog`; no document
+told me. `registry_worker` is the same: the releases guide says "Run the registries' worker
+(`registry_worker(client)`...)" with no module; I found it by trying each module of
+`ventoux.temporal` for the attribute.
+
+What held: every `import` line in every guide names something in `public.json`, and each imports
+from the installed wheel (my own scan, `<scratchpad>/p5/guides_scan.py`, run in the wheel's
+environment: 0 names missing in the ten guides; `run_case` in the quickstart is the only one).
+
+Proposed fix: decide, as D82 says such things are decided, which of these are supported and list
+them (at least `Catalog`, `run_case`, the development `CATALOG`, the other client functions of
+`ventoux.temporal.cases`, `registry_worker`, `open_cases`); show an import line for each in a
+guide; widen the test to the quickstart and to names in backticks followed by `(`.
+
+Probe: `reviews/2026-11/probes/p5_public_names.py`.
+
+#### 5.4 `run_case` plays a project's case under the development catalog, and the refusal names the wrong cause (*misleads*)
+
+My case was checked by `ventoux check` against my catalog (named in `pyproject.toml`). `run_case`,
+called as the cases guide and the quickstart show, used the development catalog without saying so,
+did not object that the case names a contract and roles that catalog doesn't hold, and refused the
+first answer with "dee has no role", although `people={"dee": ["desk"]}` gives the role.
+
+Doc text (docs/guides/cases.md, "Testing a case"): the paragraph lists `people`, `opened_by`,
+`activities`, `workflows`, `held`; it never names `catalog`. CLAUDE.md: each rule's "error message
+saying what is wrong, then what to do". Here the message says something untrue and no next step. I
+found `catalog=` only by `inspect.signature(run_case)`.
+
+Proof (`uv run python reviews/2026-11/probes/p5_first_hour_surprises.py`):
+
+```
+1. run_case without catalog=: AnswerRefused: assess#1 is answered by desk, and dee has no role
+```
+
+With `catalog=CATALOG` the same script closes the case (probe `p5_own_case.py`: "in memory: closed
+True reached reserve True").
+
+Proposed fix: say `catalog=` in the guide and the quickstart's "Next"; have `run_case` check the
+definition against the catalog it runs with before opening (an unknown contract or role is an
+error then, saying "desk is not a role of this catalog: pass catalog=..."), or read the project's
+catalog as `ventoux check` does.
+
+Probe: `reviews/2026-11/probes/p5_first_hour_surprises.py` (item 1).
+
+#### 5.5 `start_case` given the builder's `Case` raises a bare `AttributeError`, after spending the ID (*misleads*)
+
+docs/guides/cases.md shows `case = await start_case(client, RefundCases, refund, file={...},
+id="refund-A-1001", task_queue="refunds")` and never says what `refund` is there. In the
+quickstart and in `run_case` (`run_case(refund, ...)`, whose own help says "`definition` may be the
+builder's `Case`") it is the builder's object. `start_case` takes only the stored JSON
+(`packages/loan/case.json`, read with `json`), or a release record.
+
+Proof (probe, item 2): `2. start_case with the builder's Case: AttributeError: 'Case' object has no
+attribute 'get'`. From the wheel, the second try under the same ID then said `KeyRefused: a key was
+already made for loan-1: open the case under a new ID`: the key is made before the definition is
+looked at, so a typing mistake spends an ID. (That an ID is spent when starting fails is said in
+the case data guide; that a wrong argument does it is the surprise.)
+
+Proposed fix: say in the guide where the definition comes from (the package's `case.json`); refuse
+anything that isn't a definition or a release record before making the key, saying what to pass;
+or accept the builder's `Case` as `run_case` does.
+
+Probe: `reviews/2026-11/probes/p5_first_hour_surprises.py` (item 2).
+
+#### 5.6 The releases guide's `environment_worker(...)` call is a `TypeError` (*misleads*)
+
+docs/guides/releases.md, "Activating a release in an environment":
+
+```python
+worker = await environment_worker(client, "refunds", RefundCases, RefundPlans,
+                                  {"payments.refund@2": refund, ...}, build="4f2a9c1",
+                                  identity="refunds-a", activity_executor=activity_executor)
+```
+
+Run as shown (with a real mapping in place of `...`), from the wheel: `TypeError:
+environment_worker() missing 1 required keyword-only argument: 'audit'`. The probe shows the
+parameter has no default (item 3: `environment_worker's audit parameter has a default: False`).
+
+Proposed fix: add `audit=store` to the snippet (the audit guide's `case_worker` snippet has it).
+
+Probe: `reviews/2026-11/probes/p5_first_hour_surprises.py` (item 3).
+
+#### 5.7 `report` just after `start_case` on a release says the case is a draft with no history (*misleads*)
+
+docs/guides/cases.md, "A case runs its release":
+
+```python
+case = await start_case(client, RefundCases, refund_1, file={...}, id="refund-A-1002", task_queue="refunds")
+now = await report(case)
+assert (now.release, now.engine) == ("refund 1", 3)
+```
+
+With the workflow naming an environment (as the releases guide says a production one does), the
+first `report` answers before the case has opened: `release='draft'`, `status='open'`, nothing
+waiting, an empty history. A moment later it says `loan 1`. So the guide's assertion fails as
+written, and worse, a caller reading the report at once is told a case that is opening on a
+release is a draft with nothing to do. Seen three times out of three (twice from the wheel, once
+in the probe).
+
+Proof (probe, item 4):
+
+```
+   trial created: a development environment, where drafts open
+   pia activated loan 1 in trial
+4. report just after start_case on release loan 1: release='draft' waiting_at=[] history=[]
+   a moment later: release='loan 1' waiting_at=['assess#1']
+```
+
+Without an environment the first snippet of the guide (`assert (await report(case)).waiting_at ==
+["review#1"]`) held every time I ran it.
+
+Proposed fix: until the case has opened, `report` should say so (a status of its own, or the
+release it was started on), never "draft"; or `start_case` returns once the opening is decided.
+The guide should say which.
+
+Probe: `reviews/2026-11/probes/p5_first_hour_surprises.py` (item 4).
+
+#### 5.8 Commands that need the registry's worker hang or give Temporal's own words when it isn't running (*minor*)
+
+The releases guide says to run the registries' worker, "then" `ventoux environment create`. With no
+registry worker running, from the wheel against the local server:
+
+- `ventoux environment create production --address localhost:47233` printed `production created: a
+  production environment, where drafts never open`, exit 0 (so the newcomer thinks all is well);
+- `ventoux activate loan 1 --environment staging --task-queue loans2 --releases releases --by pia
+  --address localhost:47233` printed, on different tries, `h2 protocol error: http2 error` (exit
+  2), `no poller seen for task queue recently, worker may be down` (exit 2), and after 30 seconds
+  `Timeout expired` (exit 2);
+- `ventoux environment check dev2 --address localhost:47233` did not return within 30 seconds (I
+  stopped it with `timeout`).
+
+None says what to do next (CLAUDE.md: "its error message saying what is wrong, then what to do").
+The guide's own list of activation problems ("`no worker polls refunds now`" and the others) is
+about the case workers; with the registry worker running each of those came out as documented
+(`no worker polls nobody now: start one, then activate`). These three only reproduce with a
+Temporal server and timing, so they are given here as commands and not as a probe.
+
+Proposed fix: a bounded wait and one message for all three: "production's registry isn't answering:
+run its worker (registry_worker), then try again".
+
+#### 5.9 `report` on a handle from the Temporal client is a `CaseReport` while the case is open and a plain `dict` once closed (*minor*)
+
+The guide says of `report`: "once the case has closed, it is the report the case returned then".
+The only way the guides show to get a handle to something that already runs is
+`client.get_workflow_handle(...)` (cases.md, for a plan step). With such a handle to a case,
+`report(handle).status` works while it is open and raises `AttributeError: 'dict' object has no
+attribute 'release'` once it has closed.
+
+Proof (probe, item 5): `5. report(client.get_workflow_handle(id)): CaseReport while open, dict once
+closed`.
+
+Proposed fix: have `report` read the closed case's result as a `CaseReport` whatever the handle,
+or give teams a supported `case_handle(client, id)` and show it.
+
+Probe: `reviews/2026-11/probes/p5_first_hour_surprises.py` (item 5).
+
+#### 5.10 Guides run commands on folders a wheel install doesn't have (*minor*)
+
+The guides' commands name the repository's `examples/` folder: cases.md "`uv run ventoux simulate
+examples/refund/stories/nobody-reviews.json`", "`ventoux map examples/packages/refund`", "Each has
+its story under `examples/checks/stories/`"; releases.md "`ventoux release
+examples/packages/refund --releases releases --commit 4f2a9c1`", "`ventoux diff
+examples/packages/refund refund-next`", "`ventoux summary --base base --head . --packages
+examples/packages ...`". D82 says the wheel "never holds ... examples", and no guide says the
+reader needs a checkout of the repository for these. With my own package in place of the example
+(`ventoux release packages/loan --releases releases --commit 4f2a9c1` gave `loan 1 released:
+digest d9f652b7be1b (method 1)`; `ventoux notes loan 1 --releases releases` gave `loan 1: the first
+release, nothing to compare`; `ventoux diff packages/loan packages/loan` gave `loan: nothing
+changed`; `ventoux map packages/loan`) each command worked. I did not run the guides' commands on
+the repository's examples; the repository's own tests are said to.
+
+Proposed fix: one sentence at the top of each guide: its examples live in the repository's
+`examples/` folder, with the link.
+
+### What held
+
+- **D82's fresh install.** From the installed wheel, outside the repository: `ventoux version`
+  printed `ventoux 0.1.0`, `engine 3`, `schema https://ventoux.dev/schema/engine-3/` (exit 0);
+  `ventoux schema --unchanged` printed `✓ ...case.schema.json is unchanged` and the same for the
+  plan's (exit 0); `ventoux conformance --unchanged` printed `✓ this engine conforms to
+  .../ventoux/conformance` (exit 0). `ventoux conformance --export DIR` wrote 90 files.
+- **The wheel's contents** (272 entries, listed with Python's `zipfile`): it holds `ventoux/py.typed`,
+  `ventoux-0.1.0.dist-info/licenses/LICENSE`, `ventoux/schema/case.schema.json` and
+  `plan.schema.json`, `ventoux/conformance/suite.json` with its cases, plans and catalogs, and
+  `ventoux/public.json`. It holds no `tests/`, `docs/`, `scripts/` or top-level `examples/`, no
+  `.pem`, `.key` or `.crt`, no key file, no recording (the two matches on "recording" and
+  "history" are source modules, `case/recording.py` and `core/history.py`). See Unproven for
+  `ventoux/conformance/examples/`.
+- **The `anthropic` extra installs** (`uv pip install "<wheel>[anthropic]"`, then `import
+  anthropic`). With no model named, `ventoux advise` says `no model is named: name it in
+  pyproject.toml, [tool.ventoux] model = "…", or with --model` (exit 2); without the extra it says
+  `the live provider needs the anthropic extra: pip install 'ventoux[anthropic]'`; `ventoux draft`
+  with no drafts folder says `no drafts folder is named: name it in pyproject.toml, [tool.ventoux]
+  drafts = "drafts"` (exit 2). No key was used.
+- **My own case, end to end** (an equipment loan: three fields, a task whose outcome sets the
+  deposit and reaches a milestone, an activity calling a contract I registered with my own
+  implementation, a manager's approval, a second milestone): `ventoux check` passed first time and
+  its one warning said exactly what to add; in memory it closed, waited "approval of reserve by
+  manager", and refused "max set deposit, which reserve uses, so cannot approve it"; on Temporal
+  with `case_worker`, `start_case`, `answer`, `report`, `FileKeys`, `FileAudit` and
+  `data_converter` it opened, waited at `assess#1`, then `reserve.approval#1`, recorded the same
+  person's approval as refused and waited on, took another manager's, ran my activity, reached
+  both milestones and closed; `read_audit` gave five records (opened, answered ×3, completed) with
+  the history's lines. Probe: `reviews/2026-11/probes/p5_own_case.py` (RESULT: HELD, with the two
+  names outside `public.json` listed).
+- **Production refuses development providers, as the deployment guide's table says:** a worker
+  built with `FileKeys` and `FileAudit` in a production environment was refused with the two
+  documented sentences, word for word; a worker started before its environment exists is told
+  `dev2 has no registry: create it with ventoux environment create dev2`.
+- **Activation, with the registry's worker running:** `pia activated loan 1 in dev2`; `ventoux
+  environment check dev2` said `every release that is active or has open cases can run`; `ventoux
+  retire loan 1 ...` said `loan 1 not retired: it is active in dev2: activate another first`;
+  `ventoux environment harden staging --by pia` said `pia made staging a production environment:
+  drafts no longer open`; a worker that polls without a manifest was named (`7260@vm polls loans
+  and published no manifest in staging: it may serve anything`). All as releases.md prints them.
+- **Messages that told me what to do next:** `no catalog is named: ...`; `no releases folder is
+  named: ...`; `a key was already made for loan-1: open the case under a new ID`; the
+  `OUTCOME_UNREAD` warning; the `INPUT_POLICY` refusal of the quickstart's section 6.
+- **Docs whose every command I ran worked as shown:** docs/guides/releasing-ventoux.md (the three
+  commands of the fresh install; the tag and publish steps are the maintainer's and were not run);
+  docs/guides/builder.md (`uv run ventoux check`, `uv run ventoux check --unchanged`); the
+  quickstart's sections 2, 3, 5 (with `python -m pytest`) and 6. For activities.md, audit.md,
+  case-data.md, expressions.md and plans.md I ran no command as printed beyond `ventoux check` and
+  `ventoux promises`; every Python block in all ten guides parses (three use `...` inside a
+  mapping, as placeholders) and every `ventoux` import in them resolves from the installed wheel
+  and is in `public.json`.
+
+### Unproven
+
+- D82 says the wheel "never holds tests, examples, docs, scripts ...". The wheel holds
+  `ventoux/conformance/examples/` (37 entries: definitions the suite's entries point at, such as
+  `examples/quickstart/packages/refund/case.json`). I read that as part of "the conformance
+  suite", which the wheel must hold, so I do not call it a finding; the sentence and the folder's
+  name disagree on their face, and the brief could say which it means.
+- Once, `ventoux activate` printed `pia activated loan 1 in staging` and then did not exit within
+  30 seconds. I could not reproduce it (the next activations exited in under a second), and my
+  worker was about to stop at that moment, so I cannot say what it waited on.
+- Whether README.md is the package's long description on the index (it would then say "There is
+  no code yet" on the package's page): I did not read `pyproject.toml` or the wheel's METADATA for
+  it.
+
+### Unchecked
+
+- The guides one by one, to the letter: with the budget cut, I ran the quickstart in full and the
+  guides' commands by kind, on my own package, not every example of cases.md (166 KB),
+  case-data.md, plans.md, expressions.md and activities.md. Plans on Temporal (`plan_worker`,
+  `start_plan`), `ventoux.testing.run_plan`, `check_workflow_contract`, forgetting, migration,
+  `retry_export`, `Resolvers`/`Viewer`, `ventoux simulate`, `ventoux summary`, `ventoux hashes
+  --lock`, `ventoux manifest publish` and `ventoux draft-sheet` were not exercised.
+- `ventoux doctor`: it takes no `--address` (`unrecognized arguments: --address
+  localhost:47233`), and I did not write a `[tool.ventoux.temporal]` section to point it at my
+  server on another port; the deployment guide says commands' `--address` "win over the
+  section's" in a sentence that names `activate`, `retire`, `environment`, `manifest publish` and
+  `advise`, not `doctor`, so this is not a disagreement.
+- Vault (`VaultKeys`) and a real cluster with mTLS: not available here.
+- A live model: no key was used; only the failures with no model, no extra and no drafts folder.
+- How a newcomer gets a Temporal server: no document says (finding 2's probe line). I used the
+  development server binary the Temporal SDK had cached under `/tmp`, on port 47233, and stopped
+  it when done.
 
 
 ---
