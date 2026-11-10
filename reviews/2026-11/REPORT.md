@@ -1,9 +1,9 @@
 # Whole-project review of Ventoux, November 2026
 
-**Status: all six passes are done,** and a further round is closing what they left unchecked:
+**Status: all six passes are done,** and a further round has closed three of the gaps they left:
 the in-memory findings were run on a Temporal worker (all eleven reproduce there; section 7a),
-and the decisions pass 6 did not check claim by claim are being checked (section 7b, to come).
-The summary is at the end of this page.
+the decisions pass 6 had not checked claim by claim were checked (212 claims, 211 agree;
+section 7b), and the heavy replay probes were run again. The summary is at the end of this page.
 
 - **A correction to the task's own numbers:** `tests/histories` holds 68 files, of which 34 are
   recorded histories and one a carried state; the other 33 are the key files beside them.
@@ -125,11 +125,16 @@ The summary is at the end of this page.
 | 6b.4 | Three quoted wordings are printed slightly otherwise: D55's "Looser:", D74's `closed by its parent: …`, and D50's `same behaviour as refund 2`, which is said only for a revert to an older release. |
 | 4.7 | Small bounds nobody tests: a form number may be an infinite decimal, an option or attachment may be the empty text, and four more. |
 | 4.8 | Three rules on Temporal survive their own test files: the forget request's identifier check, the hold at exactly 256 KB, and a boolean read as a carried time. |
+| 7b.1 | `ventoux check` ends in a traceback and leaves an empty `case.json` when a builder condition holds a text that can't be written (a lone surrogate), where D58 says a value that doesn't read back the same is refused. |
+| 7b.2 | On one moment, a later rule's `stop` acts before an earlier rule's `start`, and no document says so: D38's "admission runs again after" allows it, D45's "decides at once" reads the other way. |
+| 7b.3 | A rule's reading writes "stop pay", the words D45 gives as the reading to avoid; what the engine does is said only in the fine print beside it. |
 
-### Where the brief reads against itself (found in pass 1; proposals only)
+### Where the brief reads against itself (proposals only)
 
 - D32 says "every form value in the answers people sent" goes with forgetting, while D76 keeps a
   non-sensitive form value in clear in the state and the audit store (pass 1, part c).
+- D60 (and D1's added line) say the schemas are at `schema/case.schema.json`; D82 moves them to
+  `src/ventoux/schema/`, which the code follows, and D60 carries no line saying D82 amends it (7b).
 - D74 adds the step kind `case`, and the glossary and "Simplifications adopted" still list four
   kinds (finding 6.2.1).
 - D74 says a parent's close "closes the child through D40's one place", while D17, D26 and D40 say
@@ -4453,8 +4458,8 @@ one finding seen from two passes):
 | Breaks a promise | 21 |
 | Weakens a promise | 18 |
 | Misleads | 15 |
-| Minor | 19 |
-| **All** | **73** |
+| Minor | 22 |
+| **All** | **76** |
 
 **The three that matter most.**
 
@@ -4506,9 +4511,11 @@ passing (4.1, 4.2, 4.4).
 - **Pass 5:** not every example in `cases.md`, `case-data.md`, `plans.md`, `expressions.md` and
   `activities.md` was run; forgetting, a migration, plans on Temporal, `simulate`, `summary` and
   `draft-sheet` were not followed from the guides.
-- **Pass 6:** D35 to D40, D42, D43, D48, D49, D53, D54, D58, D65, D75 and D79 were not checked
-  claim by claim; D77's ten attempts, five minutes and 256 KB were read in the code and not seen
-  in a run.
+- **Pass 6:** the decisions first left out (D35 to D40, D42, D43, D48, D49, D53, D54, D58, D65,
+  D75, D79) were since checked claim by claim (section 7b). Still not seen in a run: D77's ten
+  attempts, five minutes and 256 KB (read in the code only); D54's registry being unreachable
+  and its own continue-as-new; D75's daily check of open children and a child ending without
+  ringing; D53's preview as a query on a server.
 - **The TypeScript evaluator** D20 speaks of is not in this repository.
 - Each pass's own "Unproven" and "Unchecked" sections, above, say the rest.
 
