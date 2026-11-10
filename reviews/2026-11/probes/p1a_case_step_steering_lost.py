@@ -11,7 +11,7 @@ from typing import Any
 
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, run_case
+from ventoux.testing import CATALOG, later, run_case
 
 LETTER = {"to_customer": {"var": "email"}, "template": "t"}  # to_customer is trusted_only()
 PLAN = {
@@ -132,6 +132,50 @@ for kind in ("plan", "case"):
         ),
     }
 
+# A second way in: a rule starts the case step on the customer's word, the child stays open (a
+# task waits in it), and a timer set on the step's start fires a day later (D39, D44).
+OPEN_CHILD = copy.deepcopy(CHILD)
+OPEN_CHILD["steps"]["sign"] = {
+    "kind": "task",
+    "display": {"title": "Sign"},
+    "roles": ["support"],
+    "outcomes": {"signed": {"display": {"title": "Signed"}}},
+}
+by_rule = parent("case")
+del by_rule["steps"]["write"]["when"], by_rule["rules"]["begin"], by_rule["rules"]["mark"]
+by_rule["steps"]["write"]["automatic"] = False
+by_rule["rules"] = {
+    "start_write": {
+        "display": {"title": "Start"},
+        "on": "opened",
+        "when": {"==": [{"var": "note"}, "go"]},
+        "then": {"start": ["write"]},
+    },
+    "chase": {
+        "display": {"title": "Chase"},
+        "on": {"after": "1d", "since": {"started": "write"}},
+        "then": {"reach": ["began"]},
+    },
+}
+issues = validate_case(parse_case(copy.deepcopy(by_rule)), CATALOG, cases={"write@1": OPEN_CHILD})
+run = run_case(
+    by_rule,
+    file=FILE,
+    answers=[later("2d")],
+    people={"ana": ["support"]},
+    cases={"write@1": OPEN_CHILD},
+    case_answers={},
+)
+print("\n=== a rule starts the case step on the note; a timer is set on its start")
+print("check:")
+for issue in issues:
+    print(f"   {issue.severity} {issue.code} {issue.path}")
+print("history:")
+for line in run.history[1:]:
+    print("   ", line)
+print("milestones:", sorted(run.state.milestones))
+timer_reached = "began" in run.state.milestones
+
 control, case = seen["plan"], seen["case"]
 broken = []
 if not control["milestones"] and case["milestones"]:
@@ -144,6 +188,8 @@ if "untrusted:customer" not in case["sources"]["write.outcome"]:
     broken.append("write.outcome doesn't carry untrusted:customer")
 if "untrusted:customer" not in case["sources"]["seen"]:
     broken.append("a value set on its start doesn't carry untrusted:customer")
+if timer_reached:
+    broken.append("a timer set on a rule-started, steered case step's start reached a milestone")
 missing = control["errors"] - case["errors"]
 if missing:
     broken.append(f"the check is silent where it refuses the plan step: {sorted(missing)}")

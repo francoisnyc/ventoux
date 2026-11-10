@@ -128,6 +128,7 @@ runs = show("2. a rule on the steered start reaches a closes_when milestone (D43
 if "settled" not in runs[False].state.milestones and "settled" in runs[True].state.milestones:
     broken.append("a rule on a repeated step's steered start reaches a milestone")
 
+
 # The control's draft is refused by its input policy before it runs, so for 3 the control drafts
 # through a step whose input policy takes anything: swap to compare like with like.
 def requiring_loose(repeated: bool) -> dict[str, Any]:
