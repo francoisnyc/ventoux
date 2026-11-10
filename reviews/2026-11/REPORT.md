@@ -15,7 +15,8 @@ The summary is at the end of this page.
 - **Baseline:** `uv sync --locked`, then `uv run pytest -q -p no:cacheprovider`: `4694 passed, 3
   skipped in 326.29s`, before any probe was written.
 - **Every probe behind a finding or a "what held" claim has now been run twice,** once by the
-  reviewer who wrote it and once by the lead reviewer, the three heavy replay probes included.
+  reviewer who wrote it and once by the lead reviewer, the three heavy replay probes included. The exception is pass 4: of its 263 mutations, the
+  lead reviewer ran again the three behind findings 4.1, 4.2 and 4.4, against the whole suite.
 - **How to read a proof:** every finding names a probe under `reviews/2026-11/probes/`, run from
   the repository root with `uv run python reviews/2026-11/probes/<name>.py`. Each probe's first
   line says what it shows, and its last line is `RESULT: BROKEN - …` or `RESULT: HELD - …`. Each
