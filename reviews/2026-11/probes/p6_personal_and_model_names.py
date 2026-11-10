@@ -19,7 +19,11 @@ for name in files:
         text = open(name, encoding="utf-8").read()
     except (UnicodeDecodeError, IsADirectoryError):
         continue
-    hits = [m.group(0) for line in text.splitlines() for m in MODEL.finditer(line.replace("CLAUDE.md", ""))]
+    hits = [
+        m.group(0)
+        for line in text.splitlines()
+        for m in MODEL.finditer(line.replace("CLAUDE.md", ""))
+    ]
     if hits and not name.startswith("tests/histories/"):  # a history's hit is ciphertext
         found += len(hits)
         print(f"  {name}: {len(hits)}")
@@ -31,10 +35,18 @@ sessions = len(re.findall(r"/code/session_", bodies))
 emails = git("log", "main", "--format=%ae").splitlines()
 personal = [e for e in emails if "noreply" not in e]
 print(f"commits on main: {total}")
-print(f"  with a Co-Authored-By line: {len(co)}, of which naming a model version: {len(with_model)}")
+print(
+    f"  with a Co-Authored-By line: {len(co)}, of which naming a model version: {len(with_model)}"
+)
 print(f"  with a session link: {sessions}")
-print(f"  distinct author identities: {len(set(emails))}; commits under an address that isn't a no-reply one: {len(personal)}")
+print(
+    f"  distinct author identities: {len(set(emails))}; commits under an address that isn't a no-reply one: {len(personal)}"
+)
 licence = open("LICENSE", encoding="utf-8").read().splitlines()[2]
-print(f"LICENSE names a copyright holder: {'yes' if licence.lower().startswith('copyright') else 'no'}")
+print(
+    f"LICENSE names a copyright holder: {'yes' if licence.lower().startswith('copyright') else 'no'}"
+)
 broken = found or with_model or personal
-print(f"RESULT: {'BROKEN' if broken else 'HELD'} - {found} mentions in files, {len(with_model)} commit messages naming a model version, {len(personal)} commits under a personal address")
+print(
+    f"RESULT: {'BROKEN' if broken else 'HELD'} - {found} mentions in files, {len(with_model)} commit messages naming a model version, {len(personal)} commits under a personal address"
+)

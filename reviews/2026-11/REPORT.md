@@ -1,8 +1,10 @@
 # Whole-project review of Ventoux, November 2026
 
-**Status: in progress.** Passes 1 and 3 are written below. Pass 2 was started before pass 3 and
-is still running (its section is added when it is done), as are passes 4 to 6; the summary at the
-end is written when all six are.
+**Status: in progress.** Passes 1, 2, 3 and 6 are written below. Passes 4 (test strength) and 5
+(an outsider's run) are still running; the summary at the end is written when all six are.
+
+- **A correction to the task's own numbers:** `tests/histories` holds 68 files, of which 34 are
+  recorded histories and one a carried state; the other 33 are the key files beside them.
 
 - **What was reviewed:** `main` at `3edb471` (layers 0 to 20 merged). The review branch
   `review-2026-11` adds files only under `reviews/2026-11/`; `git diff 3edb471 HEAD -- src tests
@@ -47,6 +49,7 @@ end is written when all six are.
 | 3.3 | A contract validator's own message is copied in clear into the history, the needs-attention line and the audit record, a sensitive field's value with it (D30, D31); shown on the in-memory engine. |
 | 3.2 | A `404` from any server is read as Vault's answer "never made", for good, and `ventoux doctor` says `keys.reachable` passed of a server that isn't Vault (D78, D81). |
 | 3.4 | A path that isn't there reads as nothing to compare, exit 0: `ventoux summary --packages`, `conformance --since`, `check` and `check --unchanged` (D55 as amended in 13e: "anything it can't read ... fails the step"; D59, D80). |
+| 2.1 | A migration the case refused, and recorded as refused, for an engine version its code didn't know is taken when a later worker replays the history: the refusal is decided from the code's own list on every replay, behind no engine version or patch (D51, D53, D76). |
 
 ### Weakens a promise
 
@@ -62,6 +65,8 @@ end is written when all six are.
 | 3.6 | A package file with a JSON key written twice is checked, released and run with the last one, nothing said; the authoring loop refuses the same from a model (D1, D59). |
 | 3.5 | `read_audit` hands a value in a stored shape it doesn't know to a reader without its roles, in clear (D77). |
 | 3.7 | A worker's manifest file and a release record ignore unknown keys and convert loosely: a misspelt `binds` binds nothing, `"development": "no"` reads as false (D54, D81). |
+| 2.4 | The 34 kept histories leave whole areas with none: no plan run, no timer, no child case or doorbell, no registry that continued as new, no case migrated to engine 3, nine signal types; and the tests that replay them check only that no error is raised, never what the replay rebuilds (D51). |
+| 2.2 | A request to forget stamps its audit records with the code's `ENGINE` constant, not with anything recorded: with the constant moved, a recorded request replays with no error and rebuilds records that say another engine version (D51, D76, D77). |
 
 ### Misleads
 
@@ -69,6 +74,12 @@ end is written when all six are.
 |---|---|
 | 1b.10 | An edit withdraws the approval a person's proposal waited for; nothing asks again, as D52 says each is, and no line says the proposal is over (D25, D52). |
 | 1c.13 | `report` says `open`, with no history, of a case refused at its opening whose workflow failed. |
+| 6.4.1 | `README.md` says "There is no code yet ... Nothing here is ready to use"; the repository holds 147 source files, 20 commands and a 0.1.0 changelog entry. |
+| 6.4.2 | `docs/QUICKSTART.md` says "none of it is built yet" and tells the reader to run `ventoux init`, `dev` and `start`, none of which is a command (principle 5; D13). |
+| 6.1.2 | D13 relies on `ventoux init`, which doesn't exist, and no dated line or out-of-scope entry says so. |
+| 6.1.1 | `ventoux version` prints a prefix (`https://ventoux.dev/schema/engine-3/`), not a schema's `$id` as D82 says, and `docs/guides/deployment.md` shows a one-line output the command never prints. |
+| 6.4.3 | `docs/guides/cases.md` gives the schema's `$id` as `engine-2`; the committed schemas, `ENGINE` and the conformance suite say 3 (D60). |
+| 6.2.1 | D74 adds a sixth kind of step (`case`) without saying it adds to the Simplifications' kinds or to D13, as D41 did for `wait`; the glossary's "Step" row still lists four. |
 
 ### Minor
 
@@ -80,11 +91,19 @@ end is written when all six are.
 | 3.8 | `ventoux doctor` says "each certificate in date" of a certificate that isn't valid yet (D81). |
 | 3.9 | A role registered twice takes the second `approves`, looser included, with no error (D22). |
 | 3.10 | An expression result too small for decimal128 is zero with no error, so `a * a > 0` is false for a tiny positive `a`; a result too large is an error (D20). |
+| 2.3 | A case workflow's class settings (`events_per_run`, `audit_bound`) decide where a recorded run switches or holds, and nothing records them: lowered, recorded runs no longer replay, failing closed with nothing naming the cause (D27, D77). |
+| 6.6.1 | 457 of `main`'s 574 commit messages name an AI model version, and 501 carry a session link (the review's rule on names; see also 6.6.2 and 6.6.3: three mentions of an AI coding product in tracked files, and 54 commits under an address that isn't a no-reply one). |
+| 6.4.4 | Guides and 11 docstrings still name "the Ventoux API" and "the inbox" as what the reader has; D79 re-reads decisions only. |
+| 6.4.5 | Two rows of "Promises" tables (layers 18 and 20) name tests that no longer exist. |
+| 6.2.2 | The glossary's "Catalog" row lists resolvers, which D30 puts in `tooling`, and omits systems, option checks and document stores. |
+| 6.2.3 | The brief's status line says "decisions D1–D26"; it holds D1 to D83. |
 
 ### Where the brief reads against itself (found in pass 1; proposals only)
 
 - D32 says "every form value in the answers people sent" goes with forgetting, while D76 keeps a
   non-sensitive form value in clear in the state and the audit store (pass 1, part c).
+- D74 adds the step kind `case`, and the glossary and "Simplifications adopted" still list four
+  kinds (finding 6.2.1).
 - D74 says a parent's close "closes the child through D40's one place", while D17, D26 and D40 say
   a failed run is never cancelled by a milestone or stopped by a rule (finding 1b.6).
 
@@ -1527,6 +1546,328 @@ start names no parent.
 
 ---
 
+## Pass 2: replay
+
+Source reviewed: 3edb471 (probes ran with the tree at 9b92c1a on `review-2026-11`, which adds only
+files under reviews/). Every probe is run from the repository root with
+`uv run python reviews/2026-11/probes/<name>.py`. Shared, not probes themselves: `p2_harness.py`,
+`p2_fixtures.py`, `p2_time_classes.py`, `p2_seed_plugin.py`, `p2_capture_plugin.py`.
+
+How the comparing is done (p2_harness.py). A replay that raises nothing proves little, so during
+each replay an interceptor records what the workflow code hands to Temporal: each activity's
+input, timeouts and retry policy, each child workflow's start, each signal sent, each timer, each
+Update's answer, and the result or the next run's start. The same is read from the history's
+events, and both are compared as the exact JSON text Ventoux's converter writes (key order and
+number spelling included, sensitive parts opened with the fixture's key). The workflow's state at
+the end of the replay (its `report`, and for a case the whole state as `state_as_data` gives it)
+is read too. This reaches past the supported names into the SDK's `_WorkflowInstanceImpl`.
+
+### Findings
+
+#### 2.1 A migration the case refused for an engine version its code didn't know is taken when a later worker replays the history (breaks a promise)
+
+Whether a proposed migration's engine version is acceptable is decided from the code's own lists
+(`KNOWN` in `case/migrations.py`, `KNOWN`/`OPENING` in `refuse_an_engine_not_opened`,
+`temporal/cases.py`), on every decision, replays included. Nothing in the history records which
+versions the deciding code knew. So a refusal recorded by a worker that knew engines 2 and 1
+becomes an acceptance when a worker that knows 3 replays the same run: the request the case said
+it refused is open (`case.change#1`), and an answer the case recorded as refused ("case.change#1
+isn't open") approves it. The case moves to another release and engine, withdraws an approval and
+asks for an audit export, with no replay error where the history ends there.
+
+The scenario is the one the refusal exists for: a client built with the newer engine proposes
+while the workers still run the older one; then the workers are upgraded.
+
+Promises touched:
+- D51: "From this decision on, a change that decides a recorded path differently is the next
+  version: its old branch kept behind the case's version, a fixture recorded under the old version
+  that replays, and a line here."
+- D53: "The engine version moves forward only, as data in the request, sent by the proposer's
+  client; a version the code doesn't know, or one older than the case's, is refused."
+- D76 (19a's review): "until then no case moves to version 3 on Temporal either: a migration there
+  is refused when proposed".
+- The code's own comment (`refuse_an_engine_not_opened`): "Checked at the proposal only: a request
+  reaches a case no other way, and code that didn't know the version refused it there too." True
+  of a new proposal; not of the recorded one, which is decided again on replay.
+
+Proof 1 (time travel; recorded by the code at dc2407e, `KNOWN = (2, 1)`, on the tests'
+time-skipping server; replayed by that code and by today's). Commit 9b92c1a.
+`uv run python reviews/2026-11/probes/p2_refused_engine_resurrects.py`:
+
+```
+History A (ends after the refused proposal), as the case reported it when recorded at dc2407e:
+    refused pia's proposal to migrate refund 2: engine 3 is one this code doesn't know (it knows 2, 1)
+    waiting at: ['pay.approval#1']
+  replayed by the code at dc2407e (knows engines [2, 1]):
+    replay error: none
+    waiting at: ['pay.approval#1']; release refund 1, engine 2; activities asked: []
+  replayed by today's code (knows engines [3, 2, 1]):
+    replay error: none
+    waiting at: ['pay.approval#1', 'case.change#1']; release refund 1, engine 2; activities asked: []
+    pia proposed case.change#1: migrate to refund 2, to be approved by platform
+History B (goes on: lee's approval of case.change#1, refused too) ...
+    refused lee's answer approve to case.change#1: case.change#1 isn't open
+  replayed by today's code (knows engines [3, 2, 1]):
+    replay error: none
+    waiting at: ['fraud_check#1']; release refund 2, engine 3; activities asked: ['ventoux.audit.append']
+    applied case.change#1: migrated from refund 1, engine 2 to refund 2, engine 3, proposed by pia, approved by lee
+    withdrew pay.approval#1: refund 2 changed pay
+RESULT: BROKEN - a migration the case refused and recorded as refused is taken when today's code replays the history ...
+```
+
+Proof 2 (the repository's own scenario of the 19a window). The test
+`test_a_case_moves_on_temporal_only_to_an_engine_it_opens_cases_at` records a run with `OPENING`
+set to `(2, 1)`: a proposal to engine 3 refused, then lee's answer refused. The test never
+replays that run. Recorded by the code at 7913429 and replayed with today's code
+(`uv run python reviews/2026-11/probes/p2_old_recordings.py 7913429`), it is the one history of
+403 that today's code does not rebuild:
+
+```
+REFUSED tests/test_temporal_migrations.py::test_a_case_moves_on_temporal_only_to_an_engine_it_opens_cases_at refund-1 (ventoux.case, 9426ea3b): NondeterminismError: ... Activity machine does not handle this event: HistoryEvent(id: 30, WorkflowExecutionContinuedAsNew)
+step 2, with today's code: {'equal': 383, 'its case was forgotten: no key, no replay (brief, D32)': 17, 'REFUSED by Temporal on replay': 1, 'no class to replay with': 2}
+```
+
+Here Temporal does refuse (the run went on to continue as new), so the case waits; in proof 1 it
+does not, because nothing recorded follows the changed decision.
+
+The same will happen at the next engine version, for every case that recorded such a refusal.
+`problems` in `checked_migration` also reads the worker's catalog ("which this worker's catalog
+doesn't have"): a refusal for a missing contract is decided again the same way once the contract
+is deployed (not run; see Unproven).
+
+Proposed fix, in words: make what the worker knew part of the history. Either fail the workflow
+task for a proposal naming a version the code doesn't know or doesn't open at (the case waits for
+code, as D51 does for its own version, and the proposal is decided once, by code that knows it);
+or decide "known" behind a patch marker per version asked when a migration to it is proposed, so
+a history without the marker replays the refusal. Add a fixture: a refusal recorded under the old
+code, replayed by the new, compared by state.
+
+#### 2.2 A request to forget stamps its audit records with the code's `ENGINE`, not with anything recorded (weakens)
+
+`ForgetWorkflow.record` builds each record with the module constant `ENGINE`
+(`temporal/forget.py`, `AuditRecord(self.recorded, at, None, ENGINE, ...)`). It holds today
+because `ENGINE` has been 3 since the request began writing records. Once a fourth version exists,
+a request open across the upgrade rebuilds its unwritten records saying 4 where the first run
+made them saying 3, and nothing notices: Temporal compares a scheduled activity by type and ID,
+never by input.
+
+Promise touched: D76, "Each record carries its release and engine version (D51)"; D77, "The
+forget request's own stream ... is written behind the patch marker `ventoux-forget-export`"; D51,
+"The engine version is data in the case's state ... a replayed one at the version its history
+recorded".
+
+Proof (the fixture at_19b_forget_request, replayed with `ENGINE` set to 4 in memory only), commit
+9b92c1a. `uv run python reviews/2026-11/probes/p2_forget_record_engine_from_code.py`:
+
+```
+recorded in the history: each record's engine: [3, 3, 3, 3]
+replayed with ENGINE = 3: error None; engines [3, 3, 3, 3]
+replayed with ENGINE = 4: error None; engines [4, 4, 4, 4]
+RESULT: BROKEN - with the constant moved, the replay rebuilds records that say another engine version than the ones recorded, and nothing notices
+```
+
+Proposed fix: the request learns the version once, as a case does (a patch marker asked at its
+start, or a field of its start), and stamps records with that.
+
+#### 2.3 A case workflow's class settings decide where a recorded run switches or holds, and nothing records them (minor)
+
+`events_per_run` and `audit_bound` are read by the workflow code on every pass of the loop. The
+engine version is recorded; these are not. A deployment that lowers one replays every open run
+with the new value. It fails closed (Temporal refuses the replay and the case waits, D17), but
+nothing in the refusal names the setting, and neither the brief nor a guide says the setting must
+not change while cases are open (the code comments say only "A test's workflow lowers it").
+
+Promise touched: D27, "A count, never a clock, so replay switches at the same place".
+
+Proof, commit 9b92c1a. `uv run python reviews/2026-11/probes/p2_class_settings_decide_replay.py`:
+
+```
+before_12b_paid:
+  with the class that recorded it (DevelopmentCases): replays
+  with SwitchesSooner: NondeterminismError: ... Continue as new workflow machine does not handle this event: HistoryEvent(id: 13, ActivityTaskScheduled)
+at_19b_refund_export_retried:
+  with the class that recorded it (QuicklyFailingExports): replays
+  with HoldsSooner: NondeterminismError: ... Activity machine does not handle this event: HistoryEvent(id: 43, WorkflowExecutionCompleted)
+RESULT: BROKEN - 2 recorded runs no longer replay once a class setting is lowered ...
+```
+
+Proposed fix: say so where the settings are declared and in the operations guide (lowering either
+strands open runs until it is restored), or carry the value in the run's start as the engine
+version is carried.
+
+#### 2.4 The recorded fixtures leave whole workflow types and features with no kept history (weakens)
+
+tests/histories holds 35 files: 34 histories and one carried state (`before_11h2_carried.json`).
+Every file is loaded by a test. What no kept history exercises (read from the events of each
+file):
+- No history of type `ventoux.plan`: `PlanWorkflow` has none (the plan steps in three fixtures are
+  seen only from the case's side).
+- No `TIMER_STARTED` in any fixture: no timer (D44), no daily check of a child (D75).
+- No child case (D75): no `child_ended` doorbell, no `close_by_parent`, no `ventoux.child.read`.
+  The only replay of a child is of a history the test has just made with the same code
+  (`test_a_history_with_a_child_replays`), which cannot show a later change.
+- The registry: one history (`before_18d_registry`, 6 Updates), with no continue-as-new, no
+  `ventoux-registry-keeping` marker (D81's amendment has no fixture), and no
+  `ventoux.registry.ended` activity.
+- Engine 3: one case history (`at_19b_refund_export_retried`); no case migrated to engine 3; no
+  engine-3 run that continued as new with records unwritten.
+- Signals never in a fixture: `claim`, `give_back`, `assign`, `unassign`, `change`, `migrate`,
+  `shown`, `child_ended`, `close_by_parent`. No held option or attachment check (D67, D68), no
+  repeated step (D73).
+- The tests check "no error" only. Nothing compares what a replay rebuilds (finding 1's history A
+  and the fixture `before_fix_retry_rejected_retried` below both replay with no error and rebuild
+  another state).
+
+Present: engine 1 (many), engine 2 (`ventoux-engine-2`, 7 fixtures), `ventoux-registry` (1),
+`ventoux-forget-export` and `ventoux-forget-opener` (1), a state carried before 12b read as
+engine 1.
+
+Proof: the table under "What held", and for the rest
+`uv run python reviews/2026-11/probes/p2_old_recordings.py 7913429`, whose 403 fresh histories do
+hold these (45 plan runs, timers in 36 case runs, 57 child starts, 3 registry runs that continued
+as new) and replay: the gap is in what is kept, not in what replays today.
+
+Proposed fix: keep a few of those histories as fixtures at each merge (the probe's two plugins
+do it for any commit), and compare what a replay rebuilds, not only that it raises nothing.
+
+### What held
+
+**Job A: every recorded history, replayed and compared.**
+`uv run python reviews/2026-11/probes/p2_replay_every_history.py` (commit 9b92c1a; the same table
+under PYTHONHASHSEED 5 and 11). Columns: events; replay; how the recorded run ended; activities,
+children, signals, timers, updates as recorded/on replay; patch markers; verdict.
+
+```
+at_19b_forget_request                        ventoux.forget    79 ok      completed   8/8  0/0  1/1  0/0  0/0  forget-export,forget-opener EQUAL
+at_19b_refund_export_retried                 ventoux.case      43 ok      completed   3/3  0/0  0/0  0/0  0/0  engine-3 EQUAL
+before_11b_proposal                          ventoux.case      19 ok      completed   1/1  0/0  0/0  0/0  0/0  -        EQUAL
+before_11c_plan_closed                       ventoux.case      27 ok      completed   0/0  1/1  1/1  0/0  0/0  -        DIFFERENT
+before_11c_workflow_cancelled_outside        ventoux.case      43 ok      completed   1/1  2/2  0/0  0/0  0/0  -        EQUAL
+before_11c_workflow_closed                   ventoux.case      34 ok      completed   1/1  1/1  0/0  0/0  0/0  -        EQUAL
+before_11f_refund                            ventoux.case      23 ok      completed   1/1  0/0  0/0  0/0  0/0  -        EQUAL
+before_11f_switched                          ventoux.case      22 ok      completed   1/1  0/0  0/0  0/0  0/0  -        EQUAL
+before_11h2_approved                         ventoux.case      19 ok      completed   1/1  0/0  0/0  0/0  0/0  -        EQUAL
+before_11h2_carried                          no test replays this file as a history
+before_11h2_switched                         ventoux.case      15 ok      completed   1/1  0/0  0/0  0/0  0/0  -        EQUAL
+before_12b_paid                              ventoux.case      19 ok      completed   1/1  0/0  0/0  0/0  0/0  -        EQUAL
+before_12b_settled                           ventoux.case      18 ok      completed   0/0  1/1  0/0  0/0  0/0  -        EQUAL
+before_12b_switched                          ventoux.case      15 ok      completed   1/1  0/0  0/0  0/0  0/0  -        EQUAL
+before_12b_waiting                           ventoux.case       8 ok      open        0/0  0/0  0/0  0/0  0/0  -        EQUAL
+before_12c_forget_request                    ventoux.forget    29 ok      completed   3/3  0/0  1/1  0/0  0/0  -        EQUAL
+before_12c_forgotten_by_its_opener           ventoux.case       9 ok      completed   0/0  0/0  0/0  0/0  0/0  -        EQUAL
+before_12c_switched                          ventoux.case      15 ok      completed   1/1  0/0  0/0  0/0  0/0  -        EQUAL
+before_12c_waiting                           ventoux.case       8 ok      open        0/0  0/0  0/0  0/0  0/0  -        EQUAL
+before_12d_pending_edit_switched             ventoux.case       4 ok      open        0/0  0/0  0/0  0/0  0/0  -        EQUAL
+before_12d_released_open                     ventoux.case       9 ok      open        0/0  0/0  0/0  0/0  0/0  engine-2 EQUAL
+before_12d_released_waiting                  ventoux.case      13 ok      open        0/0  1/1  0/0  0/0  0/0  engine-2 EQUAL
+before_12e_closed                            ventoux.case      11 ok      completed   0/0  0/0  0/0  0/0  0/0  engine-2 EQUAL
+before_12e_draft_waiting                     ventoux.case      10 ok      open        0/0  0/0  0/0  0/0  0/0  engine-2 EQUAL
+before_12e_migrated_switched                 ventoux.case       4 ok      open        0/0  0/0  0/0  0/0  0/0  -        EQUAL
+before_12e_released_switched                 ventoux.case       4 ok      open        0/0  0/0  0/0  0/0  0/0  -        EQUAL
+before_12e_released_waiting                  ventoux.case      13 ok      open        0/0  0/0  0/0  0/0  0/0  engine-2 EQUAL
+before_18d_case_step_failed_switched         ventoux.case      11 ok      continued   0/0  0/0  0/0  0/0  0/0  engine-2 EQUAL
+before_18d_production_case                   ventoux.case      28 ok      completed   2/2  0/0  0/0  0/0  0/0  registry,engine-2 DIFFERENT
+before_18d_registry                          ventoux.registry  34 ok      open        0/0  0/0  0/0  0/0  6/6  -        EQUAL
+before_fix_retry_rejected                    ventoux.case      38 ok      completed   1/1  0/0  0/0  0/0  0/0  -        DIFFERENT
+before_fix_retry_rejected_retried            ventoux.case      48 ok      completed   1/1  0/0  0/0  0/0  0/0  -        DIFFERENT
+before_fix_retry_rejected_unapproved         ventoux.case      62 refused completed   1/2  0/0  0/0  0/0  0/0  -        n/a (refused, as its test expects)
+before_fix_untrusted_moment_closed           ventoux.case       6 refused completed   0/0  0/0  0/0  0/0  0/0  -        n/a (refused, as its test expects)
+before_fix_untrusted_moment_set              ventoux.case      17 ok      completed   0/0  0/0  0/0  0/0  0/0  -        DIFFERENT
+Differences in what the record holds:
+```
+
+Its RESULT line says BROKEN for the five DIFFERENT rows. Each is a recorded limit from before D51
+("Version 1 is the engine as merged at b734098 ... no old branch is kept for a path merged before
+it"), not a finding:
+- `before_11c_plan_closed`: the `stop` signal recorded with no input is sent on replay with
+  "the case is closing" (the test's comment says so; D28, D40).
+- `before_fix_retry_rejected`, `..._retried`: the result's history differs (`pay#2 won't run` then,
+  `pay#1 won't run ... needs attention again` now; in `_retried` 18 lines recorded, 20 on replay, a
+  retry refused then and taken now). D26's amendment records it ("may not replay").
+- `before_fix_untrusted_moment_set`: a `set` line names one more source on replay (D43, "Cases
+  already open on a path the fix decides differently replay differently").
+- `before_18d_production_case`: only the replayer's own task queue name in the registry's
+  question; not a difference of the code.
+The two "refused" rows are the two fixtures their tests expect Temporal to refuse.
+
+What could not be compared beyond "no error" from the history alone: the 10 open histories (no
+result recorded) and the registry's final state. For those the next probe asks the code that
+recorded them.
+
+**Each fixture rebuilt by the code that recorded it, against today's.**
+`uv run python reviews/2026-11/probes/p2_time_travel.py` (worktrees at b734098, 5801ca0, 66e2cff,
+2fde255, dc2407e, 43da6ca; 19 fixtures from 12b on): the report, the whole state as it would
+cross continue-as-new, and everything sent are the same value for value; today's code only adds
+fields (between 0 and 31). The full run was made before one comparison in the probe was corrected (an added `pinned` field in an activity input read as a difference for `before_18d_production_case`); that fixture was run again alone after the correction and is the same. So D52's "a history recorded under version 1 replays as version 1" and
+D51's fixture for each version hold by state, not only by no error.
+`RESULT: HELD - every history read rebuilds, with today's code, each value the code that recorded it rebuilt`.
+Not covered: the 14 fixtures from before 12b (their recording commits predate what the test
+comments name) and `before_12b_settled` (its class needs the test's plans).
+
+**Job B: fresh histories recorded by older merges, replayed today.**
+`p2_old_recordings.py <commit>` runs that commit's own Temporal tests in a worktree, keeps every
+history, and replays each with today's code and the test's own workflow class:
+- 7913429 (19b merged, engine 3): 403 histories; 383 equal, 17 forgotten (no key, D32), 2 with no
+  class, 1 refused (finding 1, proof 2).
+- dc2407e (18c merged, engine 2): 338 histories; 320 equal, 16 no key, 2 no class.
+  `RESULT: HELD`.
+- 2fde255 (12d merged, engine 2): 274 histories; 257 equal, 15 no key, 2 no class. `RESULT: HELD`.
+These include registries recorded before the `ventoux-registry-keeping` patch (their Updates'
+answers equal on replay, so D81's amendment holds), cases before the forget-export patch, plans,
+timers, children and switches. A history fetched while a workflow task was under way is compared
+only on what it recorded.
+
+What Temporal does not compare, seen in these runs: an activity's input, timeouts and retry
+policy, a signal's input, a result. Only the type and ID of a command are checked.
+
+**Job C: non-determinism.**
+- `uv run python reviews/2026-11/probes/p2_hash_seeds.py`: the 72 test files that start no server
+  (4,008 tests, 58,432 results of `decide`, `interpret` and the registry's requests) under
+  PYTHONHASHSEED 0 to 4: every state, history line, audit record, command and refusal the same,
+  in the same order. `RESULT: HELD`.
+- `... p2_hash_seeds.py --amplify 0 1 2 3`: the same with every registered role stated by whoever
+  acts and two more sources on every value, so each set has an order to leak: `RESULT: HELD`.
+  Control: with `role_that_counts` replaced in memory by a copy that forgets `sorted`
+  (`P2_SEED_CONTROL=1`), digests do differ between seeds, so the probe sees a leak when there is
+  one. Since digests match across processes, no memory address or clock reaches them either.
+- Read: `core` and `case` import no clock, randomness or I/O; no `lru_cache`, no module-level
+  mutable table; sets in the workflow classes (`starting`, `opened`) are used for membership
+  only; `state_as_data`, `record_as_data` and the child's ending sort every set they write.
+- A role's rights changed in the catalog under an open engine-3 case
+  (`p2_catalog_role_change_pays.py`): the replay does take an approval the case had refused and
+  asks for the payment, but the audit export that follows every decision makes Temporal refuse
+  the replay, so the case waits: `RESULT: HELD`. See Unproven for a case at engine 1 or 2.
+
+### Unproven
+
+- **A catalog change under an open case at engine 1 or 2.** What a role may approve, and which
+  roles and contracts exist, are read from the workflow class's catalog on every decision. At
+  engine 3 the export trips Temporal's check (above). A case at engine 1 or 2 exports nothing, so
+  a refused approval taken on replay would schedule the payment as the run's next command with
+  nothing recorded to contradict it. Not run: my live two-worker attempt on the test server did
+  not get the second worker to pick the task up within its bound. D22 says "a replay after
+  someone's roles changed would decide differently", and guards the person's roles only.
+- **A migration refused for a contract the worker's catalog lacked**, taken on replay once the
+  contract is deployed: same mechanism as finding 1, read in `checked_migration`, not run.
+- **A signal the old code had no handler for** (a newer client's `assign`, `retry_export`) is kept
+  unhandled by Temporal's SDK and decided, at its recorded place, when newer code replays. Read in
+  the SDK, not run.
+- **Pydantic's own messages in history lines** (`before_activity.py` quotes `e['msg']`): a
+  dependency upgrade would change a line's text on replay. Not run.
+
+### Unchecked
+
+- The plan interpreter under replay beyond the 45 plan histories recorded at 7913429 and those at
+  the two older commits (no finding; `core/interpreter.py` is unchanged since b734098).
+- A real Temporal cluster; only the SDK's Replayer and the tests' time-skipping server were used.
+- Older merges than 2fde255 for fresh recordings, and 3c2ad1a (19a merged) itself: the window of
+  finding 1 is shown through 7913429's test, not recorded at 3c2ad1a.
+- A git worktree at `scratchpad/wt4` (f79b0e5) is listed by `git worktree list`; it is not one of
+  mine and I left it. Mine were all removed.
+
+
+---
+
 ## Pass 3: fail closed, and secrets
 
 Every probe below was last run at commit `c2739ad` (the source under `src/` is unchanged since
@@ -1948,3 +2289,379 @@ record in D20 that a result below decimal128's range is zero, in both evaluators
   edit, migrate, forget, retry): only `role_that_counts` was read; the other passes cover people.
 - **`case/runtime.py`, `temporal/cases.py`, `case/flow.py`, `case/state.py`** were not swept line
   by line for defaults: see the tally.
+
+
+---
+
+## Pass 4: test strength
+
+Source commit 3edb471 (worktree at f79b0e5, which differs only under reviews/). Every mutation was
+run with `reviews/2026-11/probes/mutate.sh` in a detached worktree; the command lines are in
+`reviews/2026-11/probes/p4_mutations.sh` and the raw results in `reviews/2026-11/probes/p4_mutations.log`.
+
+### Findings (so far)
+
+Core: 60 mutations run against the 75 quick test files (2,622 tests, `-x`): 54 killed, 6 survived
+that set (core02 approver role not listed; core06 digest number/text; core22 infinite number fits;
+core23 empty option fits; core24 empty attachment fits; core35 a moment as a literal). Each is being
+re-run against the wider set before it is called a survivor. Case, temporal, tooling and authoring
+are running.
+
+
+---
+
+## Pass 6: the brief and the docs
+
+Probes ran at `9b92c1a` on branch `review-2026-11` (source `3edb471`; nothing under `src/`,
+`tests/`, `docs/` or `examples/` differs from it). Every probe is run from the repository root
+with `uv run python reviews/2026-11/probes/<name>.py`.
+
+Scope actually covered, said plainly: this pass was cut short by a usage limit and resumed on a
+tighter budget. The brief was read in full from line 1 to D34 (line 1100), then D59, D60, D74's
+head, D77, D79 to D83, "Simplifications adopted", the glossary, "Layers of the system", the
+non-negotiables and "Out of scope for v1.0". D35 to D58, D61 to D73, D75, D76 and D78 were only
+searched by phrase, not read. See "Unchecked".
+
+### Findings
+
+No finding here is a guarantee broken at runtime. All are documents that say something the code
+no longer does (*misleads*) or small disagreements (*minor*).
+
+#### 6.1 A decision the code doesn't follow
+
+##### 6.1.1 `ventoux version` does not print the schema's `$id`, and the deployment guide prints an output the command never gives (*misleads*)
+
+D82: "The package's version, the engine version (D51) and the schema's `$id` (D60) are three
+things; `ventoux version` says all three." D60: the `$id` is
+"`https://ventoux.dev/schema/engine-N/case.schema.json`". The command prints three lines, and the
+third is a prefix that is neither schema's `$id`. The deployment guide (`docs/guides/deployment.md`
+line 35) shows one line, comma-separated, ending in the full `$id`.
+
+```
+$ uv run python reviews/2026-11/probes/p6_guides_printed_output.py
+docs/guides/deployment.md: $ ventoux version
+  guide prints 1 line(s); the command printed 3
+    -ventoux 0.1.0, engine 3, schema https://ventoux.dev/schema/engine-3/case.schema.json
+    +ventoux 0.1.0
+...
+RESULT: BROKEN - 1 guide output(s) differ from what the command prints: docs/guides/deployment.md: `ventoux version`
+```
+
+Observed in full: `ventoux 0.1.0` / `engine 3` / `schema https://ventoux.dev/schema/engine-3/`.
+Probe: `reviews/2026-11/probes/p6_guides_printed_output.py`.
+Proposed fix: make the guide's block the three lines the command prints; and either print each
+schema's `$id` or have D82 gain a dated line saying the command prints the `$id`'s common prefix.
+
+##### 6.1.2 D13 names a command that does not exist: `ventoux init` (*misleads*)
+
+D13: "the quickstart and first guides use tasks and activities only, and `ventoux init` generates
+no plan." The quickstart builds on it ("`ventoux init` creates a `cases/` folder and a development
+catalog", "The catalog is named in your project's `pyproject.toml`, which `ventoux init` writes").
+The command line has twenty commands and `init` is not one; neither are the quickstart's
+`ventoux dev` and `ventoux start`. No dated line in D13, and no entry under "Out of scope for
+v1.0" or D79, says `init` is not built (D79 moves the inbox out, which covers `dev`'s "local
+inbox", but says nothing of `init` or `start`).
+
+```
+$ .venv/bin/ventoux init
+ventoux: error: argument command: invalid choice: 'init' (choose from 'check', 'schema', ...)
+$ uv run python reviews/2026-11/probes/p6_docs_describe_what_changed.py
+BRIEF.md D13
+  the document: `ventoux init` generates no plan
+  observed:     `init` is a command: False
+```
+
+Probe: `reviews/2026-11/probes/p6_docs_describe_what_changed.py`.
+Proposed fix: a dated line on D13 saying whether `ventoux init` is in v1.0 (and if not, how a
+project gets its `[tool.ventoux]` table); the quickstart follows (finding 4.2).
+
+#### 6.2 Two decisions that contradict each other
+
+##### 6.2.1 D74 adds a sixth kind of step without saying it adds to the list of kinds; the glossary's "Step" row still lists four (*misleads*)
+
+"Simplifications adopted": "**Kinds of step:** `activity` ..., `task` ..., `plan` ... and, per D6,
+`workflow`". The glossary: "Step | A unit of work in a case (an activity, a human task, a plan or
+a workflow) and when it may run". D41 added `wait` and said so: "a fifth kind of step ... (adds to
+the Simplifications' kinds of step, and to D13's choice among them". D74 adds
+"`{"kind": "case", ...}`"; its header lists "Adds to D10, D24, D25, D28, D29, D40, D48, D50, D51,
+D52 and D53" and names neither the Simplifications nor D13's "Which kind of step". The glossary
+gained "Child case" and "Package" rows, but its "Step" row was left at four kinds.
+
+```
+$ uv run python reviews/2026-11/probes/p6_docs_describe_what_changed.py
+BRIEF.md glossary, 'Step'
+  the document: | Step | A unit of work in a case (an activity, a human task, a plan or a workflow) and when it may run |
+  observed:     the published case schema reads these kinds of step: ['activity', 'case', 'plan', 'task', 'wait', 'workflow']
+```
+
+Proposed fix: a dated line under "Simplifications adopted" and on D13 naming `wait` (D41) and
+`case` (D74); the glossary row (a table, not a decision) updated to six kinds.
+
+##### 6.2.2 The glossary puts resolvers in the catalog; D30 puts them in `tooling`, and the catalog holds none (*minor*)
+
+Glossary: "Catalog | What a deployment allows, never where it runs: activity and workflow
+contracts, resolvers, roles and source labels". D30: "**Resolvers** are functions registered per
+system in `tooling`". The `Catalog` class has no resolver, and does hold three things the row
+leaves out (systems, D30; option checks, D67; document stores, D68), which D80's own list of what
+the catalog holds includes.
+
+```
+BRIEF.md glossary, 'Catalog'
+  observed:     Catalog's public names: ['assigners', ..., 'register_document_store', 'register_label',
+  'register_option_check', 'register_role', 'register_system', 'roles', 'systems', 'workflow'];
+  resolvers are registered in tooling/resolvers.py (exists: True)
+```
+
+Probe: `p6_docs_describe_what_changed.py`. Proposed fix: the row reads as D80 lists it, without
+resolvers.
+
+##### 6.2.3 The brief's status line says "decisions D1–D26" (*minor*)
+
+Line 3: "Status: draft, 2026-10-09; decisions D1–D26 (D3 superseded by D20)." The brief holds D1
+to D83, the last dated 2026-11-10 (probe output above, first check). Proposed fix: the line states
+no range, or is updated with each decision.
+
+#### 6.3 An amendment that leaves its decision untrue
+
+None proven beyond 1.2. The phrases "to come", "not built", "comes later", "for now", "until
+then", "until layer", "not yet" and "unbuilt" were searched in the whole brief (39 lines) and each
+read: every one is either still true (for example D11 "shown as blocked" stays unbuilt; D28 a
+plan's waits listed in the case's `waiting_for`), or names the layer or decision that later built
+it, and that decision says so (D7's `four_eyes` "(D47, to come)" then D47; D29's `cancellable`
+"comes with the first thing that stops a running step" then D40; D33's timers then D44; D50 and
+D55 "until `ventoux check` brings the deployment's (layer 14)" then D59, whose `--catalog` every
+listed command takes, checked by a run; D76's "opens new cases at 2" then D77, `ENGINE = 3`).
+See "What held".
+
+#### 6.4 A guide, README, quickstart, changelog or curriculum that describes what was later changed
+
+All from `reviews/2026-11/probes/p6_docs_describe_what_changed.py` unless said.
+
+##### 6.4.1 README.md says there is no code (*misleads*)
+
+"## Status — Design stage. There is no code yet: Ventoux is being built in Python, one layer at a
+time, starting from the design documents below. Nothing here is ready to use." Observed:
+`src/ventoux` holds 147 Python files, `ventoux` has 20 commands, and `CHANGELOG.md` describes
+release 0.1.0. The same README's "Read" list calls the quickstart "written before the code" and
+lists one guide of ten. This is the page a published package's readers see first.
+Proposed fix: the status says layers 0 to 20 are built, 0.1.0 is not yet released, and links the
+ten guides.
+
+##### 6.4.2 QUICKSTART.md says "none of it is built yet", and tells the reader to run three commands that don't exist (*misleads*)
+
+Banner: "**Design draft.** This page describes how Ventoux is meant to work; none of it is built
+yet." Its case is built and is the repository's acceptance test (`tests/test_quickstart.py` runs
+`examples/quickstart/cases/refund.py`; `.venv/bin/ventoux check --unchanged` in
+`examples/quickstart` prints "✓ refund is unchanged: packages/refund/ is what cases/refund.py
+writes", exit 0). But steps 1 and 4 run `ventoux init`, `ventoux dev` ("starts Ventoux in memory
+with a local inbox at http://localhost:8090") and `ventoux start`, none of which is a command
+(D79 moved the inbox after v1.0). `uv add ventoux` also assumes a published package (0.1.0 is
+"not yet released").
+
+```
+QUICKSTART.md, the banner and the commands it tells the reader to run
+  the document: 'none of it is built yet'; it runs `ventoux` ['check', 'dev', 'diff', 'import', 'init', 'map', 'start']
+  observed:     commands that exist: ['check', 'diff', 'map']; that don't: ['dev', 'init', 'start']
+```
+
+Proposed fix: the banner says which steps run today (2, 3, 5 and the diff) and which wait for
+what; step 4 is rewritten around what v1.0 ships (a test with `run_case`, or the trusted caller's
+client functions), or marked as after v1.0.
+
+##### 6.4.3 The cases guide gives the schema's `$id` as engine 2 (*misleads*)
+
+`docs/guides/cases.md` line 2505: "`https://ventoux.dev/schema/engine-2/case.schema.json` is the
+format engine version 2 reads." D77: "`ENGINE` is 3". The committed schema's `$id` is
+`https://ventoux.dev/schema/engine-3/case.schema.json`; `suite.json` says `"engine": 3`; the
+changelog says engine 3. A reader who validates against the guide's URL names a schema that is
+not the one shipped. Proposed fix: the guide says engine 3 (or says "engine-N" and points to
+`ventoux version`).
+
+##### 6.4.4 Guides and docstrings still name "the Ventoux API" and "the inbox" as what the reader has (*minor*)
+
+D79: "In v1.0 the trusted caller is the integrator's own service ... Ventoux ships no HTTP API and
+no inbox in v1.0". D79 tells the reader how to read earlier *decisions* ("read 'the trusted
+caller'"), but the guides are not decisions and were not changed: "the Ventoux API" appears 4
+times in `cases.md` (for example line 1115, "The Ventoux API, the only caller allowed to send
+events (brief, D19), states who sent it") and once in `plans.md`, 11 times in docstrings under
+`src/ventoux` (for example `temporal/client.py` line 46), and `case-data.md` and `activities.md`
+describe what "the inbox" does (uploads a file, asks a resolver) in the present tense. Only
+`cases.md` line 2699 and the deployment guide say "the trusted caller". Proposed fix: one sentence
+at the top of each guide, or a replacement of the term, as D79 did for the brief.
+
+##### 6.4.5 Two rows of "Promises" tables name tests that no longer exist (*minor*)
+
+CLAUDE.md: "each claim the note makes about behaviour ..., and the test that would fail if it
+weren't true." Of 503 distinct tests named in the Promises tables of layers 16 to 20, two are not
+defined anywhere in `tests/`:
+
+- `docs/layers/18-lifecycle.md`: "A child ending without reporting fails the step: ... and within
+  a day" names `test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day`; the test
+  is now `test_after_a_switch_a_child_terminated_unheard_is_noticed_at_the_next_check`
+  (`fix-child-switch-clock.md`).
+- `docs/layers/20-deployment.md`: "pydantic is bounded below the minor after the one the hashes
+  were made with" names `test_pydantic_is_bounded_to_the_minor_version_the_hashes_were_made_with`;
+  D83 changed the bound and the test is `test_pydantic_is_bounded_below_its_next_major_only`. That
+  row's promise itself is no longer true of `pyproject.toml` (`pydantic>=2.13.5,<3`).
+
+Proposed fix: a dated line under each table naming the test that replaced it (and, for layer 20,
+that D83 replaced the promise).
+
+#### 6.5 docs/LEARNING.md
+
+Exists (2,292 lines), untouched (`git status --short` shows nothing outside `reviews/`), not
+quoted and not answered anywhere in this pass.
+
+#### 6.6 The two scans: personal details and AI model names; dependency licences
+
+##### 6.6.1 Commit messages on `main` name AI model versions, and carry session links (*minor*; the review's own rule, not a decision of the brief)
+
+Of the 574 commits on `main`, 464 carry a `Co-Authored-By` line, 457 of them naming a model
+version, and 501 carry a link to a coding session. Commit history can't be changed without
+rewriting it, which the project's rules forbid, so this is recorded for whoever decides how the
+repository is shared: a squashed export, or a fresh history at v1.0, would be the two ways. The
+review's own commits on `review-2026-11` carry neither line.
+
+Proof (`uv run python reviews/2026-11/probes/p6_personal_and_model_names.py`, at `3edb471`'s
+history):
+
+```
+tracked files naming an AI product or model (the file name CLAUDE.md apart):
+  docs/layers/15-authoring.md: 2
+  docs/layers/fix-flaky-temporal.md: 1
+commits on main: 574
+  with a Co-Authored-By line: 464, of which naming a model version: 457
+  with a session link: 501
+  distinct author identities: 3; commits under an address that isn't a no-reply one: 54
+LICENSE names a copyright holder: yes
+RESULT: BROKEN - 3 mentions in files, 457 commit messages naming a model version, 54 commits under a personal address
+```
+
+##### 6.6.2 Three mentions of an AI coding product in tracked files (*minor*)
+
+`docs/layers/15-authoring.md` twice names an assistant's API reference as where the SDK's current
+interface would be checked, and `docs/layers/fix-flaky-temporal.md` once names a vendor's cloud
+containers as where a test failed. Neither is a model's name, and the file name `CLAUDE.md` and
+the provider D62 chooses (named in the brief, the code and `pyproject.toml`'s extra) are the
+project's own decisions, not counted. Proposed: reword the three lines to name what was done
+("the SDK's reference", "a container without IPv6"), in a pull request of the maintainer's.
+Same probe as 6.1.
+
+##### 6.6.3 Personal details: commit authorship and the licence's copyright line (*minor*)
+
+Fifty-four commits on `main` are authored under an address that isn't a no-reply one, and the
+commit authors and `LICENSE`'s copyright line name a person. A licence must name its holder, so
+that line is as it should be; the addresses in history are the same question as 6.1. No email
+address, private path or employer was found in any tracked file: the addresses in the guides are
+`example.com` and `evil.example`, and the two `/home/...` paths are CI's runner cache and a
+session's checkout path in two layer notes (`docs/layers/11-rules.md`, `12-research.md`), which
+name no person. Same probe as 6.1.
+
+### What held
+
+- **Licences** (`p6_licences.py`, by the lead reviewer): all 39 distributions `uv sync --locked`
+  installs declare a permissive licence, compatible with the project's MIT. The three runtime
+  dependencies are MIT (`pydantic`, `temporalio`) and Apache-2.0 or BSD-3-Clause (`cryptography`);
+  the optional `anthropic` extra is MIT; the only weak-copyleft one is `pathspec` (MPL 2.0), a
+  development-only dependency the wheel never carries. Declared metadata only: no licence text
+  was read.
+- **The version triple agrees.** `ENGINE = 3` (`src/ventoux/case/engine.py`), both schemas' `$id`
+  under `engine-3`, `suite.json` `"engine": 3`, `ventoux version` says `0.1.0` / `engine 3`,
+  `pyproject.toml` `version = "0.1.0"`, `CHANGELOG.md` "0.1.0 (not yet released) ... Engine
+  version 3". D60's "The engine stays at version 2" is a dated note about 14e, and D77 moves it
+  with the `$id`, as D60 says it must. (Commands in the session; `p6_docs_describe_what_changed.py`
+  check 7 prints the `$id` and `ENGINE`.)
+- **pydantic's bound.** D82's bullet says `<2.14`, its dated amendment by D83 says `<3`;
+  `pyproject.toml` has `pydantic>=2.13.5,<3`, `uv.lock` resolves 2.14.3, inside the bound; the
+  test `test_pydantic_is_bounded_below_its_next_major_only` passes.
+- **Schemas' place.** D60 and D4 say `schema/` at the root; D82 moves them to
+  `src/ventoux/schema/`, saying so. No guide, README or CLAUDE.md names the old place
+  (grep; `schema/` at the root does not exist).
+- **D59:** "Every command that reads contracts or roles takes it: `check`, `release`, `summary`,
+  `diff`, `map`, `notes`, `simulate`, `promises` and `hashes`": each one's `--help` shows
+  `--catalog` (so do `draft` and `draft-sheet`).
+- **D63:** `ventoux draft --help` says `--rounds ROUNDS  at most this many, 1 to 5 (3)`.
+- **D7 as amended by D58:** no guide, README or quickstart uses `unless=` or `only_if=`.
+- **D21:** "sink policy" appears exactly once in the guides, in the activities guide (line 124);
+  zero times in `src/ventoux`.
+- **Guides' printed outputs:** `ventoux map examples/packages/refund` (48 lines), `ventoux
+  simulate examples/refund/stories/nobody-reviews.json` (44 lines) and the first `ventoux release`
+  line with its digest `89420f53b3d3` are, line for line, what the commands print
+  (`p6_guides_printed_output.py`).
+- **Relative links and paths:** all 13 relative Markdown links in the README files, changelog,
+  quickstart, curriculum and guides resolve (`p6_relative_links.py`, HELD). Every backticked
+  repository path in those files and CLAUDE.md exists, except `tests/test_refund.py` (a file the
+  quickstart tells the reader to create) and the curriculum's "Reference" paths, which point into
+  the prototype by design.
+- **CLAUDE.md, "Tracer code is temporary":** no `# TRACER:` marker remains in `src/`,
+  `examples/` or `scripts/` (only `tests/test_tracer.py`, which tests the rule).
+- **CLAUDE.md, strict typing and lint:** `uv run mypy` gives "Success: no issues found in 286
+  source files"; `uv run ruff check --exclude reviews` "All checks passed!"; `uv run ruff format
+  --check --exclude reviews` "291 files already formatted".
+- **CLAUDE.md, "Decisions in the brief are never renumbered or rewritten":** across the 45 commits
+  on main's first-parent line that touch the brief, no decision's heading changed and no sentence
+  of a decision that had reached main was later removed or reworded (`p6_decisions_rewritten.py`,
+  HELD, all 83 decisions). A second pass over all 69 non-merge commits found 21 rewordings, each
+  inside the pull request that introduced the text, before it reached main (the brief's own
+  "before D25 was merged" practice).
+- **CLAUDE.md, citations:** of 2,055 "(brief, Dn)" citations in `src/ventoux`, every number from
+  D1 to D83 that is cited exists; 45 drawn at random were read against their decision and none
+  names a decision about something else.
+- **Promises tables, layers 16 to 20:** 552 rows name 503 distinct tests; 501 exist. Ten drawn at
+  random, plus the pydantic one, were run: `11 passed`. Two were read for whether they would fail
+  if the promise weren't true (`test_the_committed_suite_names_the_engine_it_describes` asserts
+  `COMMITTED.engine == ENGINE`; `test_a_carried_date_that_isnt_a_day_is_refused` changes the
+  carried value and expects the refusal's exact message): both would.
+- **Secrets in tracked files** (`p6_secrets_in_tracked_files.py`, HELD; 592 project files, counts
+  and names only): no private-key or certificate block with a body, no provider-style key, no
+  cloud or forge token, no authorization header value. Three `BEGIN PRIVATE KEY` markers with no
+  body (`tests/doctor_broken.py`, `tests/test_connecting.py`, `tests/test_doctor.py`) and one
+  token-shaped constant (`tests/test_vault_keys.py`) are made-up values tests search for where a
+  secret must never appear. The one recording (`tests/recordings/advisor-goodwill.json`) holds
+  `provider`, `request.system`, `request.messages` and `answer` only: no key, no header (D62).
+  The 33 `tests/histories/*.keys.json` files hold 32 development keys for the development
+  provider and 2 entries marked destroyed: they let the committed histories, sealed under those
+  keys, replay. See "Unproven" for what the brief says of them.
+
+### Unproven
+
+- **Committed fixture keys are nowhere said to be acceptable.** D31 and D82 were searched for
+  `keys.json`, "fixture key" and "development key": D82 only keeps a key file out of the wheel;
+  only `docs/layers/20-deployment.md` mentions `keys.json` (the wheel's check). The keys protect
+  nothing but test fixtures, so this is a gap in what is written, not a leak; a sentence in the
+  deployment guide or D31 would close it. Not a finding because no text promises the contrary.
+- **`renamed()` in `src/ventoux/case/diff.py` cites "(brief, D53)"** for "a rename, never judged"
+  in the semantic diff. D53 is about a migration's renames; the diff is D55, and the word
+  "rename" does not occur in D55's text (grep). I did not read D55 in full, so I can't say the
+  rule is unrecorded or the number wrong.
+- **The 18-lifecycle promise "within a day"** after a switch: the renamed test says "at the next
+  check". I did not run it or read `fix-child-switch-clock.md` to see whether the bound itself
+  changed or only the name.
+- **README-draft.md** is described by the README as "It still describes the TypeScript
+  prototype", yet it holds v1.0 checklist lines written after D79 (lines 393 to 401). Not read in
+  full.
+
+### Unchecked
+
+- **Most of the decision-by-decision list in the task**, for lack of budget after the
+  interruption: D22's identifier spelling, D27's key format, D33/D44 ages, D47 `count` readings,
+  D50 exit codes and file names, D51's report wording, D55/D56 escaping, D62's key and base URL,
+  D64's six parts, D66, D68, D73, D77's bounds, D78's name encoding and timeout, D80's
+  `ISSUE_CODES` and `refused_first`, D81's exit codes and rule names against the deployment guide,
+  D82's wheel contents and `public.json` rule, D83's writer refusals. None was run. Several are
+  the subject of other passes.
+- **Decisions D35 to D58, D61 to D73, D75, D76, D78** were not read, only searched; so
+  contradictions between them (heading 2) are checked only for the candidates above.
+- **Guides other than the blocks run:** `cases.md` was not read by section; history lines quoted
+  in guides were not compared with a run, except the `simulate` story. `releases.md`'s second and
+  third `release` outputs, its `activate`, `environment check`, `retire`, `diff` and `summary`
+  blocks, the deployment guide's `doctor` block and `plans.md`'s `draft` blocks were not re-run
+  (several need a Temporal server or uncommitted input folders).
+- **BRIEF's non-negotiables against CLAUDE.md's**, line by line: read once, no contradiction seen
+  (CLAUDE.md spells `importlib`/`pickle` where the brief says "import or unpickle"), not probed.
+- **A note for the lead, not a project finding:** `uv run ruff check` and `uv run ruff format
+  --check` exactly as CI runs them (no `--exclude`) fail at this commit because of files under
+  `reviews/2026-11/probes/` ("Found 50 errors", "30 files would be reformatted"), and mypy's
+  `files` list doesn't include `reviews/`. If the review branch is merged as it is, CI's lint job
+  fails; either exclude `reviews/` in `pyproject.toml` (a project change, the maintainer's) or
+  format the probes.
