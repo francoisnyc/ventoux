@@ -675,15 +675,12 @@ def test_an_output_source_made_untrusted_is_stricter() -> None:
 def test_one_system_for_another_is_not_proven() -> None:
     # Neither is a proof: what each system says is trusted, and a policy may name one and not
     # the other (brief, D21).
+    # Named as @2's output is, so only the source differs.
+    class LookupOutputFromOrders(BaseModel):
+        status: Annotated[str, source("system:crm")]
+
     from_crm = lookup_2.model_validate(
-        dict(lookup_2)
-        | {
-            "version": 3,
-            # Named as @2's output is, so only the source differs.
-            "output": create_model(
-                "LookupOutputFromOrders", status=(Annotated[str, source("system:crm")], ...)
-            ),
-        }
+        dict(lookup_2) | {"version": 3, "output": LookupOutputFromOrders}
     )
     found = diff(
         packed(looking_up("orders.lookup@2")),

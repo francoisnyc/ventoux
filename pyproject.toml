@@ -8,9 +8,9 @@ license-files = ["LICENSE"]  # carried in the wheel, as the licence asks (brief,
 requires-python = ">=3.12"
 dependencies = [
     "cryptography>=50.0.2",
-    # Below the next minor: contracts hash from pydantic's JSON Schema, which 2.14 writes
-    # otherwise (brief, D82, as amended).
-    "pydantic>=2.13.5,<2.14",
+    # Below the next major only: contracts no longer hash from pydantic's JSON Schema, which
+    # changes between minor versions, but from Ventoux's own (brief, D83).
+    "pydantic>=2.13.5,<3",
     "temporalio>=1.34.0",
 ]
 
