@@ -50,7 +50,8 @@ def failing(inputs):
 
 runs = [
     run_case(FOUR, FILE, [REVIEW, ("pay", "approve", "sam"), ("pay", "approve", "lee")], PEOPLE),
-    run_case(FOUR, FILE, [REVIEW, ("pay", "approve", "sam"), ("pay", "reject", "lee"), close("duplicate", "ana")], PEOPLE),
+    run_case(FOUR, FILE, [REVIEW, ("pay", "approve", "sam"), ("pay", "reject", "lee")], PEOPLE),
+    run_case(FOUR, FILE, [close("duplicate", "ana")], PEOPLE),
     run_case(FOUR, FILE, [REVIEW, edit("approved_amount", Decimal(50), "bo"), ("case.change#1", "approve", "sam")], PEOPLE),
     run_case(json.loads(Path("examples/claim/claim.json").read_text(), parse_float=Decimal), {"claimed": Decimal(1)}, [later("6d"), ("assess", "done", "ada")], {"ada": ["adjuster"]}),
 ]
@@ -79,7 +80,7 @@ with tempfile.TemporaryDirectory() as temporary:
     kind, shown = attempt(lambda: store.append(written[2:3]))
     row("D77", "'a number whose previous one it doesn't hold is refused'", f"{kind}: {shown}", kind == "AuditRefused")
     other = copy.deepcopy(written[0])
-    other["at"] += 1
+    other["engine"] = 99
     kind, shown = attempt(lambda: store.append([other]))
     row("D77", "'other content ... is refused'", f"{kind}: {shown}", kind == "AuditRefused")
     kind, shown = attempt(lambda: store.append(written[:1]))
