@@ -90,7 +90,11 @@ What each part is for:
   `Decimal`, a `str`, a `bool` or a `date`. The catalog refuses any other type, such as a `float`.
   A field is its type, its marks (a policy, a reference, a source) and, if it is optional, `= None`:
   a description, a title, an alias, examples, a constraint such as `Field(gt=0)`, any other
-  default, or a `model_config` on the model is refused, since Ventoux couldn't write it exactly.
+  default, any other setting on a field (`frozen`, `exclude`, …), or a `model_config` on the
+  model is refused, since Ventoux couldn't write it exactly. So is a `RootModel` (its value is its
+  root alone, never an object holding it), and a model, or a base of it, that writes its own schema
+  (`__get_pydantic_json_schema__`, `__get_pydantic_core_schema__`): a contract's model is a
+  `BaseModel` with named fields.
 - **`risk`** (`low`, `medium`, `high`): how bad a mistake would be. High-risk steps need an approval
   on every path.
 - **`effect`** (`read`, `compute`, `write`, `notify`): what the activity does to the world. `read`

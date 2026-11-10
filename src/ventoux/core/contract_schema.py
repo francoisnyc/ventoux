@@ -12,7 +12,7 @@ from decimal import Decimal
 from types import NoneType, UnionType
 from typing import Any, Literal, Union, get_args, get_origin
 
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 from pydantic.fields import FieldInfo
 
 from ventoux.core.output_sources import OutputSource
@@ -34,6 +34,7 @@ class Unwritable(ValueError):
 def contract_schema(model: type[BaseModel]) -> dict[str, object]:
     """`model` as JSON Schema, as pydantic 2.13 wrote it. `Unwritable` if it holds anything a
     contract's field may not."""
+    refuse_what_it_isnt(model)
     if model.model_config:
         raise Unwritable(
             f"{model.__name__} sets model_config: a contract's model sets none. Remove it"
@@ -53,6 +54,31 @@ def contract_schema(model: type[BaseModel]) -> dict[str, object]:
     if model.__doc__:
         schema["description"] = inspect.cleandoc(model.__doc__)
     return schema
+
+
+# Pydantic's hooks by which a class writes its own schema: Ventoux writes a contract's, so none.
+HOOKS = ("__get_pydantic_json_schema__", "__get_pydantic_core_schema__")
+
+
+def refuse_what_it_isnt(model: type[BaseModel]) -> None:
+    """Refuse a model whose schema, as Ventoux writes it, would say what it isn't: a `RootModel`
+    (its value is its root alone, never an object holding it), or one that writes its own schema,
+    itself or through a base other than `BaseModel` (the hook wouldn't reach the hash) (tutor's
+    review of #98)."""
+    if issubclass(model, RootModel):
+        raise Unwritable(
+            f"{model.__name__} is a RootModel, whose value is its root alone, never an object "
+            "holding it: a contract's model is a BaseModel with named fields. Make it one"
+        )
+    for base in model.__mro__:
+        if base in (BaseModel, object):
+            continue  # pydantic's own: what Ventoux writes stands for them
+        for hook in HOOKS:
+            if hook in vars(base):  # defined on that class itself, never only inherited
+                raise Unwritable(
+                    f"{model.__name__} defines {hook} (in {base.__name__}): a contract's model "
+                    "writes no schema of its own; Ventoux writes it. Remove it"
+                )
 
 
 # A decimal is a number, or a text shaped like one, as pydantic 2.13 wrote it. Read left to right:
@@ -137,6 +163,10 @@ EXTRAS = {
     "discriminator": "a discriminator",
 }
 
+# What a contract's field may set, each read and checked here: its type, its default (`None`
+# only, below) and its marks. Anything else set is refused.
+MAY_SET = ("annotation", "default", "metadata")
+
 # The marks a contract's field may carry, each written by Ventoux: a policy (brief, D21), a
 # reference (brief, D30) and an output's source (brief, D29).
 MARKS = (Policy, Reference, OutputSource)
@@ -148,6 +178,15 @@ def refuse_extras(model: type[BaseModel], name: str, field: FieldInfo) -> None:
     for attribute, said in EXTRAS.items():
         if getattr(field, attribute) is not None:
             raise Unwritable(f"{where} has {said}: {A_FIELD}. Remove it")
+    # Fail closed: what a field may set is listed, never what it may not, so a setting a later
+    # pydantic adds is refused too. A blank `FieldInfo` holds pydantic's defaults; its private
+    # attributes (`_…`) are its own bookkeeping (the tutor's review of #98).
+    blank = FieldInfo()
+    for attribute in FieldInfo.__slots__:
+        if attribute.startswith("_") or attribute in MAY_SET:
+            continue
+        if getattr(field, attribute) != getattr(blank, attribute):
+            raise Unwritable(f"{where} sets {attribute}: {A_FIELD}. Remove it")
     # Pydantic: a field with no default holds `PydanticUndefined` (`is_required()` says so).
     if not field.is_required() and field.default is not None:
         raise Unwritable(f"{where} has a default other than None: {A_FIELD}. Remove it")

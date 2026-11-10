@@ -293,6 +293,65 @@
       "properties": {},
       "title": "Empty",
       "type": "object"
+    },
+    "Twice": {
+      "properties": {
+        "checked": {
+          "title": "Checked",
+          "type": "string",
+          "x-input-policies": [
+            {
+              "kind": "trusted_only"
+            },
+            {
+              "kind": "only_from",
+              "systems": [
+                "opener",
+                "crm"
+              ]
+            }
+          ]
+        },
+        "class_": {
+          "title": "Class",
+          "type": "string"
+        },
+        "kind_": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "reversed_": {
+          "title": "Reversed",
+          "type": "string",
+          "x-input-policies": [
+            {
+              "kind": "only_from",
+              "systems": [
+                "opener",
+                "crm"
+              ]
+            },
+            {
+              "kind": "trusted_only"
+            }
+          ]
+        }
+      },
+      "required": [
+        "checked",
+        "reversed_",
+        "class_"
+      ],
+      "title": "Twice",
+      "type": "object"
     }
   }
 }

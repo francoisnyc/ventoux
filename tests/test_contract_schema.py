@@ -10,7 +10,17 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetCoreSchemaHandler,
+    GetJsonSchemaHandler,
+    RootModel,
+    ValidationError,
+)
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.contract_schema import Unwritable, contract_schema
@@ -124,12 +134,136 @@ def test_anything_else_pydantic_would_write_is_refused(model: type[BaseModel], s
     assert f"orders.lookup@1: {said}" in str(refused.value)
 
 
+class Frozen(BaseModel):
+    order_id: str = Field(frozen=True)
+
+
+class Excluded(BaseModel):
+    order_id: str | None = Field(default=None, exclude=True)
+
+
+class ValidatedDefault(BaseModel):
+    order_id: str | None = Field(default=None, validate_default=True)
+
+
+@pytest.mark.parametrize(
+    ("model", "setting"),
+    [(Frozen, "frozen"), (Excluded, "exclude"), (ValidatedDefault, "validate_default")],
+)
+def test_any_other_setting_on_a_field_is_refused(model: type[BaseModel], setting: str) -> None:
+    # What a field may set is listed, never what it may not: a setting a later pydantic adds is
+    # refused too (fail closed) (the tutor's review of #98).
+    with pytest.raises(ValidationError) as refused:
+        lookup_with(model)
+    assert f"orders.lookup@1: input order_id ({model.__name__}) sets {setting}" in str(
+        refused.value
+    )
+
+
 def test_an_output_is_refused_the_same_way() -> None:
     class Described(BaseModel):
         status: Annotated[str, Field(description="the order's status")]
 
     with pytest.raises(ValidationError, match=r"output status \(Described\) has a description"):
         lookup_with(LookupInput, Described)
+
+
+# A model whose value isn't the object of its fields, or that writes its own schema: the promise
+# would say something it isn't (the tutor's review of #98).
+class Root(RootModel[str]):
+    pass
+
+
+class Hooked(BaseModel):
+    order_id: str
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        schema = handler(core_schema)
+        schema["x-mine"] = 1
+        return schema
+
+
+class CoreHooked(BaseModel):
+    order_id: str
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+        return handler(source)
+
+
+class WritesItsOwn(BaseModel):
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        return handler(core_schema)
+
+
+class InheritsAHook(WritesItsOwn):
+    order_id: str
+
+
+A_ROOT_MODEL = (
+    "Root is a RootModel, whose value is its root alone, never an object holding it: a "
+    "contract's model is a BaseModel with named fields. Make it one"
+)
+
+
+def writes_its_own(model: str, hook: str, where: str) -> str:
+    return (
+        f"{model} defines {hook} (in {where}): a contract's model writes no schema of its own; "
+        "Ventoux writes it. Remove it"
+    )
+
+
+@pytest.mark.parametrize(
+    ("side", "model", "said"),
+    [
+        ("input", Root, A_ROOT_MODEL),
+        ("output", Root, A_ROOT_MODEL),
+        ("input", Hooked, writes_its_own("Hooked", "__get_pydantic_json_schema__", "Hooked")),
+        ("output", Hooked, writes_its_own("Hooked", "__get_pydantic_json_schema__", "Hooked")),
+        (
+            "input",
+            CoreHooked,
+            writes_its_own("CoreHooked", "__get_pydantic_core_schema__", "CoreHooked"),
+        ),
+        (
+            "output",
+            CoreHooked,
+            writes_its_own("CoreHooked", "__get_pydantic_core_schema__", "CoreHooked"),
+        ),
+        (
+            "input",
+            InheritsAHook,
+            writes_its_own("InheritsAHook", "__get_pydantic_json_schema__", "WritesItsOwn"),
+        ),
+        (
+            "output",
+            InheritsAHook,
+            writes_its_own("InheritsAHook", "__get_pydantic_json_schema__", "WritesItsOwn"),
+        ),
+    ],
+    ids=[
+        "a RootModel input",
+        "a RootModel output",
+        "an input writing its own JSON Schema",
+        "an output writing its own JSON Schema",
+        "an input writing its own core schema",
+        "an output writing its own core schema",
+        "an input inheriting a hook",
+        "an output inheriting a hook",
+    ],
+)
+def test_a_model_that_isnt_what_its_schema_would_say_is_refused(
+    side: str, model: type[BaseModel], said: str
+) -> None:
+    with pytest.raises(ValidationError) as refused:
+        lookup_with(model) if side == "input" else lookup_with(LookupInput, model)
+    assert f"orders.lookup@1: {side} {said} (brief, D83)." in str(refused.value)
 
 
 # Every shape a contract's field may have (choice 2 of the note), each possibly optional and
@@ -187,7 +321,25 @@ class Empty(BaseModel):
     pass
 
 
-SHAPES: list[type[BaseModel]] = [Plain, Optional, Marked, Named, Documented, Inherited, Empty]
+class Twice(BaseModel):
+    # Two policies, in the order written: the order is in the hash. And names ending in `_`,
+    # whose titles pydantic strips (the tutor's review of #98).
+    checked: Annotated[str, trusted_only(), only_from("opener", "crm")]
+    reversed_: Annotated[str, only_from("opener", "crm"), trusted_only()]
+    class_: str
+    kind_: str | None = None
+
+
+SHAPES: list[type[BaseModel]] = [
+    Plain,
+    Optional,
+    Marked,
+    Named,
+    Documented,
+    Inherited,
+    Empty,
+    Twice,
+]
 
 
 @pytest.mark.parametrize("model", SHAPES, ids=lambda model: model.__name__)

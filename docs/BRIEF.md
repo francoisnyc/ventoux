@@ -3512,9 +3512,7 @@ whose key provider or audit store is for development, or that doesn't say, so th
   is written in `docs/guides/releasing-ventoux.md`; the tag and the publish are the maintainer's.
 
 *Amended 2026-11-10, by D83* (the text above stands; this changes the bound): contracts no longer
-hash from pydantic's rendering, so pydantic is bounded below its next major (`>=2.13.5,<3`). The
-finding's direction, as 20c wrote it, was the wrong way round: 2.13 writes a decimal field's
-string form with a `pattern`, and 2.14 drops it.
+hash from pydantic's rendering, so pydantic is bounded below its next major (`>=2.13.5,<3`).
 
 ### D83. A contract's promise is written by Ventoux, never by pydantic
 

@@ -166,6 +166,27 @@ Answer by number.
 - **One Temporal test failed once in the full run** (`test_forgetting_waits_for_a_workflow_step`,
   under load); it passes alone, with and without this change, and in the next full run.
 
+## From the tutor's review of #98
+
+- **Two kinds of model passed and were written as what they aren't:** a `RootModel`, written as an
+  object holding `root` although its value is the root alone (`{"root": "A-1"}` is refused, only
+  `"A-1"` accepted); and a model writing its own schema (`__get_pydantic_json_schema__`), whose
+  hook no longer reached the hash, so two versions of it hashed alike. Both are refused when the
+  contract is made, saying what to do; a hook is found on the model or any base of it but
+  `BaseModel` (`object` aside), defined there itself. Negative tests on input and output.
+- **What a field may set is listed, not what it may not:** `annotation`, `default` and `metadata`,
+  each checked; any other public attribute of pydantic's `FieldInfo` that differs from a blank
+  one is refused (`frozen`, `exclude` and `validate_default` today, and what a later pydantic
+  adds). Its private ones (`_…`) are pydantic's bookkeeping. The friendlier refusals
+  (`has an alias`) still come first.
+- **Two shapes recorded:** a field carrying two policies, in both orders (the order is in the
+  hash), and names ending in `_`, whose titles pydantic strips. Recorded on `main`, which still had
+  the marks' hooks and pydantic 2.13.5 in its lock, into `tests/rendering-2.13.json`; reversing the
+  policies or not stripping the title now fails.
+- **20c's note said its correction twice** once `main` was merged in: `main`'s last 20c commit had
+  fixed the sentence in place. Only the dated line's last sentence is kept; D83's amendment on D82
+  no longer speaks of the direction, which D82 never stated.
+
 ## Promises
 
 Each claim this note makes, and the test that fails if it isn't true. Each new test was seen
@@ -181,4 +202,8 @@ writer; the unknown types by taking the writer's refusals out.
 | The semantic diff doesn't read pydantic's rendering | `tests/test_diff.py::test_a_contracts_differences_dont_read_pydantics_rendering` |
 | No hash recorded so far changes | `tests/test_catalog.py::test_every_development_contract_matches_its_recorded_hash`, and the hash test above, both against `contracts.lock.json` unchanged |
 | The conformance catalog file doesn't change with pydantic | `ventoux conformance --unchanged`, in CI under 2.14.3 and in the package job's fresh install; `development.json` unchanged |
+| A `RootModel`, as input or output, is refused when the contract is made | `test_a_model_that_isnt_what_its_schema_would_say_is_refused` (a RootModel input, output) |
+| A model, or a base of it but `BaseModel`, writing its own schema is refused, input or output | the same test (its own JSON Schema, its own core schema, an inherited hook; input and output) |
+| Any setting on a field but its type, its default and its marks is refused | `test_any_other_setting_on_a_field_is_refused` (`frozen`, `exclude`, `validate_default`) |
+| Two policies are written in the order given, and a name's trailing `_` is stripped from its title, as 2.13.5 did | `test_each_shape_is_written_as_pydantic_2_13_wrote_it[Twice]` |
 | pydantic is bounded below its next major only | `tests/test_package.py::test_pydantic_is_bounded_below_its_next_major_only` |
