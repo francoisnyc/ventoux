@@ -32,6 +32,7 @@ def replay_all(captured: Path, tree: Path) -> None:
 
     sys.path[:0] = [str(tree / "tests"), str(tree / "examples" / "quickstart")]
     from p2_harness import compare, recorded, replayed, run
+    from temporalio.api.enums.v1 import EventType
     from temporalio.client import WorkflowHistory
 
     import ventoux
@@ -64,12 +65,32 @@ def replay_all(captured: Path, tree: Path) -> None:
             was = run(recorded(history, converter))
             now = run(replayed(history, [cases], converter))
         except Exception as error:  # noqa: BLE001
-            counts["could not be read"] += 1
-            print(f"UNREAD {label}: {type(error).__name__}: {str(error)[:300]}")
+            if "was destroyed when it was forgotten" in str(error) or "there is no key" in str(error):
+                counts["its case was forgotten: no key, no replay (brief, D32)"] += 1
+            else:
+                counts["could not be read"] += 1
+                print(f"UNREAD {label}: {type(error).__name__}: {str(error)[:300]}")
             continue
         said, _, _ = compare(was, now)
-        said = [line for line in said if "replay 'replay-" not in line]  # the replayer's own queue
-        if now["failure"]:
+        last = history.events[-1].event_type
+        mid_task = last in (
+            EventType.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED, EventType.EVENT_TYPE_WORKFLOW_TASK_STARTED
+        )
+        kept_lines = []
+        for line in said:
+            if "replay replay-" in line or "replay 'replay-" in line:
+                continue  # the replayer's own task queue, where the history says the worker's
+            if mid_task and " recorded, " in line and " on replay" in line:
+                # The history was fetched while a workflow task was under way: the replay runs
+                # that task, and what it asks for was never recorded. Not a difference.
+                few, many = (int(word) for word in line.split() if word.rstrip(",").isdigit())
+                if many > few:
+                    continue
+            kept_lines.append(line)
+        said = kept_lines
+        if now["failure"] and "was destroyed when it was forgotten" in now["failure"]:
+            counts["its case was forgotten: no key, no replay (brief, D32)"] += 1
+        elif now["failure"]:
             counts["REFUSED by Temporal on replay"] += 1
             print(f"REFUSED {label}: {now['failure'][:260]}")
         elif said:
@@ -87,7 +108,11 @@ def main() -> None:
     pattern = sys.argv[2] if len(sys.argv) > 2 else "test_temporal*.py"
     work = Path(tempfile.mkdtemp(prefix="p2-old-"))
     tree, captured = work / "tree", work / "captured"
-    captured.mkdir()
+    again = os.environ.get("P2_CAPTURED")  # histories an earlier run of step 1 kept: skip step 1
+    if again:
+        captured = Path(again)
+    else:
+        captured.mkdir()
     subprocess.run(
         ["git", "-C", str(REPOSITORY), "worktree", "add", "--detach", "-q", str(tree), commit],
         check=True,
@@ -97,13 +122,17 @@ def main() -> None:
         environment = dict(
             os.environ, P2_CAPTURE_DIR=str(captured), PYTHONPATH=f"{tree / 'src'}:{HERE}"
         )
-        ran = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p",
-             "p2_capture_plugin", *files],
-            cwd=tree, env=environment, capture_output=True, text=True, check=False,
-        )
-        print(f"step 1, at {commit}: {len(files)} test files: "
-              f"{(ran.stdout.strip().splitlines() or ['?'])[-1]}")
+        if again:
+            print(f"step 1, at {commit}: skipped; the histories kept in {captured} are used")
+        else:
+            ran = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p",
+                 "p2_capture_plugin", *files],
+                cwd=tree, env=environment, capture_output=True, text=True, check=False,
+            )
+            print(f"step 1, at {commit}: {len(files)} test files: "
+                  f"{(ran.stdout.strip().splitlines() or ['?'])[-1]}")
+            print(f"         kept in {captured} (P2_CAPTURED={captured} replays them again)")
         histories = [p for p in captured.glob("*.json") if not p.name.endswith(".keys.json")]
         print(f"         {len(histories)} histories recorded by the code at {commit}")
         environment = dict(os.environ, PYTHONPATH=f"{REPOSITORY / 'src'}:{HERE}")

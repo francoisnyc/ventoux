@@ -1,7 +1,8 @@
 # Whole-project review of Ventoux, November 2026
 
-**Status: in progress.** Pass 1 is written below. Passes 2 to 6 follow, each added when it is
-done; the summary at the end is written when all six are.
+**Status: in progress.** Passes 1 and 3 are written below. Pass 2 was started before pass 3 and
+is still running (its section is added when it is done), as are passes 4 to 6; the summary at the
+end is written when all six are.
 
 - **What was reviewed:** `main` at `3edb471` (layers 0 to 20 merged). The review branch
   `review-2026-11` adds files only under `reviews/2026-11/`; `git diff 3edb471 HEAD -- src tests
@@ -42,6 +43,10 @@ done; the summary at the end is written when all six are.
 | 1b.6 | A parent closing by `closes_when`, or a parent's rule stopping the case step, cancels a failed run inside the child with no person and no flag; the brief's texts pull against each other here (D17, D26, D40 against D74). |
 | 1b.3 | A child's reported field named `outcome` replaces `<step>.outcome` in the parent with a person's free text, which validation accepts and the step advisor is then sent (D61, D74). |
 | 1c.8 | A raw signal carrying `NaN` or `Infinity` makes the case's workflow task fail for good; needs a caller that signals with Temporal's client directly, which D79 forbids and Temporal doesn't prevent (D17). |
+| 3.1 | A `VAULT_TOKEN` ending with a line break is quoted in an error that is neither `KeyRefused` nor `KeyUnavailable`: it reaches the caller of `start_case`, Temporal's history and the worker's output (D31, D78). |
+| 3.3 | A contract validator's own message is copied in clear into the history, the needs-attention line and the audit record, a sensitive field's value with it (D30, D31); shown on the in-memory engine. |
+| 3.2 | A `404` from any server is read as Vault's answer "never made", for good, and `ventoux doctor` says `keys.reachable` passed of a server that isn't Vault (D78, D81). |
+| 3.4 | A path that isn't there reads as nothing to compare, exit 0: `ventoux summary --packages`, `conformance --since`, `check` and `check --unchanged` (D55 as amended in 13e: "anything it can't read ... fails the step"; D59, D80). |
 
 ### Weakens a promise
 
@@ -54,6 +59,9 @@ done; the summary at the end is written when all six are.
 | 1c.10 | A request to forget waits in silence, its look-up retried without end, when the case's start doesn't read as a case (D32). |
 | 1c.9 | Ten of 56 malformed raw signals are dropped with no line and no record (D41 as amended, D76). |
 | 1c.12 | An activity failure's `details` and its `ApplicationError` type cross Temporal unsealed, and the type lands in the case's own line (D31). |
+| 3.6 | A package file with a JSON key written twice is checked, released and run with the last one, nothing said; the authoring loop refuses the same from a model (D1, D59). |
+| 3.5 | `read_audit` hands a value in a stored shape it doesn't know to a reader without its roles, in clear (D77). |
+| 3.7 | A worker's manifest file and a release record ignore unknown keys and convert loosely: a misspelt `binds` binds nothing, `"development": "no"` reads as false (D54, D81). |
 
 ### Misleads
 
@@ -69,6 +77,9 @@ done; the summary at the end is written when all six are.
 | 1b.7 | Whoever's answer reaches the milestone a step requires approves that step; D39 records this on purpose, and nothing tells an author which of two equivalent definitions they wrote. |
 | 1b.11 | A retry stopped by a lapsed approval says "a new approval is needed", and no retry can ask for one when the change came from a task answered again (D23, D25). |
 | 1c.14 | A case with no parent closes on a raw `close_by_parent` signal, with any reason and nobody named. |
+| 3.8 | `ventoux doctor` says "each certificate in date" of a certificate that isn't valid yet (D81). |
+| 3.9 | A role registered twice takes the second `approves`, looser included, with no error (D22). |
+| 3.10 | An expression result too small for decimal128 is zero with no error, so `a * a > 0` is false for a tiny positive `a`; a result too large is an error (D20). |
 
 ### Where the brief reads against itself (found in pass 1; proposals only)
 
@@ -1512,3 +1523,428 @@ start names no parent.
   markers), not probed.
 - **Heartbeat details** of an integrator's activity: not probed; they are the author's payloads,
   as outputs are (see finding 12 for `details`).
+
+
+---
+
+## Pass 3: fail closed, and secrets
+
+Every probe below was last run at commit `c2739ad` (the source under `src/` is unchanged since
+`3edb471`; `git diff --quiet 3edb471 HEAD -- src` says so). Each is run from the repository root
+with `uv run python reviews/2026-11/probes/<name>.py`. Marker secrets in the probes are made up;
+their values are never printed here ("the marker").
+
+### Tally for Part A
+
+Sites listed by search over `src/ventoux` (every `except` and `suppress`; `.get(`, `getattr(`,
+`next(…, None)`, `setdefault`, `or <default>`, `is None:`; `all(`/`any(`), and how many I read in
+their function, not only on their line. The second and third numbers are approximate: I counted
+functions read, not lines.
+
+| Package | `except` sites listed | handlers read | defaults / `all`,`any` listed | read | suspicious | proven |
+|---|---|---|---|---|---|---|
+| core | 28 | 28 | 71 / 12 | about 40 | 3 | 2 (findings 3, 10) |
+| case | 61 | about 20 | 293 / 70 | about 45 (registry.py, activation.py, guards' role comparisons, runtime's output check, releases' reading) | 3 | 0 |
+| temporal | 45 | about 20 | 89 / 12 | about 35 (codec.py, converter.py, registry.py, logs.py whole) | 3 | 1 (finding 1, where it lands) |
+| tooling | 88 | 88 | 59 / 9 | all (cli.py, doctor.py, vault.py, audit.py, keys.py, summary.py, conformance.py, deployment.py, environments.py, probes.py, connecting.py, releases.py, draft_sheet.py whole) | 14 | 8 (findings 1, 2, 4, 5, 6, 7, 8, 9) |
+| authoring | 13 | 13 | 4 / 0 | all | 1 | 0 (held) |
+
+`model_config`: every Pydantic model in `src/ventoux` sets `extra="forbid"` (14 configurations
+over 10 base models; the contract models are refused a `model_config` and are checked field by
+field). The two places that read JSON without it are plain dataclasses behind a `TypeAdapter`
+(finding 7). The `case` and `temporal` packages are the least covered here: I read the parts named
+above and did not sweep `runtime.py`, `cases.py`, `flow.py` or `state.py` line by line.
+
+### Findings
+
+#### 3.1 A `VAULT_TOKEN` ending with a line break is quoted in an error, and reaches the caller, Temporal's history and the worker's output (breaks a promise)
+
+`Https.__call__` (`src/ventoux/tooling/vault.py`, lines 366 to 400) catches `HTTPError`, `URLError`,
+`TimeoutError`, `OSError` and `HTTPException`. A token that ends with a line break (a secret
+mounted from a file usually does) makes the standard library refuse the header with
+`ValueError("Invalid header value b'<the token>\n'")`, which none of those catch. The error is
+neither `KeyRefused` nor `KeyUnavailable`, and its text is the token. From there: `start_case`
+raises it to the trusted caller; on a worker, the codec raises it while a workflow task's commands
+are encoded, the SDK writes `Failed encoding completion: <the error>` as the workflow task's
+failure (not through the failure converter, so it isn't sealed), Temporal stores it in the case's
+history on every retry, and the SDK's core prints it on the worker's standard error, which the
+log filter of `src/ventoux/temporal/logs.py` doesn't see. In some runs the Python logger
+`temporalio.activity` holds it too (`Exception handling failed, original error: …`, from the audit
+export activity).
+
+Promises touched. D78: "The token is read from `VAULT_TOKEN` as each call is made, never kept on
+the object, never said in a message, a log, a `repr` or a recording (D62)". D78: "**Two kinds of
+error, never an empty value or a guess**". D81: "no output of doctor's, a failure included, holds a
+secret's value" (doctor itself held: it says `met ValueError`).
+
+Proof, at `c2739ad` (marker masked):
+
+```
+$ uv run python reviews/2026-11/probes/p3_vault_token_in_errors.py
+VaultKeys.state raised ValueError: "Invalid header value b'<THE MARKER>\\n'"
+  the token is in the error's text: True
+start_case raised ValueError to the caller; the token is in its text: True
+… WARN temporalio_sdk_core::worker::workflow: Failing workflow task run_id=… failure=Failure { failure: Some(Failure { message: "Failed encoding completion: Invalid header value b'<THE MARKER>\\n'", …
+IN HISTORY (claim-1 run 1): …'…Failed encoding completion: Invalid header value b\'<THE MARKER>\\n\'*'…
+LOGGED: Exception handling failed, original error: Invalid header value b'<THE MARKER>\n' ({'activity_id': '1', 'activity_type': 'ventoux.audit.append', …
+RESULT: BROKEN - a VAULT_TOKEN ending with a line break is quoted in a ValueError that is neither KeyRefused nor KeyUnavailable; it reaches the caller, Temporal's history and the worker's log
+```
+
+The probe uses the real transport against a stand-in Vault on 127.0.0.1, a case worker on the
+time-skipping server, and the public `start_case` and `answer`. The `LOGGED` line appears in some
+runs only (it depends on which task meets the token first); the history and the core's line
+appeared in each of three runs.
+
+Probe: `reviews/2026-11/probes/p3_vault_token_in_errors.py`.
+
+Proposed fix, in words: refuse a token holding anything but printable ASCII where it is read
+(`KeyUnavailable`, "VAULT_TOKEN holds a character a header can't: check for a line break", never
+quoting it), and have `Https.__call__` turn any other exception into `Unreachable` with its type's
+name alone, so nothing a library says about a request can leave the transport. Separately, the
+general path is worth closing: whatever a key provider raises during encoding is written by the
+SDK into the history in clear, so the codec should let out only its own two errors, with its own
+words.
+
+#### 3.2 A `404` from anything is read as Vault's answer "never made", for good, and `ventoux doctor` passes a server that isn't Vault (breaks a promise)
+
+`VaultKeys.key_config` and `VaultKeys.marked` read status `404` as "no key" and "no mark" without
+looking at the body. A wrong address, an ingress with no backend, or a mount path that isn't
+mounted answers `404` too. Against a plain web server that answers every request `404` with an
+HTML page, a live case's key reads `never made`; `seal`, `open` and `destroy` raise `KeyRefused`,
+the final kind that is never retried; and doctor's `keys.reachable` says `passed … answers: a key
+that can't exist was never made`. A `200` is checked for Ventoux's shape; a `404` is not.
+
+Promise touched. D78: "A key's state is `destroyed` or `never made` only on Vault's answer;
+anything else is `KeyUnavailable`", and "`KeyUnavailable`, not now: Vault unreachable, timing out,
+refusing the token, hanging up, or answering something unreadable". D81: "`passed` (seen to
+hold)".
+
+Proof, at `c2739ad`:
+
+```
+$ uv run python reviews/2026-11/probes/p3_any_404_is_never_made.py
+state of refund-1001, asked of a server that isn't Vault: 'never made'
+seal: KeyRefused (final: True): there is no key for refund-1001, so its sensitive values can't be read or written
+open: KeyRefused (final: True): there is no key for refund-1001, so its sensitive values can't be read or written
+destroy: KeyRefused (final: True): there is no key for refund-1001 to destroy: no case was opened with its ID
+doctor: passed     keys.reachable: the key service at http://127.0.0.1:34071 answers: a key that can't exist was never made
+doctor: unchecked  keys.policy: Vault answered sys/capabilities-self with status 404
+doctor's output holds the token: False
+RESULT: BROKEN - …
+```
+
+Probe: `reviews/2026-11/probes/p3_any_404_is_never_made.py`.
+
+Proposed fix, in words: take a `404` as Vault's only in the shape Vault gives it (a JSON object
+with an `errors` list), and anything else as `KeyUnavailable`; and have `keys.reachable` see
+something only Vault says (for instance that the transit mount exists, or `sys/capabilities-self`
+answering `200`) before it says `passed`. A wrong mount name still answers `404` in Vault's own
+shape, so doctor is the place that would see that; I could not check it against a real Vault (see
+Unchecked).
+
+#### 3.3 A contract validator's message is copied into the history, the needs-attention line and the audit record in clear (breaks a promise)
+
+A contract's input and output models are the team's Pydantic models. Registration accepts a
+`@field_validator` on one. When it refuses a value, `one_line`
+(`src/ventoux/core/before_activity.py`, line 126) copies Pydantic's `msg`, which for a validator is
+`Value error, ` followed by the team's own text, into `InputRefused`
+(`before_activity.py`, line 119), into the plan interpreter's `Stop`
+(`src/ventoux/core/interpreter.py`, line 302) and into a case step's failure reason
+(`src/ventoux/case/runtime.py`, line 1263). A message that quotes its value (`'…' is not a national
+ID`) then stands in clear in the history, the needs-attention line and the audit record, for a
+field declared sensitive too. The same value quoted by the activity's own exception reads
+`‹sensitive›`, because the engine wraps what it can't vouch for; a validator's text is the same
+team's text and isn't wrapped.
+
+Promises touched. D30: "**A refusal or a failure names the field and the kind of value, never the
+value**". D31: "everyone reads `‹sensitive›` wherever a value would be written: history lines,
+refusals, failures", and "An activity's own message is treated as sensitive in every case, since
+Ventoux can't know what it says".
+
+Proof, at `c2739ad`:
+
+```
+$ uv run python reviews/2026-11/probes/p3_validator_message_in_history.py
+an input refused by the contract's validator:
+  history: look#1 failed: people.lookup@1 doesn't take these inputs: national_id: Value error, '<THE NATIONAL ID>' is not a national ID: write it without spaces
+  the national ID is in clear in: ['history', 'needs_attention', 'audit']
+an output refused by the contract's validator:
+  history: look#1 failed: people.status@1 gave an output its contract doesn't declare: status: Value error, '<WHAT THE SYSTEM GAVE>' is not a status
+  what the system gave is in clear in: ['history', 'needs_attention', 'audit']
+the activity's own failure quoting it: look#1 failed: people.status@1 failed with RuntimeError: ‹sensitive›
+RESULT: BROKEN - …
+```
+
+The probe runs on the in-memory engine (`ventoux.testing.run_case`); I did not run it on Temporal.
+Pydantic's own messages for the types a contract may hold (text, boolean, decimal, day, one of
+some texts) quote no value: I tried each, strict and not (`scratchpad/p3/pd.py`, not a probe).
+Related, shown by a command and not made a probe: the contract hash doesn't see a validator
+(two contracts differing only by one hash the same, and the catalog registers one over the other
+with no conflict), so a validator added later changes what a contract takes with no new version.
+
+Probe: `reviews/2026-11/probes/p3_validator_message_in_history.py`.
+
+Proposed fix, in words: either refuse a contract model that defines a validator at registration
+(the schema is then all a contract checks, and the hash sees all of it), or say a `value_error` by
+the field and "its contract's own check refused it" and wrap the text as an activity's is.
+
+#### 3.4 A path that isn't there reads as nothing to compare: `summary`, `conformance --since` and `check` end 0 (weakens a promise; for `summary`, breaks one)
+
+- `ventoux summary --packages NAME` skips a folder that isn't in either tree
+  (`src/ventoux/tooling/summary.py`, `found_in`: `if not folder.is_dir(): continue`). With the
+  folder misspelt, the summary has an empty "Packages" section and the step ends 0, on a pull
+  request whose package `ventoux release` refuses.
+- `ventoux conformance --since BASE` with no `BASE/suite.json` prints `no result to compare` and
+  ends 0. The code says this is for "a base with no suite (before the suite existed)"; a base path
+  that is wrong reads the same.
+- `ventoux check` and `ventoux check --unchanged` print nothing and end 0 when the configured
+  `cases` and `packages` folders both aren't there, and when a builder file defines no case at its
+  top level (for instance under `if __name__ == "__main__":`, since the file is run under another
+  name).
+
+Promise touched. D55, as amended in 13e: "Anything it can't read or the diff refuses fails the
+step, saying why, never read as nothing changed". CLAUDE.md: "Fail closed: anything the engine
+can't evaluate or doesn't recognise is an error, never a permissive default". With only `cases`
+misnamed, `check --unchanged` does fail (the package folder reads as stale), so the gap is the
+silent case, not the usual one.
+
+Proof, at `c2739ad`:
+
+```
+$ uv run python reviews/2026-11/probes/p3_missing_paths_read_as_nothing.py
+ventoux summary --packages packages: exit 1
+ventoux summary --packages package (no such folder): exit 0
+  its Packages section: '\n\n\n'
+ventoux conformance --since no-such-folder: exit 0: no-such-folder has no suite.json: no result to compare
+ventoux check, cases and packages misnamed: exit 0, output ''
+ventoux check --unchanged, cases and packages misnamed: exit 0, output ''
+ventoux check, a builder file defining no case at its top level: exit 0, output ''
+RESULT: BROKEN - …
+```
+
+Probe: `reviews/2026-11/probes/p3_missing_paths_read_as_nothing.py`.
+
+Proposed fix, in words: `summary` fails (exit 2) on a `--packages` folder that is in neither tree;
+`conformance --since` tells a base folder that isn't there (exit 2) from one that is there with no
+suite; `check` says how many builder files and cases it found, and refuses none found unless the
+configuration says so.
+
+#### 3.5 `read_audit` hands a value in a shape it doesn't know to any reader, in clear (weakens a promise)
+
+`shown` (`src/ventoux/tooling/audit.py`, line 181) filters a stored value only when its keys are
+exactly `{value, visible_to}` or `{sealed, part, visible_to}`: "in clear: seen by whoever reads the
+case's records" is the fallback for every other shape. A stored value in the hidden shape with one
+more key is given whole to a reader who holds none of its roles. Nothing writes that shape today;
+a later writer's record read by this reader, or a damaged row, would be shown instead of refused.
+A record has no format number a reader could refuse on.
+
+Promises touched. D77: "a value whose field narrows who sees it is said hidden unless the reader
+holds one of those roles". CLAUDE.md: "a view hiding more than its source", and fail closed.
+
+Proof, at `c2739ad`:
+
+```
+$ uv run python reviews/2026-11/probes/p3_audit_unknown_shape_in_clear.py
+a reader holding only `support` reads:
+  the known shape  : hidden (needs fraud)
+  the unknown shape: {'value': 'fraud score 97', 'visible_to': ['fraud'], 'written_by': 4}
+RESULT: BROKEN - …
+```
+
+Probe: `reviews/2026-11/probes/p3_audit_unknown_shape_in_clear.py`.
+
+Proposed fix, in words: a stored value that is an object holding `visible_to`, `sealed` or `value`
+and isn't exactly one of the two shapes is refused, naming the record and the field; and a record
+says its format, which `read_audit` checks.
+
+#### 3.6 A package file with a key written twice is checked, released and run with the last one (weakens a promise)
+
+Every reader of a definition's JSON uses `json.loads`, which keeps the last of two equal keys in
+silence: `ventoux check --unchanged` for a `by_hand` package, `ventoux release`, `ventoux map`,
+and the engine. The authoring loop refuses exactly this from a model (`no_key_twice`,
+`src/ventoux/authoring/answers.py`: "Python's reader would keep the last one, silently"), and a
+draft read back for its sheet (`reference_of`, `src/ventoux/authoring/approve.py`, line 132) is
+read without that refusal. Ventoux's own readings (the map, the diff) agree with what runs; a
+person reading the file, or a pull request's diff, meets the first.
+
+Promise touched. D1: the JSON is what is reviewed and what runs ("the JSON that runs is committed
+and reviewed", D59). D63, as built: a key given twice is refused in a model's answer.
+
+Proof, at `c2739ad`:
+
+```
+$ uv run python reviews/2026-11/probes/p3_duplicate_keys_last_wins.py
+`roles` is written 2 times in the step review
+ventoux check --unchanged: 0 ✓ refund is valid (3 steps): written by hand, checked, not compared
+ventoux release: 0 refund 1 released: digest d42dce7d7779 (method 1)
+ventoux map says of who answers: ['- review is a task for adjuster, answered approve or reject. …']
+the same text as a model's answer: refused (a key is given twice: roles)
+RESULT: BROKEN - …
+```
+
+Probe: `reviews/2026-11/probes/p3_duplicate_keys_last_wins.py`.
+
+Proposed fix, in words: one function reads a definition's text everywhere (packages, records,
+stories, drafts), refusing a key given twice as `one_object` does, naming the key and its path.
+
+#### 3.7 A worker's manifest file and a release record ignore keys nobody declares (weakens a promise)
+
+`MANIFEST` (`src/ventoux/tooling/environments.py`) and `RECORD`
+(`src/ventoux/tooling/releases.py`) are Pydantic `TypeAdapter`s over plain dataclasses: an unknown
+key is dropped and values are converted loosely. A manifest written by hand for a worker in
+another language with `binds` misspelt publishes no binding, with no word; `"development": "no"`
+and `0` read as `false`; a record's unknown keys say nothing. Where it matters most the registry
+still fails closed (a production case worker whose `keys` is missing or misspelt is refused), so
+this is the weaker kind.
+
+Promise touched. CLAUDE.md: "anything the engine … doesn't recognise is an error". D54: "A worker
+in another SDK language publishes the same manifest as JSON".
+
+Proof, at `c2739ad`:
+
+```
+$ uv run python reviews/2026-11/probes/p3_unknown_keys_ignored.py
+manifest read: keys Provided(name='FileKeys', development=False) | audit Provided(name='FileAudit', development=False) | binds {}
+record read: refund 1 (the keys `retired` and `format` said nothing)
+RESULT: BROKEN - …
+```
+
+Probe: `reviews/2026-11/probes/p3_unknown_keys_ignored.py`.
+
+Proposed fix, in words: read both strictly, with unknown keys refused, as every definition is.
+
+#### 3.8 Doctor says "each certificate in date" of a certificate that isn't valid yet (minor; misleads)
+
+`certificate_problems` (`src/ventoux/tooling/doctor.py`, line 178) compares the certificate's end
+with now, never its start. D81: "`passed` (seen to hold)".
+
+```
+$ uv run python reviews/2026-11/probes/p3_doctor_certificate_not_yet_valid.py
+the certificate is valid from 2027-11-10
+temporal.identities: passed: each identity's files are there (operator): each key readable by its owner only, each certificate in date
+RESULT: BROKEN - …
+```
+
+Probe: `reviews/2026-11/probes/p3_doctor_certificate_not_yet_valid.py`. Fix: compare both ends.
+
+#### 3.9 A role registered twice takes the second `approves`, looser included, with no error (minor)
+
+`Catalog.register_role` (`src/ventoux/core/catalog.py`, line 133) writes `approves` over the
+earlier one and only ever adds `operates`, `forgets` and the others. A contract registered twice
+with other content is refused (`ContractConflict`); a role isn't. CLAUDE.md: "Policies can be made
+stricter downstream, never looser".
+
+```
+$ uv run python reviews/2026-11/probes/p3_role_registered_twice.py
+support, then support approving high: {'support': 'high'}
+lead approving high and operating, then lead alone: {'lead': None, 'support': 'high'} ['lead']
+RESULT: BROKEN - …
+```
+
+Probe: `reviews/2026-11/probes/p3_role_registered_twice.py`. Fix: refuse a second registration
+that says anything else, as a contract's is.
+
+#### 3.10 A result too small for decimal128 is zero, with no error (minor)
+
+`CONTEXT` (`src/ventoux/core/expressions/model.py`, line 43) traps `Overflow`, not `Underflow`, so
+`a * a` for `a = 1E-6143` is `0E-6176` and `a * a > 0` is false, while `1E+6143 * 1E+6143` is an
+`ExpressionError`. D20 doesn't say which it should be; the code's own comment says "an error rather
+than a special value when something goes wrong". No realistic amount is this small.
+
+```
+$ uv run python reviews/2026-11/probes/p3_expression_underflow_is_zero.py
+a * a, a = 1E-6143: Decimal('0E-6176')
+a * a > 0, a = 1E-6143: False
+a * a, a = 1E+6143: ExpressionError: `*` gives a number too large for an expression (decimal128)
+RESULT: BROKEN - …
+```
+
+Probe: `reviews/2026-11/probes/p3_expression_underflow_is_zero.py`. Fix: trap `Underflow` too, or
+record in D20 that a result below decimal128's range is zero, in both evaluators.
+
+### What held
+
+- **Expressions fail closed and quote no value.** 37 expressions that must be refused (wrong
+  arity, `==` across types, a missing value, an int or a float in the case file, NaN, Infinity,
+  `1e400`, an unknown operator, two keys, depth 40, a mixed or empty `in` list, a day that isn't
+  on the calendar, `sum` over a list that isn't records) are each `ExpressionInvalid` or
+  `ExpressionError`, and no error holds the recognisable value given.
+  `reviews/2026-11/probes/p3_expressions_fail_closed.py`.
+- **The live provider never says its key.** A refused request, a key ending with a line break and
+  a key that isn't ASCII each give `ProviderFailed: the model's API failed: <kind>`; the key is in
+  no error text or traceback. `reviews/2026-11/probes/p3_provider_key_never_said.py`.
+- **Doctor says no secret.** With `VAULT_TOKEN` set to the marker, doctor's whole output doesn't
+  hold it (in `p3_any_404_is_never_made.py`, last line before the result). With an identity whose
+  `cert` and `key` files hold a marker in malformed PEM, `ventoux doctor production`, `ventoux
+  environment check production` and `ventoux advise` print the files' paths and an error's kind,
+  never their contents (run by hand in a temporary project: `grep -c` of the marker over all three
+  outputs gave 0; `Failed client connect: … CertificateParseError`; doctor's rules that connect
+  said `unchecked … met RuntimeError, which it doesn't expect`, and it ended 1 on the rules that
+  failed).
+- **`repr` of `VaultKeys` and its transport** holds no token (`scratchpad/p3/v1.py`, by hand: all
+  three `False`).
+- **Doctor never passes a rule that raised.** By reading `finding_of`, and by the run above: an
+  unexpected error is `unchecked`, by its kind.
+- **`ventoux hashes`** refuses a lock that isn't an object (exit 2), an empty file (exit 2), a
+  missing file (exit 2), and lists every contract an empty lock doesn't record (exit 1).
+- **`ventoux release`, `map`, `diff`** on an empty or missing folder: exit 2, saying it has no
+  `case.json`. `release` with no releases folder named: exit 2. `--releases` naming a file: exit
+  2. `schema --unchanged` on an empty folder: exit 1, naming both files. `notes` for a release that
+  isn't recorded: exit 1. (Commands run by hand in a temporary project.)
+- **The diff's roles.** A plan's approvers changed from `support-lead` to `support` reads
+  "Stricter", which looked wrong and isn't: `support` may approve no risk, so nobody may approve
+  after, and the same summary fails the step because `ventoux release` refuses it (seen in the
+  summary run of finding 4). A leaf no comparison knows is `not proven` (by reading `judged`).
+- **The activation check** has no empty-collection pass that I could find by reading
+  `activation_problems`, `live` and `bound_problems`: no poller is a problem, a poller with no
+  manifest is a problem, and a queue whose pollers are all refused is a problem. Not run against
+  Temporal.
+- **The codec** refuses a sensitive part with no workflow ID, and the converter refuses a part
+  that arrives still encrypted (by reading; other reviewers ran the codec on Temporal).
+
+### Unproven
+
+- `src/ventoux/tooling/doctor.py`, `providers_are_production` (line 262): with no case worker's
+  manifest in a production registry it says `passed … no case worker has published a manifest`,
+  and `environment.workers` passes when nothing is active. Both are true statements about nothing;
+  whether "seen to hold" should cover them is the maintainer's call. Not run (needs a registry).
+- `src/ventoux/tooling/doctor.py`, `key_problems` (line 166): a key file is judged by its mode
+  alone, so a directory, an empty file, or a certificate named as the key passes "each key
+  readable by its owner only". By reading only.
+- `src/ventoux/temporal/converter.py`, `rewrapped` (line 126): `{"‹sensitive›": -1}` would read the
+  last part (Python's negative index) instead of being refused. By reading only; it needs someone
+  who can write a payload.
+- `src/ventoux/core/expressions/evaluate.py`, line 103: `exists` of a field holding a value no
+  expression can read (a dict, a NaN) is `true`; I saw it by calling `evaluate` directly, and did
+  not find a way for the case file to hold such a value through a public entry.
+- `src/ventoux/tooling/keys.py`, `_read` (line 128): a `FileKeys` file that has gone reads as "no
+  key was ever made" for every case, and a damaged one raises `JSONDecodeError`, neither of the two
+  key errors. Development only, so not pursued.
+- `ventoux conformance --suite FOLDER` with no `suite.json` ends with a traceback
+  (`FileNotFoundError`) and exit 1, where the command's own table says 2 for a suite that can't be
+  read. Seen once by hand (`ventoux conformance --suite nosuchdir`); minor, no probe.
+- `contracts.lock.json` records `letters.draft@1`, which the development catalog no longer
+  registers, and `ventoux hashes` says "every contract matches": a recorded contract that has gone
+  from the catalog is not said. Seen by hand; I did not find the brief promising otherwise.
+
+### Unchecked
+
+- **A real Vault.** No `vault` binary was tried (the rules say not to look for one). Finding 2 is
+  shown against a web server that isn't Vault, which is the point of it; what a real Vault answers
+  for a mount that isn't there, or for a key-value mount of version 1 at the marks' path, I could
+  not see. If a version 1 mount accepts the mark's write and answers `404` on its metadata, a
+  forgotten case would read `never made` after its key is deleted: worth one test where Vault is
+  installed.
+- **A real Temporal cluster with mTLS.** Doctor's `temporal.mtls-required` and
+  `temporal.reader-cannot-write` were read, not run against a server that authorizes.
+- **Finding 3 on Temporal.** Shown on the in-memory engine only; where the reason is written on
+  Temporal (the report, the audit export) follows from the same line being recorded, but I did not
+  run it there.
+- **The plain renderer, the "will never do" sheet and the case map on shapes they don't know**: not
+  reached.
+- **`scripts/check_wheel.py`**: read in outline only (it lists what must never ship; it doesn't
+  list what may).
+- **Roles unknown to the catalog at each runtime check** (answer, propose, close, claim, assign,
+  edit, migrate, forget, retry): only `role_that_counts` was read; the other passes cover people.
+- **`case/runtime.py`, `temporal/cases.py`, `case/flow.py`, `case/state.py`** were not swept line
+  by line for defaults: see the tally.

@@ -79,7 +79,27 @@ class HoldsSooner(CaseWorkflow):
         return await self.drive(start)
 
 
+def leads_approve_little() -> Any:
+    """The development catalog as it might have been earlier: `support-lead` approves low risk
+    only (p2_catalog_role_change_pays.py). Today's registers it with `approves="high"`."""
+    import copy
+
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register_role("support-lead", approves="low", edits=True, assigns=True)
+    return catalog
+
+
+@workflow.defn(name="ventoux.case")
+class BeforeTheRoleChange(CaseWorkflow):
+    catalog = leads_approve_little()
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
 __all__ = [
-    "DevelopmentCases", "DevelopmentForget", "EveryEventCases", "HoldsSooner", "ProductionCases",
+    "BeforeTheRoleChange", "DevelopmentCases", "DevelopmentForget", "EveryEventCases",
+    "HoldsSooner", "ProductionCases",
     "RegistryWorkflow", "SwitchesSooner", "SwitchingCases",
 ]

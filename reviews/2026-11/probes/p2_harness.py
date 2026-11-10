@@ -13,7 +13,7 @@ timers and to read a workflow's state at the end of a replay), `ventoux.temporal
 
 import asyncio
 import dataclasses
-import inspect
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -304,8 +304,12 @@ async def recorded(history: WorkflowHistory, converter: DataConverter) -> dict[s
             out["timers"][a.timer_id] = round(a.start_to_fire_timeout.ToTimedelta().total_seconds(), 3)
         elif kind == "MARKER_RECORDED":
             a = event.marker_recorded_event_attributes
-            ids = await texts(a.details["patch_id"]) if "patch_id" in a.details else []
-            out["markers"].append(ids[0][0].strip('"') if ids else a.marker_name)
+            name = a.marker_name
+            for payloads in a.details.values():  # Temporal: a patch marker's details name it
+                for text, _ in await texts(payloads):
+                    if text.startswith("{") and '"id"' in text:
+                        name = json.loads(text)["id"]
+            out["markers"].append(name)
         elif kind == "WORKFLOW_EXECUTION_UPDATE_ACCEPTED":
             a = event.workflow_execution_update_accepted_event_attributes
             out["accepted"][a.accepted_request.meta.update_id] = a.accepted_request.input.name
