@@ -35,7 +35,9 @@ def contract_schema(model: type[BaseModel]) -> dict[str, object]:
     """`model` as JSON Schema, as pydantic 2.13 wrote it. `Unwritable` if it holds anything a
     contract's field may not."""
     if model.model_config:
-        raise Unwritable(f"{model.__name__} sets model_config: a contract's model sets none. Remove it")
+        raise Unwritable(
+            f"{model.__name__} sets model_config: a contract's model sets none. Remove it"
+        )
     for name, field in model.model_fields.items():
         refuse_extras(model, name, field)
     fields = model.model_fields
