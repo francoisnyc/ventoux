@@ -1,0 +1,354 @@
+{
+  "Defaults": {
+    "properties": {
+      "maybe_amount": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Maybe Amount"
+      },
+      "maybe_several": {
+        "anyOf": [
+          {
+            "enum": [
+              "low",
+              "high"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Maybe Several"
+      },
+      "maybe_text": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Maybe Text"
+      },
+      "several": {
+        "default": "low",
+        "enum": [
+          "low",
+          "high"
+        ],
+        "title": "Several",
+        "type": "string"
+      },
+      "text": {
+        "default": "none given",
+        "title": "Text",
+        "type": "string"
+      },
+      "yes_or_no": {
+        "default": false,
+        "title": "Yes Or No",
+        "type": "boolean"
+      }
+    },
+    "title": "Defaults",
+    "type": "object"
+  },
+  "Described": {
+    "description": "Refund an order, in the customer's currency.\n\nIndented lines, as a docstring has them.",
+    "properties": {
+      "order_id": {
+        "description": "the order, as the shop numbers it",
+        "title": "Order Id",
+        "type": "string"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "description": "from 0 to 100",
+        "title": "Risk Score"
+      }
+    },
+    "required": [
+      "order_id",
+      "risk_score"
+    ],
+    "title": "Described",
+    "type": "object"
+  },
+  "Kinds": {
+    "properties": {
+      "amount": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Amount"
+      },
+      "day": {
+        "format": "date",
+        "title": "Day",
+        "type": "string"
+      },
+      "one": {
+        "const": "only",
+        "title": "One",
+        "type": "string"
+      },
+      "several": {
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "Several",
+        "type": "string"
+      },
+      "text": {
+        "title": "Text",
+        "type": "string"
+      },
+      "yes_or_no": {
+        "title": "Yes Or No",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "text",
+      "yes_or_no",
+      "amount",
+      "day",
+      "one",
+      "several"
+    ],
+    "title": "Kinds",
+    "type": "object"
+  },
+  "Marked": {
+    "properties": {
+      "amount": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Amount",
+        "x-input-policies": [
+          {
+            "kind": "trusted_only"
+          }
+        ]
+      },
+      "both": {
+        "title": "Both",
+        "type": "string",
+        "x-input-policies": [
+          {
+            "kind": "trusted_only"
+          }
+        ],
+        "x-reference": "crm"
+      },
+      "customer_id": {
+        "title": "Customer Id",
+        "type": "string",
+        "x-reference": "crm"
+      },
+      "maybe_customer_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Maybe Customer Id",
+        "x-reference": "crm"
+      },
+      "note": {
+        "title": "Note",
+        "type": "string",
+        "x-input-policies": [
+          {
+            "kind": "only_from",
+            "systems": [
+              "system:crm",
+              "person"
+            ]
+          }
+        ]
+      }
+    },
+    "required": [
+      "customer_id",
+      "amount",
+      "note",
+      "both"
+    ],
+    "title": "Marked",
+    "type": "object"
+  },
+  "Optionals": {
+    "properties": {
+      "amount": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Amount"
+      },
+      "day": {
+        "anyOf": [
+          {
+            "format": "date",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Day"
+      },
+      "one": {
+        "anyOf": [
+          {
+            "const": "only",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "One"
+      },
+      "several": {
+        "anyOf": [
+          {
+            "enum": [
+              "low",
+              "high"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Several"
+      },
+      "text": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Text"
+      },
+      "yes_or_no": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Yes Or No"
+      }
+    },
+    "required": [
+      "text",
+      "yes_or_no",
+      "amount",
+      "day",
+      "one",
+      "several"
+    ],
+    "title": "Optionals",
+    "type": "object"
+  },
+  "Sourced": {
+    "properties": {
+      "held": {
+        "title": "Held",
+        "type": "boolean",
+        "x-source": "person"
+      },
+      "maybe_note": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Maybe Note",
+        "x-source": "untrusted:llm"
+      },
+      "risk_score": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Risk Score",
+        "x-source": "system:kyc"
+      }
+    },
+    "required": [
+      "risk_score",
+      "held"
+    ],
+    "title": "Sourced",
+    "type": "object"
+  }
+}

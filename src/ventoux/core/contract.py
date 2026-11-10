@@ -11,6 +11,7 @@ from typing import Any, Literal, Self, Union, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ventoux.core.described import undescribed
 from ventoux.core.expressions import BooleanType, FieldType, NumberType, OutcomeType, StringType
 from ventoux.core.output_sources import HELD, HELD_NAMES, OutputSource, is_output_source
 from ventoux.core.policy import KIND_NAMES, KINDS, Policy
@@ -242,6 +243,15 @@ class Contract(BaseModel):
                     f"exactly. An output is {HELD_NAMES}: numbers are exact decimals, never "
                     "binary floats (brief, D20)."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def fields_are_described(self) -> Self:
+        # Fail closed: what Ventoux doesn't write into the promise would be outside its hash, a
+        # rule the engine neither writes down nor enforces (brief, D83).
+        problems = undescribed("input", self.input) + undescribed("output", self.output)
+        if problems:
+            raise ValueError("; ".join(f"{self.reference}: {problem}" for problem in problems))
         return self
 
     @model_validator(mode="after")
