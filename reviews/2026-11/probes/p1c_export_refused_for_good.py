@@ -85,7 +85,10 @@ async def scenario(setup: Setup) -> list[str]:
     broken: list[str] = []
     for name, made in (("1/3", claim(**NATIONAL)), ("2", with_lookup())):
         issues = validate_case(parse_case(made), CATALOG)
-        print(f"definition {name}: validation errors:", [i.code for i in issues if i.severity == "error"])
+        print(
+            f"definition {name}: validation errors:",
+            [i.code for i in issues if i.severity == "error"],
+        )
 
     # 1. An event the case doesn't even declare, whose payload has a key named like the case's
     # sensitive field. The event is refused, rightly; its record then refuses the export.
@@ -95,15 +98,25 @@ async def scenario(setup: Setup) -> list[str]:
     if await stuck(case, "1 event"):
         broken.append("an event's payload key")
     # ... and so the person can't be forgotten: the request waits for a case that never ends.
-    request = await propose_forget(setup.client, DevelopmentForget, "claim-1", "pat", ["privacy"], QUEUE)
+    request = await propose_forget(
+        setup.client, DevelopmentForget, "claim-1", "pat", ["privacy"], QUEUE
+    )
     await answer_forget(request, "approve", "kim", ["privacy"])
     await until(case, lambda now: now.status == "closed")  # closed as forgotten, in name
     await asyncio.sleep(3)  # real seconds: the request's activity asks Temporal again and again
     told = await forget_report(request)
     now = await until(case, lambda now: True)
     print("1 forget request, approved:", told.status, "|", told.history[-1])
-    print("1 case:", now.status, "| unwritten", now.unwritten, "| workflow",
-          (await case.describe()).status.name, "| key", setup.keys.state("claim-1"))
+    print(
+        "1 case:",
+        now.status,
+        "| unwritten",
+        now.unwritten,
+        "| workflow",
+        (await case.describe()).status.name,
+        "| key",
+        setup.keys.state("claim-1"),
+    )
     print("1 needs attention:", now.needs_attention)
 
     # 2. No outside input at all: an activity whose output field is named like a sensitive field.
@@ -117,8 +130,14 @@ async def scenario(setup: Setup) -> list[str]:
     file3 = {"customer_id": "cus-7"}
     asking = claim(sets=True, **NATIONAL)
     case = await start_case(setup.client, ImpatientCases, asking, file3, "claim-3", QUEUE)
-    raw = {"entry": "assess#1", "outcome": "accept", "by": "ana", "roles": ["adjuster"],
-           "form": {"national_id": "2 90 01 75 111 222 33"}, "wording": None}
+    raw = {
+        "entry": "assess#1",
+        "outcome": "accept",
+        "by": "ana",
+        "roles": ["adjuster"],
+        "form": {"national_id": "2 90 01 75 111 222 33"},
+        "wording": None,
+    }
     await setup.client.get_workflow_handle("claim-3").signal("answer", raw)
     if await stuck(case, "3 unsealed answer"):
         broken.append("a refused unsealed answer")

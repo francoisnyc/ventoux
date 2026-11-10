@@ -69,8 +69,14 @@ def refund() -> dict[str, Any]:
 
 
 def ans(**changes: Any) -> dict[str, Any]:
-    base = {"entry": "review#1", "outcome": "reject", "by": "ana", "roles": ["support"],
-            "form": None, "wording": None}
+    base = {
+        "entry": "review#1",
+        "outcome": "reject",
+        "by": "ana",
+        "roles": ["support"],
+        "form": None,
+        "wording": None,
+    }
     return base | changes
 
 
@@ -79,15 +85,30 @@ def req(what: str, **changes: Any) -> dict[str, Any]:
 
 
 GOOD_FORM = {"note": "n", "due": "2026-12-01", "paid": 1.5, "national_id": "x"}
-MIGRATION = {"name": "refund", "release": 2, "method": 1, "sha256": "00", "case": {}, "plans": {},
-             "mapping": {}, "engine": 3, "by": "pat", "roles": ["platform"], "cases": {}}
+MIGRATION = {
+    "name": "refund",
+    "release": 2,
+    "method": 1,
+    "sha256": "00",
+    "case": {},
+    "plans": {},
+    "mapping": {},
+    "engine": 3,
+    "by": "pat",
+    "roles": ["platform"],
+    "cases": {},
+}
 
 # (label, signal name, the JSON text of its one argument)
 ATTACKS: list[tuple[str, str, str]] = [
     ("answer: roles a text, not a list", "answer", json.dumps(ans(roles="support"))),
     ("answer: form a text", "answer", json.dumps(ans(form="x"))),
     ("answer: an extra key", "answer", json.dumps(ans(extra=1))),
-    ("answer: no roles key", "answer", json.dumps({"entry": "review#1", "outcome": "reject", "by": "ana"})),
+    (
+        "answer: no roles key",
+        "answer",
+        json.dumps({"entry": "review#1", "outcome": "reject", "by": "ana"}),
+    ),
     ("answer: the argument is a list", "answer", "[1, 2]"),
     ("answer: wording a text", "answer", json.dumps(ans(wording="two"))),
     ("answer: wording -7", "answer", json.dumps(ans(wording=-7))),
@@ -98,65 +119,231 @@ ATTACKS: list[tuple[str, str, str]] = [
     ("answer: by empty", "answer", json.dumps(ans(by=""))),
     ("answer: outcome unknown", "answer", json.dumps(ans(outcome="maybe"))),
     ("answer: roles hold a number", "answer", json.dumps(ans(roles=[1]))),
-    ("answer: form values unsealed, wrong kinds", "answer",
-     json.dumps(ans(outcome="approve", form={"note": {"a": [1]}, "due": 7, "paid": "1", "national_id": None}))),
-    ("answer: form value NaN", "answer",
-     '{"entry": "review#1", "outcome": "reject", "by": "ana", "roles": ["support"], '
-     '"form": {"note": NaN}, "wording": null}'),
-    ("event: payload value Infinity", "event",
-     '{"event": "cancelled", "payload": {"why": Infinity}, "by": "system:portal", "roles": []}'),
-    ("change: edit amount to NaN", "change",
-     '{"kind": "edit", "target": "amount", "value": NaN, "by": "ana", "roles": ["support"]}'),
-    ("answer: a sensitive mark naming no part", "answer",
-     json.dumps(ans(outcome="approve", form={"note": {"‹sensitive›": 7}}))),
-    ("answer: form key that is no field", "answer", json.dumps(ans(outcome="approve", form=GOOD_FORM | {"zzz": 1}))),
-    ("answer: due an impossible day", "answer", json.dumps(ans(outcome="approve", form=GOOD_FORM | {"due": "2026-02-31"}))),
-    ("event: one the case doesn't declare", "event",
-     json.dumps({"event": "exploded", "payload": {}, "by": "system:portal", "roles": []})),
-    ("event: payload a list", "event",
-     json.dumps({"event": "cancelled", "payload": [1], "by": "system:portal", "roles": []})),
-    ("event: payload value an object", "event",
-     json.dumps({"event": "cancelled", "payload": {"why": {"a": 1}}, "by": "system:portal", "roles": []})),
-    ("event: payload key not declared", "event",
-     json.dumps({"event": "cancelled", "payload": {"why": "w", "more": 1}, "by": "system:portal", "roles": []})),
-    ("event: from a system nobody registered", "event",
-     json.dumps({"event": "cancelled", "payload": {"why": "w"}, "by": "system:nobody", "roles": []})),
-    ("event: by empty", "event", json.dumps({"event": "cancelled", "payload": {"why": "w"}, "by": "", "roles": []})),
-    ("change: kind delete", "change",
-     json.dumps({"kind": "delete", "target": "amount", "value": 1, "by": "ana", "roles": ["support"]})),
-    ("change: edit of no field", "change",
-     json.dumps({"kind": "edit", "target": "nothing", "value": 1, "by": "ana", "roles": ["support"]})),
-    ("change: edit amount to an object, unsealed", "change",
-     json.dumps({"kind": "edit", "target": "amount", "value": {"a": 1}, "by": "ana", "roles": ["support"]})),
-    ("change: edit a sensitive field, unsealed", "change",
-     json.dumps({"kind": "edit", "target": "national_id", "value": "plain", "by": "ana", "roles": ["support", "claims-sensitive"]})),
-    ("change: edit due to 'soon'", "change",
-     json.dumps({"kind": "edit", "target": "due", "value": "soon", "by": "ana", "roles": ["support"]})),
-    ("change: skip a run that isn't one", "change",
-     json.dumps({"kind": "skip", "target": "review#zz", "value": None, "by": "ana", "roles": ["support"]})),
-    ("change: kind migrate, value a text", "change",
-     json.dumps({"kind": "migrate", "target": "refund 2", "value": "x", "by": "pat", "roles": ["platform"]})),
+    (
+        "answer: form values unsealed, wrong kinds",
+        "answer",
+        json.dumps(
+            ans(
+                outcome="approve",
+                form={"note": {"a": [1]}, "due": 7, "paid": "1", "national_id": None},
+            )
+        ),
+    ),
+    (
+        "answer: form value NaN",
+        "answer",
+        (
+            '{"entry": "review#1", "outcome": "reject", "by": "ana", "roles": ["support"], '
+            '"form": {"note": NaN}, "wording": null}'
+        ),
+    ),
+    (
+        "event: payload value Infinity",
+        "event",
+        '{"event": "cancelled", "payload": {"why": Infinity}, "by": "system:portal", "roles": []}',
+    ),
+    (
+        "change: edit amount to NaN",
+        "change",
+        '{"kind": "edit", "target": "amount", "value": NaN, "by": "ana", "roles": ["support"]}',
+    ),
+    (
+        "answer: a sensitive mark naming no part",
+        "answer",
+        json.dumps(ans(outcome="approve", form={"note": {"‹sensitive›": 7}})),
+    ),
+    (
+        "answer: form key that is no field",
+        "answer",
+        json.dumps(ans(outcome="approve", form=GOOD_FORM | {"zzz": 1})),
+    ),
+    (
+        "answer: due an impossible day",
+        "answer",
+        json.dumps(ans(outcome="approve", form=GOOD_FORM | {"due": "2026-02-31"})),
+    ),
+    (
+        "event: one the case doesn't declare",
+        "event",
+        json.dumps({"event": "exploded", "payload": {}, "by": "system:portal", "roles": []}),
+    ),
+    (
+        "event: payload a list",
+        "event",
+        json.dumps({"event": "cancelled", "payload": [1], "by": "system:portal", "roles": []}),
+    ),
+    (
+        "event: payload value an object",
+        "event",
+        json.dumps(
+            {"event": "cancelled", "payload": {"why": {"a": 1}}, "by": "system:portal", "roles": []}
+        ),
+    ),
+    (
+        "event: payload key not declared",
+        "event",
+        json.dumps(
+            {
+                "event": "cancelled",
+                "payload": {"why": "w", "more": 1},
+                "by": "system:portal",
+                "roles": [],
+            }
+        ),
+    ),
+    (
+        "event: from a system nobody registered",
+        "event",
+        json.dumps(
+            {"event": "cancelled", "payload": {"why": "w"}, "by": "system:nobody", "roles": []}
+        ),
+    ),
+    (
+        "event: by empty",
+        "event",
+        json.dumps({"event": "cancelled", "payload": {"why": "w"}, "by": "", "roles": []}),
+    ),
+    (
+        "change: kind delete",
+        "change",
+        json.dumps(
+            {"kind": "delete", "target": "amount", "value": 1, "by": "ana", "roles": ["support"]}
+        ),
+    ),
+    (
+        "change: edit of no field",
+        "change",
+        json.dumps(
+            {"kind": "edit", "target": "nothing", "value": 1, "by": "ana", "roles": ["support"]}
+        ),
+    ),
+    (
+        "change: edit amount to an object, unsealed",
+        "change",
+        json.dumps(
+            {
+                "kind": "edit",
+                "target": "amount",
+                "value": {"a": 1},
+                "by": "ana",
+                "roles": ["support"],
+            }
+        ),
+    ),
+    (
+        "change: edit a sensitive field, unsealed",
+        "change",
+        json.dumps(
+            {
+                "kind": "edit",
+                "target": "national_id",
+                "value": "plain",
+                "by": "ana",
+                "roles": ["support", "claims-sensitive"],
+            }
+        ),
+    ),
+    (
+        "change: edit due to 'soon'",
+        "change",
+        json.dumps(
+            {"kind": "edit", "target": "due", "value": "soon", "by": "ana", "roles": ["support"]}
+        ),
+    ),
+    (
+        "change: skip a run that isn't one",
+        "change",
+        json.dumps(
+            {
+                "kind": "skip",
+                "target": "review#zz",
+                "value": None,
+                "by": "ana",
+                "roles": ["support"],
+            }
+        ),
+    ),
+    (
+        "change: kind migrate, value a text",
+        "change",
+        json.dumps(
+            {
+                "kind": "migrate",
+                "target": "refund 2",
+                "value": "x",
+                "by": "pat",
+                "roles": ["platform"],
+            }
+        ),
+    ),
     ("migrate: an empty definition", "migrate", json.dumps(MIGRATION)),
     ("migrate: engine 99", "migrate", json.dumps(MIGRATION | {"engine": 99})),
     ("migrate: engine a text", "migrate", json.dumps(MIGRATION | {"engine": "3"})),
     ("migrate: method 99", "migrate", json.dumps(MIGRATION | {"method": 99})),
-    ("migrate: mapping of an unknown kind", "migrate", json.dumps(MIGRATION | {"mapping": {"bogus": {"a": "b"}}})),
+    (
+        "migrate: mapping of an unknown kind",
+        "migrate",
+        json.dumps(MIGRATION | {"mapping": {"bogus": {"a": "b"}}}),
+    ),
     ("migrate: release -1", "migrate", json.dumps(MIGRATION | {"release": -1})),
     ("propose: no such step", "propose", json.dumps(req("nothing"))),
-    ("propose: suggested by evil-bot", "propose", json.dumps(req("review", suggested_by="evil-bot"))),
+    (
+        "propose: suggested by evil-bot",
+        "propose",
+        json.dumps(req("review", suggested_by="evil-bot")),
+    ),
     ("retry: a run that isn't one", "retry", json.dumps(req("review#zz"))),
-    ("retry_export: nothing failed", "retry_export", json.dumps(req("audit export", roles=["operations"]))),
+    (
+        "retry_export: nothing failed",
+        "retry_export",
+        json.dumps(req("audit export", roles=["operations"])),
+    ),
     ("claim: entry with two #", "claim", json.dumps(req("review#1#1"))),
     ("give_back: nothing held", "give_back", json.dumps(req("review#1"))),
-    ("assign: to 'Bad Name'", "assign",
-     json.dumps({"entry": "review#1", "to": "Bad Name", "to_roles": ["support"], "by": "sam", "roles": ["support-lead"]})),
-    ("unassign: nothing held", "unassign", json.dumps(req("review#1", by="sam", roles=["support-lead"]))),
+    (
+        "assign: to 'Bad Name'",
+        "assign",
+        json.dumps(
+            {
+                "entry": "review#1",
+                "to": "Bad Name",
+                "to_roles": ["support"],
+                "by": "sam",
+                "roles": ["support-lead"],
+            }
+        ),
+    ),
+    (
+        "unassign: nothing held",
+        "unassign",
+        json.dumps(req("review#1", by="sam", roles=["support-lead"])),
+    ),
     ("close: a reason nobody declared", "close", json.dumps(req("because"))),
     ("shown: no such field", "shown", json.dumps(req("nothing"))),
-    ("forget: sent to the case directly, one person both", "forget",
-     json.dumps({"proposed_by": "pat", "proposer_roles": ["privacy"], "approved_by": "pat", "approver_roles": ["privacy"]})),
-    ("forget: sent to the case directly, without the role", "forget",
-     json.dumps({"proposed_by": "pat", "proposer_roles": ["support"], "approved_by": "noor", "approver_roles": ["support"]})),
+    (
+        "forget: sent to the case directly, one person both",
+        "forget",
+        json.dumps(
+            {
+                "proposed_by": "pat",
+                "proposer_roles": ["privacy"],
+                "approved_by": "pat",
+                "approver_roles": ["privacy"],
+            }
+        ),
+    ),
+    (
+        "forget: sent to the case directly, without the role",
+        "forget",
+        json.dumps(
+            {
+                "proposed_by": "pat",
+                "proposer_roles": ["support"],
+                "approved_by": "noor",
+                "approver_roles": ["support"],
+            }
+        ),
+    ),
     ("child_ended: a number", "child_ended", "7"),
     ("child_ended: no such entry", "child_ended", '"zz#1"'),
     ("close_by_parent: to a case with no parent", "close_by_parent", '"mischief"'),
@@ -166,12 +353,16 @@ ATTACKS: list[tuple[str, str, str]] = [
 
 async def failed_tasks(setup: Setup, id: str) -> int:
     history = await setup.client.get_workflow_handle(id).fetch_history()
-    return sum(event.event_type == EventType.EVENT_TYPE_WORKFLOW_TASK_FAILED for event in history.events)
+    return sum(
+        event.event_type == EventType.EVENT_TYPE_WORKFLOW_TASK_FAILED for event in history.events
+    )
 
 
 async def one(setup: Setup, n: int, label: str, signal: str, text: str) -> tuple[str, str]:
     id = f"refund-{n}"
-    case = await start_case(setup.client, DevelopmentCases, refund(), {"amount": Decimal(40)}, id, QUEUE)
+    case = await start_case(
+        setup.client, DevelopmentCases, refund(), {"amount": Decimal(40)}, id, QUEUE
+    )
     opened = await until(case, lambda now: now.waiting_at == ["review#1"])
     raw = RawValue(Payload(metadata={"encoding": b"json/plain"}, data=text.encode()))
     await setup.client.get_workflow_handle(id).signal(signal, raw)
@@ -196,7 +387,11 @@ async def one(setup: Setup, n: int, label: str, signal: str, text: str) -> tuple
     added = now.history[len(opened.history) :]
     mine = "ana answered review#1 reject as support"
     closed_first = any("the case is closed" in line for line in added)
-    others = [line for line in added if line != mine and not line.startswith(("review#1 done", "closed: nothing"))]
+    others = [
+        line
+        for line in added
+        if line != mine and not line.startswith(("review#1 done", "closed: nothing"))
+    ]
     if failures:
         return "TASK FAILED", f"{failures} failed workflow tasks, then: {others}"
     # A doorbell for no open child is recorded and changes nothing, as D75 says.

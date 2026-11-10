@@ -65,12 +65,16 @@ async def scenario(setup: Setup) -> tuple[list[str], list[str]]:
     print("validation errors:", errors)
     case = await start_case(setup.client, DevelopmentCases, claim(), {}, "claim-1", QUEUE)
     await until(case, lambda now: now.waiting_at == ["assess#1"])
-    await answer(case, "assess#1", "accept", "ana", ["adjuster"], {"branch": BRANCH, "id_scan": SCAN})
+    await answer(
+        case, "assess#1", "accept", "ana", ["adjuster"], {"branch": BRANCH, "id_scan": SCAN}
+    )
     closed = await until(case, lambda now: now.status == "closed")
     for line in closed.history:
         print("   ", line)
     before = await in_clear(setup)
-    request = await propose_forget(setup.client, DevelopmentForget, "claim-1", "pat", ["privacy"], QUEUE)
+    request = await propose_forget(
+        setup.client, DevelopmentForget, "claim-1", "pat", ["privacy"], QUEUE
+    )
     await answer_forget(request, "approve", "noor", ["privacy"])
     told = await asyncio.wait_for(request.result(), timeout=40)
     print("forget request:", told.status, "| key:", setup.keys.state("claim-1"))

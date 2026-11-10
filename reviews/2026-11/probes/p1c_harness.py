@@ -12,25 +12,23 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tests"))
 
-from skipping_server import time_skipping  # noqa: E402  (the tests' harness)
-from temporalio.api.history.v1 import History  # noqa: E402
-from temporalio.client import Client  # noqa: E402
-from worker_threads import worker_threads  # noqa: E402  (the tests' harness)
+from p1c_workflows import ImpatientCases, SwitchingCases  # noqa: F401
+from skipping_server import time_skipping
+from temporalio.api.history.v1 import History
+from temporalio.client import Client
+from worker_threads import worker_threads
 
-from p1c_workflows import ImpatientCases, SwitchingCases  # noqa: E402, F401
-
-from ventoux.temporal.cases import CaseReport, CaseWorkflow, report  # noqa: E402
-from ventoux.temporal.worker import case_worker  # noqa: E402
-
-from ventoux.temporal.converter import data_converter  # noqa: E402
-from ventoux.testing import (  # noqa: E402
+from ventoux.temporal.cases import CaseReport, CaseWorkflow, report
+from ventoux.temporal.converter import data_converter
+from ventoux.temporal.worker import case_worker
+from ventoux.testing import (
     FAKES,
     DevelopmentCases,
     DevelopmentForget,
     DevelopmentPlans,
 )
-from ventoux.tooling.audit import FileAudit  # noqa: E402
-from ventoux.tooling.keys import FileKeys  # noqa: E402
+from ventoux.tooling.audit import FileAudit
+from ventoux.tooling.keys import FileKeys
 
 QUEUE = "cases"
 
@@ -51,13 +49,14 @@ def on_temporal[T](
     activities: Mapping[str, Any] = FAKES,
     audit: Any = None,
     timeout: float = 90,
+    keys_class: type[FileKeys] = FileKeys,
 ) -> T:
     """Run `scenario` against the time-skipping test server with a case worker (and the
     development forget workflow) on `QUEUE`."""
 
     async def go() -> T:
         folder = Path(tempfile.mkdtemp(prefix="p1c-"))
-        keys = FileKeys(folder / "keys.json")
+        keys = keys_class(folder / "keys.json")
         store = audit if audit is not None else FileAudit(folder / "audit")
         async with (
             time_skipping(data_converter(keys)) as environment,
@@ -103,7 +102,9 @@ async def raw_histories(client: Client, id: str) -> dict[str, bytes]:
     runs: list[bytes] = []
     while run_id:
         history = await client.get_workflow_handle(id, run_id=run_id).fetch_history()
-        runs.insert(0, History(events=history.events).SerializeToString() + history.to_json().encode())
+        runs.insert(
+            0, History(events=history.events).SerializeToString() + history.to_json().encode()
+        )
         started = history.events[0].workflow_execution_started_event_attributes
         run_id = started.continued_execution_run_id
     return {f"{id} run {n}": raw for n, raw in enumerate(runs, start=1)}

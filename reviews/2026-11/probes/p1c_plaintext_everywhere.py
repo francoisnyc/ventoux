@@ -20,7 +20,6 @@ import logging
 import os
 import sys
 import tempfile
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -42,11 +41,10 @@ from ventoux.temporal.cases import (
     case_handle,
     propose_change,
     report,
-    send_event,
     start_case,
     view,
 )
-from ventoux.temporal.forget import answer_forget, forget_report, propose_forget
+from ventoux.temporal.forget import answer_forget, propose_forget
 from ventoux.testing import FAKES, DevelopmentForget, release_of
 from ventoux.tooling.audit import read_audit
 
@@ -179,8 +177,11 @@ async def everything(setup: Setup, ids: list[str]) -> dict[str, bytes]:
     for id in ids:
         blobs |= await raw_histories(setup.client, id)
     blobs |= {f"audit store {n}": b for n, b in files_under(setup.audit.folder).items()}
-    blobs |= {f"key folder {n}": b for n, b in files_under(setup.keys.path.parent).items()
-              if not n.startswith("audit")}
+    blobs |= {
+        f"key folder {n}": b
+        for n, b in files_under(setup.keys.path.parent).items()
+        if not n.startswith("audit")
+    }
     return blobs
 
 
@@ -189,7 +190,9 @@ async def scenario(setup: Setup) -> list[str]:
     client = setup.client
     released = release_of(kyc(), 1, plans=[PLAN], cases={"verify@1": verify()})
     file = {"customer_id": "cus-7", "national_id": PLANTED["national_id (opening)"]}
-    case = await start_case(client, SwitchingCases, released, file, "kyc-1", QUEUE, "olga", ["adjuster"])
+    case = await start_case(
+        client, SwitchingCases, released, file, "kyc-1", QUEUE, "olga", ["adjuster"]
+    )
     await until(case, lambda now: now.waiting_at == ["assess#1"])
     form = {
         "tax_id": PLANTED["tax_id (form)"],
@@ -209,15 +212,22 @@ async def scenario(setup: Setup) -> list[str]:
     print("child view for claims-sensitive holds subject:", "subject" in seen.values)
     # An approved edit of the sensitive field, proposed by one person, approved by another.
     edited = PLANTED["national_id (approved edit)"]
-    await propose_change(case, "edit", "national_id", edited, "kim", ["claims-sensitive", "support"])
+    await propose_change(
+        case, "edit", "national_id", edited, "kim", ["claims-sensitive", "support"]
+    )
     await until(case, lambda now: "case.change#1" in now.waiting_at)
     await answer(case, "case.change#1", "approve", "lee", ["claims-sensitive", "support-lead"])
-    await until(case, lambda now: any(line.startswith("applied case.change#1") for line in now.history))
+    await until(
+        case, lambda now: any(line.startswith("applied case.change#1") for line in now.history)
+    )
     await answer(child, "check#1", "ok", "ana", ["adjuster"], {"result": "fine"})
     before = await until(
         case,
-        lambda now: len(now.needs_attention) == 2 and "verify#1" not in " ".join(now.waiting_for)
-        and now.unwritten == 0,
+        lambda now: (
+            len(now.needs_attention) == 2
+            and "verify#1" not in " ".join(now.waiting_for)
+            and now.unwritten == 0
+        ),
     )
     print("parent, before forgetting:")
     for line in before.history:
@@ -241,7 +251,9 @@ async def scenario(setup: Setup) -> list[str]:
         seen_by = [what for what, value in PLANTED.items() if value in shown]
         print(f"  read_audit(roles={roles}) shows:", seen_by or "none of the planted values")
         if roles != ["claims-sensitive"]:
-            found += [f"before forgetting: read_audit(roles={roles}) shows {what}" for what in seen_by]
+            found += [
+                f"before forgetting: read_audit(roles={roles}) shows {what}" for what in seen_by
+            ]
 
     # --- forget the family ---
     request = await propose_forget(client, DevelopmentForget, "kyc-1", "pat", ["privacy"], QUEUE)
@@ -250,7 +262,9 @@ async def scenario(setup: Setup) -> list[str]:
     print("forget request:", told.status)
     for line in told.history:
         print("    ", line)
-    print("key state:", setup.keys.state("kyc-1"), "| key file:", setup.keys.path.read_text().strip())
+    print(
+        "key state:", setup.keys.state("kyc-1"), "| key file:", setup.keys.path.read_text().strip()
+    )
     blobs = await everything(setup, [*ids, "kyc-1/forget"])
     leaks = where(PLANTED, blobs)
     print("AFTER forgetting, sensitive values in clear:", leaks or "none")
@@ -259,8 +273,10 @@ async def scenario(setup: Setup) -> list[str]:
     for roles in (["adjuster"], ["claims-sensitive"], []):
         shown = json.dumps(read_audit(setup.audit, "kyc-1", roles, setup.keys), ensure_ascii=False)
         seen_by = [what for what, value in PLANTED.items() if value in shown]
-        print(f"  read_audit(roles={roles}) after: shows {seen_by or 'none'};",
-              f"‹forgotten› {shown.count('‹forgotten›')} times, hidden {shown.count('hidden (needs')} times")
+        print(
+            f"  read_audit(roles={roles}) after: shows {seen_by or 'none'};",
+            f"‹forgotten› {shown.count('‹forgotten›')} times, hidden {shown.count('hidden (needs')} times",
+        )
         found += [f"after forgetting: read_audit(roles={roles}) shows {what}" for what in seen_by]
     try:
         await view(case, ["claims-sensitive"])
@@ -269,7 +285,9 @@ async def scenario(setup: Setup) -> list[str]:
         print("view after forgetting:", refused)
     for each in (case, child):
         closed = await report(each)
-        print(f"report of {each.id} after forgetting: {closed.status}, last line: {closed.history[-1]}")
+        print(
+            f"report of {each.id} after forgetting: {closed.status}, last line: {closed.history[-1]}"
+        )
     return found
 
 
@@ -296,14 +314,22 @@ with output.open("wb") as sink:
         os.dup2(saved[0], 1)
         os.dup2(saved[1], 2)
         print(output.read_text())
-logged = {"the worker's log": "\n".join(kept.lines).encode(), "the process's output": output.read_bytes()}
+logged = {
+    "the worker's log": "\n".join(kept.lines).encode(),
+    "the process's output": output.read_bytes(),
+}
 in_logs = where(PLANTED, logged)
-print(f"log records kept: {len(kept.lines)}; core warnings in the output: {output.read_text().count(' WARN')};",
-      "failed activities logged:", sum("Completing activity as failed" in line for line in kept.lines))
+print(
+    f"log records kept: {len(kept.lines)}; core warnings in the output: {output.read_text().count(' WARN')};",
+    "failed activities logged:",
+    sum("Completing activity as failed" in line for line in kept.lines),
+)
 print("sensitive values in the log or stderr:", in_logs or "none")
 found += in_logs
 if found:
     print("RESULT: BROKEN - " + "; ".join(found))
 else:
-    print("RESULT: HELD - no planted sensitive value was found in clear in any history, audit "
-          "file, key file or log, before or after forgetting")
+    print(
+        "RESULT: HELD - no planted sensitive value was found in clear in any history, audit "
+        "file, key file or log, before or after forgetting"
+    )

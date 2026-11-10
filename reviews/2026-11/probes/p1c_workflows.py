@@ -39,3 +39,15 @@ class ImpatientCases(CaseWorkflow):
     @workflow.run
     async def run(self, start: CaseStart) -> CaseReport:
         return await self.drive(start)
+
+
+# Temporal: a deployment's case workflow in the environment `production`, whose registry each
+# case asks as it opens (brief, D54).
+@workflow.defn(name="ventoux.case")
+class ProductionCases(CaseWorkflow):
+    catalog = CATALOG
+    environment = "production"
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
