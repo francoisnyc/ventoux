@@ -275,26 +275,36 @@ async def providers_are_production(context: Context) -> Seen:
 
 
 NOT_VAULT = "the key service named isn't VaultKeys: keys.named says what it is"
+NOT_LOADED = "the key service can't be loaded: keys.named says why"
 
 
-def vault_keys(context: Context) -> VaultKeys | None:
-    """The key service `[tool.ventoux] keys` names, when it is Vault; None otherwise (named
-    elsewhere, not at all, or not importable: `keys.named` says which)."""
+def vault_keys(context: Context) -> VaultKeys | str:
+    """The key service `[tool.ventoux] keys` names, when it is Vault; otherwise why a rule asking
+    Vault is unchecked (`keys.named` says more)."""
     name = context.found.keys
     if name is None:
-        return None
+        return NOT_VAULT
     try:
         provider = named(name, context.found.root, "the key service", "acme_platform:KEYS")
     except Unconfigured:
-        return None
-    return provider if isinstance(provider, VaultKeys) else None
+        return NOT_LOADED
+    return provider if isinstance(provider, VaultKeys) else NOT_VAULT
 
 
 async def token_is_present(context: Context) -> Seen:
-    """`VAULT_TOKEN` is set: seen by its name, never read out (brief, D81)."""
-    if vault_keys(context) is None:
+    """`VAULT_TOKEN` is set: seen by its name, never read out (brief, D81). Read before the key
+    service is: the guide's `VaultKeys` can't be made without it, so a module building one raises
+    as it is imported, and only this rule says why."""
+    if context.found.keys is None:
         return "unchecked", NOT_VAULT
-    if os.environ.get("VAULT_TOKEN"):
+    token_set = bool(os.environ.get("VAULT_TOKEN"))
+    try:
+        provider = named(context.found.keys, context.found.root, "the key service", "m:KEYS")
+    except Unconfigured:
+        provider = None  # not made: perhaps for want of the token, said below if it isn't set
+    if provider is not None and not isinstance(provider, VaultKeys):
+        return "unchecked", NOT_VAULT  # another provider: Vault's token isn't its
+    if token_set:
         return "passed", "VAULT_TOKEN is set"
     return "FAILED", (
         "VAULT_TOKEN is not set: set it in the environment of each worker, the caller and the "
@@ -305,8 +315,8 @@ async def token_is_present(context: Context) -> Seen:
 async def keys_are_reachable(context: Context) -> Seen:
     """The key service answers that a key that can't exist was never made: reads only."""
     keys = vault_keys(context)
-    if keys is None:
-        return "unchecked", NOT_VAULT
+    if isinstance(keys, str):
+        return "unchecked", keys
     state = await asked(context, context.probes.key_state(keys))
     if state == "never made":
         return "passed", (
@@ -322,8 +332,8 @@ async def policy_is_narrow(context: Context) -> Seen:
     """What the token could do, asked of Vault (`sys/capabilities-self`), never done: no delete
     on a mark; denied a key not named `ventoux-*`; update on encrypt and decrypt (brief, D78)."""
     keys = vault_keys(context)
-    if keys is None:
-        return "unchecked", NOT_VAULT
+    if isinstance(keys, str):
+        return "unchecked", keys
     name = vault_name(NEVER_MADE)
     marks = [
         f"{keys.marks_mount}/data/ventoux/forgotten/{name}",

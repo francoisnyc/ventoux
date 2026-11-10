@@ -201,8 +201,13 @@ def named(name: str, root: Path | None, what: str, example: str) -> object:
         sys.path.insert(0, str(root))  # the project's own modules, as its tests import them
     try:
         loaded = importlib.import_module(module)
-    except ImportError as error:
+    except ModuleNotFoundError as error:
         raise Unconfigured(f"{module} can't be imported: {error}") from None
+    except Exception as error:  # noqa: BLE001 (the platform team's code may raise anything)
+        # Said by its kind alone: its message may hold anything, a secret included.
+        raise Unconfigured(
+            f"{module} can't be imported: it raised {type(error).__name__}"
+        ) from None
     finally:
         if root is not None:
             sys.path.remove(str(root))

@@ -3,6 +3,7 @@
 deployment"."""
 
 import asyncio
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -146,12 +147,12 @@ def test_every_rule_runs_whatever_the_others_give(tmp_path: Path) -> None:
     assert verdict(found, "catalog.named").verdict == "unchecked"
 
 
-def test_an_error_a_rule_doesnt_expect_is_unchecked_by_its_kind_never_its_message(
+def test_a_module_raising_as_it_is_imported_is_said_by_its_kind_never_its_message(
     tmp_path: Path,
 ) -> None:
     found = deployment(tmp_path, '[tool.ventoux]\ncatalog = "doctor_broken:CATALOG"\n')
     assert verdict(found, "catalog.named") == Finding(
-        "catalog.named", "unchecked", "met RuntimeError, which it doesn't expect"
+        "catalog.named", "unchecked", "doctor_broken can't be imported: it raised RuntimeError"
     )
 
 
@@ -758,3 +759,50 @@ def test_the_command_says_each_finding_and_exits_as_its_verdicts_say(
     assert main(["doctor", "production", "--strict"]) == 1  # 6 unchecked
     monkeypatch.delenv("VAULT_TOKEN")
     assert main(["doctor", "production"]) == 1  # keys.token-present failed
+
+
+# A deployment configured as the guide says: one platform module, its VaultKeys built as the guide
+# builds it (no transport given).
+PLATFORM = """
+[tool.ventoux]
+catalog = "doctor_platform:CATALOG"
+keys = "doctor_platform:KEYS"
+audit = "doctor_platform:AUDIT"
+"""
+
+
+def test_without_vault_token_the_guides_key_service_fails_token_present_and_doctor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("VAULT_TOKEN", raising=False)
+    monkeypatch.delitem(sys.modules, "doctor_platform", raising=False)  # imported afresh
+    seen = findings(deployment(tmp_path, PLATFORM))
+    by_rule = {finding.rule: finding for finding in seen}
+    assert by_rule["keys.token-present"] == Finding(
+        "keys.token-present",
+        "FAILED",
+        "VAULT_TOKEN is not set: set it in the environment of each worker, the caller and the "
+        "shell doctor runs in",
+    )
+    # The module raised as it was imported: said by its name and the error's kind.
+    for rule in ("catalog.named", "keys.named", "audit.named"):
+        assert by_rule[rule] == Finding(
+            rule, "unchecked", "doctor_platform can't be imported: it raised ValueError"
+        )
+    for rule in ("keys.reachable", "keys.policy"):
+        assert by_rule[rule] == Finding(
+            rule, "unchecked", "the key service can't be loaded: keys.named says why"
+        )
+    assert outcome(seen, strict=False) == 1
+
+
+def test_with_vault_token_the_guides_key_service_is_named_and_its_token_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VAULT_TOKEN", SECRET)
+    monkeypatch.delitem(sys.modules, "doctor_platform", raising=False)
+    found = deployment(tmp_path, PLATFORM)
+    assert verdict(found, "keys.named") == Finding(
+        "keys.named", "passed", "the key service is doctor_platform:KEYS, VaultKeys"
+    )
+    assert verdict(found, "keys.token-present").verdict == "passed"

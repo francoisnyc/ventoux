@@ -108,11 +108,14 @@ async def answered_without_certificate(
     found: Configuration, address: str | None, namespace: str | None
 ) -> list[str]:
     """How Temporal answers a connection with no client certificate: `without TLS`, `with TLS and
-    no client certificate`; empty when it refuses each (`ventoux doctor`) (brief, D81)."""
-    settings = connection(found, None, address, namespace)
+    no client certificate`; empty when it refuses each (`ventoux doctor`) (brief, D81). Where
+    from the section (the flags winning), as no identity: `connection` would refuse none."""
+    temporal = found.temporal
+    target = address or (temporal.address if temporal is not None else DEVELOPMENT_ADDRESS)
+    space = namespace or (temporal.namespace if temporal is not None else DEVELOPMENT_NAMESPACE)
     ca = None
-    if found.temporal is not None and found.temporal.server_ca is not None:
-        ca = read_file(f"the server CA, {found.temporal.server_ca},", found.temporal.server_ca)
+    if temporal is not None and temporal.server_ca is not None:
+        ca = read_file(f"the server CA, {temporal.server_ca},", temporal.server_ca)
     tried: list[tuple[str, TLSConfig | bool]] = [
         ("without TLS", False),
         ("with TLS and no client certificate", TLSConfig(server_root_ca_cert=ca)),
@@ -120,7 +123,7 @@ async def answered_without_certificate(
     answered: list[str] = []
     for how, tls in tried:
         try:
-            await Client.connect(settings.target, namespace=settings.namespace, tls=tls)
+            await Client.connect(target, namespace=space, tls=tls)
         except RuntimeError:  # Temporal's client: the connection failed, or was refused
             continue
         answered.append(how)

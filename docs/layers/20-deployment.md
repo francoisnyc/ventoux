@@ -770,6 +770,30 @@ three skipped tests have, isn't needed for 20b2.
 - **`doctor.py` stays one file,** the verdicts, the running of rules and the rules, one function
   each: splitting the rules out needs a third file to break an import cycle.
 
+### From the tutor's review of #96
+
+Both from one gap: the tests reached the production path only through stand-ins (a `VaultKeys`
+on a recording; a development server with no `[tool.ventoux.temporal]`).
+
+- **A platform module written the guide's way, with no `VAULT_TOKEN`, left six rules unchecked
+  and doctor exiting 0.** The guide's `VaultKeys(address=…, …)` can't be made without the token,
+  so the module raised as it was imported, and only an `ImportError` was read as a module that
+  can't be imported. Now a module raising anything as it is imported is `Unconfigured`, naming the
+  module and the error's kind (never its message); `keys.token-present` reads the environment
+  before it needs the provider, so it fails, and doctor exits 1; `keys.reachable` and
+  `keys.policy` say the key service can't be loaded, not that it isn't Vault.
+  `tests/doctor_platform.py` builds `VaultKeys` as the guide does, with no transport.
+- **`temporal.mtls-required` could never run with `[tool.ventoux.temporal]`,** which every
+  production deployment has: the connection without a certificate went through `connection()`,
+  which refuses no identity (`identities.None`). It is built from the section's address and
+  namespace directly now. And `LiveProbes` first connected *as an identity*, with TLS, to see
+  Temporal reached, which fails on a server without TLS before anything was tried: now the
+  attempts come first, and an answer is itself Temporal reached; only when each is refused is
+  Temporal seen reached as an identity, so a refusal is still never read from silence.
+- **One doctor test runs through `LiveProbes` with the configuration production has:** a section
+  addressing the development server, `reader` and `operator` identities with their files, and the
+  guide's key service. On that server the connection without TLS is answered: FAILED.
+
 ## Promises (20b2)
 
 Each claim D81, the note and the guide make about `ventoux doctor`, and the test that would fail
@@ -781,7 +805,7 @@ code was written, or with its branch switched off when the code came first.
 | A configuration doctor can't read exits 2, saying why, running no rule | `test_a_configuration_doctor_cant_read_exits_2_saying_why_and_runs_no_rule` |
 | A rule failed exits 1; nothing failed exits 0 with the unchecked lines said; `--strict` fails an unchecked one; the last line counts each verdict | `test_a_rule_failed_exits_1_nothing_failed_exits_0_and_strict_fails_an_unchecked_one`, `test_the_command_says_each_finding_and_exits_as_its_verdicts_say` |
 | Every rule runs, whatever the others give | `test_every_rule_runs_whatever_the_others_give` |
-| An error a rule doesn't expect is unchecked by its kind, never its message, never passed or dropped | `test_an_error_a_rule_doesnt_expect_is_unchecked_by_its_kind_never_its_message`, `test_a_probe_raising_what_its_rule_doesnt_expect_is_unchecked` (each probing rule) |
+| An error a rule doesn't expect is unchecked by its kind, never its message, never passed or dropped | `test_a_probe_raising_what_its_rule_doesnt_expect_is_unchecked` (each probing rule) |
 | Every probe is bounded: one that never answers is unchecked naming the bound, and doctor finishes | `test_a_probe_that_never_answers_is_unchecked_naming_the_bound` |
 | An identity that can't connect is unchecked, naming its file, never its contents | `test_an_identity_that_cant_connect_is_unchecked_saying_which_file` |
 | `catalog.named`, each verdict | `test_catalog_named` |
@@ -803,6 +827,9 @@ code was written, or with its branch switched off when the code came first.
 | No secret's value is said, a failure included | `test_no_secret_is_said_a_failure_included` |
 | The guide's table lists every rule and no other, in order; its example output and its FAILED example are what doctor says | `test_the_guide_lists_every_rule_doctor_checks_and_no_other`, `test_the_guides_example_output_names_only_rules_doctor_has`, `test_the_guides_failed_example_is_what_doctor_says` |
 | Only `connecting.py` makes a Temporal client, doctor's included | `test_connecting.py::test_only_connecting_connects_to_temporal` |
+| A module raising as it is imported is unchecked, named with the error's kind, never its message | `test_a_module_raising_as_it_is_imported_is_said_by_its_kind_never_its_message`, `test_without_vault_token_the_guides_key_service_fails_token_present_and_doctor` |
+| With the guide's key service and no `VAULT_TOKEN`, `keys.token-present` fails and doctor exits 1; with the token, the key service is named and the token present | `test_without_vault_token_the_guides_key_service_fails_token_present_and_doctor`, `test_with_vault_token_the_guides_key_service_is_named_and_its_token_present` |
+| With `[tool.ventoux.temporal]` and identities, as production has, every rule runs through `LiveProbes`: `temporal.mtls-required` fails on a server answering without TLS | `test_doctor_live.py::test_doctor_with_a_production_configuration_runs_every_rule_through_live_probes` |
 
 **Reached only with a stand-in:** `temporal.mtls-required` passed, `temporal.reader-cannot-write`
 passed, and every `keys.*` branch that asks Vault. `LiveProbes`' Vault calls go through

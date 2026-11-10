@@ -4,16 +4,19 @@ the Temporal rules fail here; their passed branches are reached only with a stan
 (`test_doctor.py`)."""
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
 from temporalio.api.enums.v1 import EventType
 from temporalio.client import Client, WorkflowHandle
 from temporalio.service import RPCError, RPCStatusCode
+from test_doctor import IN_DATE, PLATFORM, SECRET, certificate
 from test_temporal_registry import in_production
 
 from ventoux.temporal.registry import registry_handle
-from ventoux.tooling.deployment import read
+from ventoux.tooling.deployment import Configuration, read
 from ventoux.tooling.doctor import Finding, diagnose
 from ventoux.tooling.probes import NEVER_STARTED, LiveProbes
 
@@ -86,3 +89,54 @@ def test_doctor_changes_nothing(tmp_path: Path) -> None:
     before, after, started = in_production(scenario)
     assert after == before  # nothing written to the registry
     assert started == RPCStatusCode.NOT_FOUND  # no workflow started by the signal
+
+
+def production_configured(folder: Path, address: str, namespace: str) -> Configuration:
+    """The configuration a production deployment has: `[tool.ventoux.temporal]` with `reader` and
+    `operator` identities whose files are there, and the key service built as the guide builds
+    it. Here the address is a development server's, which has no TLS."""
+    identities = ""
+    for name in ("reader", "operator"):
+        certificate(folder / f"{name}.pem", IN_DATE)
+        key = folder / f"{name}.key"
+        key.write_text(SECRET)
+        key.chmod(0o600)
+        identities += (
+            f"\n[tool.ventoux.temporal.identities.{name}]\n"
+            f'cert = "{folder / name}.pem"\nkey = "{key}"\n'
+        )
+    path = folder / "pyproject.toml"
+    path.write_text(
+        PLATFORM
+        + f'\n[tool.ventoux.temporal]\naddress = "{address}"\nnamespace = "{namespace}"\n'
+        + identities
+    )
+    return read(path)
+
+
+def test_doctor_with_a_production_configuration_runs_every_rule_through_live_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The production path, never only through stand-ins: a section, identities, and the guide's
+    # key service. On a development server the connection without TLS is answered: FAILED.
+    monkeypatch.setenv("VAULT_TOKEN", "hvs.never-said-token")
+    monkeypatch.delitem(sys.modules, "doctor_platform", raising=False)
+
+    async def scenario(client: Client) -> list[Finding]:
+        target = client.service_client.config.target_host
+        found = production_configured(tmp_path, target, client.namespace)
+        return await diagnose(found, "production", LiveProbes(found, "production"), 3)
+
+    seen = {finding.rule: finding for finding in in_production(scenario)}
+    assert seen["temporal.mtls-required"] == Finding(
+        "temporal.mtls-required",
+        "FAILED",
+        "Temporal answered a connection without a client certificate, without TLS: require mTLS "
+        "on the namespace's frontend",
+    )
+    assert seen["temporal.identities"].verdict == "passed"
+    assert seen["keys.named"].verdict == "passed"
+    assert seen["keys.token-present"].verdict == "passed"
+    said = "\n".join(finding.said for finding in seen.values())
+    assert "identities.None" not in said
+    assert "never-said" not in said

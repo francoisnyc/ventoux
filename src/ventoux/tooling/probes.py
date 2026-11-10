@@ -93,11 +93,14 @@ class LiveProbes:
         raise Unconnectable("no reader or operator identity is configured to read the registry as")
 
     async def unauthenticated(self) -> list[str]:
-        if self.found.temporal is not None:
-            await self.as_identity(self.reading())  # reached: a refusal below is one
         answered = await answered_without_certificate(self.found, self.address, self.namespace)
-        if self.found.temporal is None and not answered:
+        if answered:
+            return answered  # Temporal answered: reached
+        # Each refused: a refusal only once Temporal is seen reached, as an identity, never read
+        # from silence.
+        if self.found.temporal is None:
             raise Unanswered("Temporal can't be reached with no section, so nothing was refused")
+        await self.as_identity(self.reading())
         return answered
 
     async def reader_signal(self) -> str:
