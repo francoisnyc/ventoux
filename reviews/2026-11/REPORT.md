@@ -5,6 +5,8 @@ the in-memory findings were run on a Temporal worker (all eleven reproduce there
 the decisions pass 6 had not checked claim by claim were checked (212 claims, 211 agree;
 section 7b), and the heavy replay probes were run again. The summary is at the end of this page.
 
+- **A proposed order for the fixes** is in `FIXES.md`, beside this page: what needs a decision in
+  the brief first, then the fix pull requests in order. A proposal only.
 - **A correction to the task's own numbers:** `tests/histories` holds 68 files, of which 34 are
   recorded histories and one a carried state; the other 33 are the key files beside them.
 
