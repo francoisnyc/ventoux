@@ -920,8 +920,9 @@ No new dependency: `uv build` and `uv publish` are uv's own; no `twine`, no `bui
 
 - **The fresh install found that contract hashes depend on pydantic's version.** Installed into
   a new environment, the wheel resolved pydantic 2.14.3 (the lock holds 2.13.5), and
-  `ventoux conformance --unchanged` failed: 2.14 writes a decimal field's JSON Schema with a
-  `pattern`, and a contract's hash is made from that schema (`core/promise.py`). Three of the nine
+  `ventoux conformance --unchanged` failed: 2.13 writes a decimal field's string form with a
+  `pattern`, which 2.14 drops, and a contract's hash is made from that schema
+  (`core/promise.py`). Three of the nine
   development contracts hashed differently; a team upgrading pydantic would see its lock fail and
   the registry refuse its workers (D54). *Decided with the user:* bound pydantic below 2.14 now
   (D82, a test pinning the bound to the installed minor), and make the hash independent of
