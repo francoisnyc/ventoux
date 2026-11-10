@@ -922,12 +922,14 @@ No new dependency: `uv build` and `uv publish` are uv's own; no `twine`, no `bui
   a new environment, the wheel resolved pydantic 2.14.3 (the lock holds 2.13.5), and
   `ventoux conformance --unchanged` failed: 2.13 writes a decimal field's string form with a
   `pattern`, which 2.14 drops, and a contract's hash is made from that schema
-  (`core/promise.py`). Three of the nine
-  development contracts hashed differently; a team upgrading pydantic would see its lock fail and
-  the registry refuse its workers (D54). *Decided with the user:* bound pydantic below 2.14 now
-  (D82, a test pinning the bound to the installed minor), and make the hash independent of
-  pydantic's rendering in a separate fix, its own pull request and decision. With the bound, the
-  fresh install passes all three commands and every hash equals the locked environment's.
+  (`core/promise.py`). Three of the nine development contracts hashed differently; a team
+  upgrading pydantic would see its lock fail and the registry refuse its workers (D54). *Decided
+  with the user:* bound pydantic below 2.14 now (D82, a test pinning the bound to the installed
+  minor), and make the hash independent of pydantic's rendering in a separate fix, its own pull
+  request and decision. With the bound, the fresh install passes all three commands and every
+  hash equals the locked environment's. *Since 2026-11-10, the contract rendering fix:* the hash
+  no longer depends on it, and the bound is below the next major (brief, D83;
+  `docs/layers/fix-contract-rendering.md`).
 - **A recording is a data file, never code:** `check_wheel` first refused `ventoux/case/recording.py`,
   which is the code that writes recordings. The rule leaves `.py` files alone.
 - **The forbidden folders are matched at the wheel's top only:** the suite has an `examples/` of

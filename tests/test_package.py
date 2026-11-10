@@ -227,16 +227,13 @@ def test_every_name_the_docs_import_is_supported() -> None:
     assert sorted(imported_by_the_docs() - supported) == []
 
 
-def test_pydantic_is_bounded_to_the_minor_version_the_hashes_were_made_with() -> None:
-    # A contract's hash is made from pydantic's JSON Schema of its models (core/promise.py), and
-    # pydantic 2.14 writes a decimal field's differently from 2.13: under another minor version,
-    # contracts would hash otherwise and the lock and the registry refuse them (brief, D54). So
-    # the package stays on the minor its hashes were made with, until the hash no longer depends
-    # on pydantic's rendering (brief, D82, as amended).
-    major, minor = (int(part) for part in metadata.version("pydantic").split(".")[:2])
+def test_pydantic_is_bounded_below_its_next_major_only() -> None:
+    # A contract's hash no longer reads pydantic's JSON Schema, which changes between minor
+    # versions (tests/test_contract_schema.py), so any 2.x from the one the lock was made with is
+    # accepted; a major version may change the API, and is kept out (brief, D83).
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
     (pydantic,) = [d for d in project["dependencies"] if d.startswith("pydantic")]
-    assert f"<{major}.{minor + 1}" in pydantic, pydantic
+    assert pydantic == "pydantic>=2.13.5,<3"
 
 
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"

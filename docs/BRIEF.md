@@ -3511,6 +3511,31 @@ whose key provider or audit store is for development, or that doesn't say, so th
   conformance --unchanged` from what it installed. The procedure (bump, changelog, tag, publish)
   is written in `docs/guides/releasing-ventoux.md`; the tag and the publish are the maintainer's.
 
+*Amended 2026-11-10, by D83* (the text above stands; this changes the bound): contracts no longer
+hash from pydantic's rendering, so pydantic is bounded below its next major (`>=2.13.5,<3`).
+
+### D83. A contract's promise is written by Ventoux, never by pydantic
+
+*Decided 2026-11-10, in the contract rendering fix (`docs/layers/fix-contract-rendering.md`).
+Adds to D5, D50 and D82, whose text is kept.*
+
+- **A contract's input and output models are written as JSON Schema by Ventoux's own writer**
+  (`core/contract_schema.py`), never by pydantic's `model_json_schema()`: so no pydantic version
+  can change a contract's hash. The promise (D57), its hash, the conformance catalog (D80) and the
+  semantic diff all read it.
+- **It writes what pydantic 2.13 wrote, for exactly the field shapes a contract may have:** a
+  text, true or false, a decimal, a day, one of some texts, each input possibly optional, and
+  Ventoux's three marks (input policies, a reference, an output's source). So **hash method 1 is
+  unchanged** and written down: the SHA-256 of the promise written canonically, its models written
+  by this writer. No hash recorded in a lockfile, a release record or a manifest changes.
+- **A model the writer can't describe exactly is refused when the contract is made,** saying which
+  field and what a field may be: a description, a title, examples, an alias, a constraint, a
+  default other than `None`, any other mark, or any `model_config`. Never written some other way,
+  never left to pydantic (fail closed). Writing more of them is a decision.
+- **Set aside: a hash method 2,** a description Ventoux designs (no titles, no class name). It
+  would change what a promise covers, and migrate the lockfile, release records and manifests;
+  that is a decision of its own, and method 2 stays free for it.
+
 ## Concepts
 
 | Term | Meaning |
