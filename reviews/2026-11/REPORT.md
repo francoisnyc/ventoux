@@ -1,7 +1,7 @@
 # Whole-project review of Ventoux, November 2026
 
-**Status: in progress.** Passes 1, 2, 3, 5 and 6 are written below. Pass 4 (test strength) and a
-second part of pass 6 (each decision's checkable claims) are still running; the summary at the end is written when all six are.
+**Status: in progress.** Passes 1, 2, 3, 5 and 6 are written below. Pass 4 (test strength) is
+still running; the summary at the end is written when all six are.
 
 - **A correction to the task's own numbers:** `tests/histories` holds 68 files, of which 34 are
   recorded histories and one a carried state; the other 33 are the key files beside them.
@@ -67,7 +67,7 @@ second part of pass 6 (each decision's checkable claims) are still running; the 
 | 3.7 | A worker's manifest file and a release record ignore unknown keys and convert loosely: a misspelt `binds` binds nothing, `"development": "no"` reads as false (D54, D81). |
 | 2.4 | The 34 kept histories leave whole areas with none: no plan run, no timer, no child case or doorbell, no registry that continued as new, no case migrated to engine 3, nine signal types; and the tests that replay them check only that no error is raised, never what the replay rebuilds (D51). |
 | 2.2 | A request to forget stamps its audit records with the code's `ENGINE` constant, not with anything recorded: with the constant moved, a recorded request replays with no error and rebuilds records that say another engine version (D51, D76, D77). |
-| 5.3 | Thirteen names the documents tell a team to use are not in `public.json`, so they are "internal: importable, unsupported, free to change": among them `ventoux.testing.run_case` and `CATALOG`, `Catalog`, `registry_worker`, and `propose`, `retry`, `close`, `view` and `propose_change` in `ventoux.temporal.cases`. A case of one's own can't be run, in a test or to its close, without them (D82). |
+| 5.3, 6b.1 | Thirteen names the documents tell a team to use are not in `public.json`, so they are "internal: importable, unsupported, free to change": among them `ventoux.testing.run_case` and `CATALOG`, `Catalog`, `registry_worker`, and `propose`, `retry`, `close`, `view` and `propose_change` in `ventoux.temporal.cases`. A case of one's own can't be run, in a test or to its close, without them; the guides call `run_case` 20 times without ever showing its import, so the test that compares the guides' imports with the list can't notice (D82). |
 
 ### Misleads
 
@@ -87,6 +87,7 @@ second part of pass 6 (each decision's checkable claims) are still running; the 
 | 5.6 | The releases guide's `environment_worker(...)` snippet is a `TypeError`: `audit` is required and the snippet leaves it out. |
 | 5.7 | `report` just after `start_case` on a release, in an environment, says `draft` with an empty history, where the cases guide asserts the release at once. |
 | 5.2 | No document says how to install the package or start a local Temporal server (with 6.4.1). |
+| 6b.2 | D76's own example says an answer that approves `pay` and so starts it is one record, `approved`, `admitted`, `started`; a run gives `approved`, `started`, and the same decision's dated line says `admitted` is an approval asked. |
 
 ### Minor
 
@@ -107,6 +108,8 @@ second part of pass 6 (each decision's checkable claims) are still running; the 
 | 5.8 | With the registry's worker not running, `environment create` reports success, `activate` gives Temporal's raw words after 30 seconds, and `environment check` doesn't return. |
 | 5.9 | `report` on a handle from Temporal's client is a `CaseReport` while the case is open and a plain `dict` once closed. |
 | 5.10 | Guides run commands on the repository's `examples/` folder, which an installed wheel doesn't have, without saying so. |
+| 6b.3 | An age has no upper bound: an `sla` of a 30-digit number of days is read, validated and run in memory, and raises `ValueError` as the duration a workflow timer's wait is written into (D44 states no bound). |
+| 6b.4 | Three quoted wordings are printed slightly otherwise: D55's "Looser:", D74's `closed by its parent: …`, and D50's `same behaviour as refund 2`, which is said only for a revert to an older release. |
 
 ### Where the brief reads against itself (found in pass 1; proposals only)
 
@@ -3066,3 +3069,319 @@ name no person. Same probe as 6.1.
   `files` list doesn't include `reviews/`. If the review branch is merged as it is, CI's lint job
   fails; either exclude `reviews/` in `pyproject.toml` (a project change, the maintainer's) or
   format the probes.
+
+
+---
+
+## Pass 6, second part: each decision's checkable claims, run
+
+Probes ran at `b464f3f` on branch `review-2026-11` (the first runs at `cf916d8`; source `3edb471`;
+nothing under `src/`, `tests/`, `docs/` or `examples/` differs from it). Each probe is run from the
+repository root with `uv run python reviews/2026-11/probes/<name>.py`, prints a table
+"decision | the brief's claim | what a run shows | agrees?" and ends with a `RESULT:` line.
+
+Scope, said plainly: 168 claims of 40 decisions were run in eight probes. Read in full for this
+pass: D20, D22, D23, D27, D33, D41, D44, D46, D47, D50, D51, D52, D55 (its head and its
+amendments), D56, D57, D59, D61 to D64, D66 to D74 (D74's first half), D76 to D78, D80 to D83.
+Not read: D35 to D40, D42, D43, D45, D48, D49, D53, D54, D58, D60, D65, D75 (see "Unchecked").
+
+The eight probes and their last lines:
+
+| Probe | Result |
+|---|---|
+| `p6b_d20_d22_d23_expressions_identifiers_answer_order.py` | HELD, 24 of 24 |
+| `p6b_d33_d44_d46_d47_ages_timers_patterns_counts.py` | HELD, 19 of 19 |
+| `p6b_d50_d51_d55_d56_d57_d59_command_line.py` | HELD, 29 of 29 |
+| `p6b_d52_d66_to_d74_wordings_and_bounds.py` | HELD, 26 of 26 |
+| `p6b_d76_d77_d78_audit_and_vault.py` | BROKEN, 1 of 24 (finding 2) |
+| `p6b_d61_to_d64_advisor_providers_drafts.py` | HELD, 18 of 18 |
+| `p6b_d80_d81_d82_d83_suite_doctor_package_writer.py` | BROKEN, 1 of 39 (finding 1) |
+| `p6b_non_negotiables_d27_d31_d41.py` | HELD, 9 of 9 |
+
+### Findings
+
+No guarantee of the engine was found broken at runtime in this pass. Two findings are documents
+and a list that say something the code doesn't do; two are small.
+
+#### 6b.1 The supported imports leave out `run_case` and every script helper the guides teach, and the test that should notice can't see them (*weakens one*)
+
+`src/ventoux/public.json` lists two names under `ventoux.testing`: `check_workflow_contract` and
+`run_plan`. The guides' Python blocks call `run_case` 20 times (`cases.md` 15, `case-data.md` 4,
+`releases.md` 1), the quickstart imports it (`docs/QUICKSTART.md` line 149,
+`from ventoux.testing import run_case`), and the guides also call the script helpers `propose`,
+`retry`, `edit`, `skip`, `assign`, `claim`, `later` and `migrate`. None of them is in the list, so
+by D82's own words each is "internal: importable, unsupported, free to change", and the test that
+fails when a listed name disappears doesn't protect them.
+
+The promise it touches, D82: "**The supported imports are a committed list,**
+`src/ventoux/public.json`: the names the guides tell teams to import, the builder's `__all__`, and
+the protocols a deployment implements. Everything else is internal: importable, unsupported, free
+to change. A listed name that disappears fails a test, so removing one is a decision, as a contract
+change is; a name a guide imports that the list doesn't hold fails too." And: "`ventoux.testing`
+ships, for teams' tests."
+
+Why nothing noticed: `tests/test_package.py::test_every_name_the_docs_import_is_supported` reads
+only `from ventoux… import …` lines in the Python blocks of `README.md`, `docs/guides/*.md` and
+`examples/**/*.py`. The guides use `run_case(` without ever showing its import, and the quickstart,
+which does show it, is not one of the files the test reads. The test passes
+(`uv run pytest -q -p no:cacheprovider tests/test_package.py -k 'docs_import or supported_name'`:
+3 passed).
+
+Proof (`b464f3f`):
+
+```
+$ uv run python reviews/2026-11/probes/p6b_d80_d81_d82_d83_suite_doctor_package_writer.py
+D82 | 'a name a guide imports that the list doesn't hold fails too' (the import lines of the Python
+  blocks of the README, the quickstart and the guides) | imported and not listed:
+  ['ventoux.testing.run_case'] | yes   (the quickstart's line; the test doesn't read that file)
+D82 | 'the names the guides tell teams to import'; ... | helpers of ventoux.testing the guides'
+  Python blocks call and public.json doesn't list: {'assign': ['cases.md'], 'claim': ['cases.md'],
+  'edit': ['cases.md'], 'later': ['case-data.md'], 'migrate': ['releases.md'], 'propose':
+  ['cases.md'], 'retry': ['cases.md'], 'run_case': ['QUICKSTART.md', 'case-data.md', 'cases.md',
+  'releases.md'], 'skip': ['cases.md']}; listed under ventoux.testing:
+  ['check_workflow_contract', 'run_plan'] | NO
+RESULT: BROKEN - D82: 'the names the guides tell teams to import'; ...
+```
+
+(The helper names are matched by name against what `ventoux.testing` defines; `claim` in
+`cases.md` is called twice and may in one place be the guide's own name. `run_case` is not in
+doubt.) Probe: `reviews/2026-11/probes/p6b_d80_d81_d82_d83_suite_doctor_package_writer.py`.
+
+Proposed fix: list `run_case` and the script helpers the guides use under `ventoux.testing` (the
+count moves from 73, so D82 or the deployment note that says 73 gains a dated line); have the
+guides show the import once per page; and widen the test to the quickstart and to names a block
+calls that `ventoux.testing` defines, so a guide can't teach a helper the list doesn't hold.
+
+#### 6b.2 D76's own example of a record names a decision the engine doesn't put there (*misleads*)
+
+D76, first bullet: "An answer that approves `pay` and so starts it is one record: `approved`,
+`admitted`, `started`." D76, its dated line "*Changed while building 19a, before D76 was merged*":
+"`admitted` is an approval asked; a start reads its condition, its approval's condition, then its
+inputs." The two disagree, and the code follows the second: the approving answer's record holds
+`approved`, `started`; `admitted` is in the record of the earlier act that had the approval asked.
+
+Proof (`b464f3f`):
+
+```
+$ uv run python reviews/2026-11/probes/p6b_d76_d77_d78_audit_and_vault.py
+D76 | 'An answer that approves pay and so starts it is one record: approved, admitted, started'
+  (the same decision later: 'admitted is an approval asked') | the approving answer's decisions:
+  ['approved', 'started']; `admitted` is in the record of the answer that had the approval asked:
+  ['answered', 'admitted'] | NO
+RESULT: BROKEN - D76: ...
+```
+
+Probe: `reviews/2026-11/probes/p6b_d76_d77_d78_audit_and_vault.py`. An auditor or an implementer
+of a reader of the export who takes the example as the format expects a decision that never
+comes. Proposed fix: decisions aren't rewritten, so a dated line on D76 saying the example reads
+`approved`, `started` since the change before merge (and what the asking answer's record holds),
+and the audit guide checked for the same example.
+
+#### 6b.3 An age has no upper bound: a wait no workflow timer can hold is accepted when the definition is read (*minor*)
+
+D44: "`after` is an age in D33's format (`30m`, `12h`, `1d`), at least a minute". The lower bound
+is enforced; nothing bounds it above. An `sla` of `999999999999999999999999999999d` is read,
+validated and run in memory (the run lists the timer as due in the year 2.7e27). The same wait
+can't be written as the protobuf duration Temporal's SDK puts a workflow timer's wait into.
+
+Proof (`b464f3f`):
+
+```
+$ uv run python reviews/2026-11/probes/p6b_d33_d44_d46_d47_ages_timers_patterns_counts.py
+D44 | an age with no upper bound (asked: is one that no workflow timer can hold refused when read?)
+  | 999999...d (30 digits): read: ok; the same wait as a protobuf duration: ValueError Value out of
+  range: 86400000000000000000000000000000000 | yes
+```
+
+(The row doesn't count against the probe's result: D44 states no upper bound, so no quoted promise
+is broken.) What the case workflow does when it meets such a timer on a server was not run; see
+"Unproven". The standard it touches is CLAUDE.md's "Fail closed: anything the engine can't
+evaluate or doesn't recognise is an error", here at the wrong moment: at the first timer of an
+open case, not at `ventoux check`. Proposed fix: a decision giving an age a largest value (for
+example the ten thousand years a protobuf duration holds, or far less), refused when read, with a
+negative test; the same for `max_age` and a plan's `timeout`.
+
+#### 6b.4 Three wordings the brief quotes are printed a little differently (*minor*)
+
+None changes what is decided; each is a quotation a reader can't find verbatim.
+
+- D55: "each change's verdict in fixed words (\"Looser:\", \"Stricter:\", \"Changed, not proven
+  either way (read it as possibly looser):\")". The plain form prints the words, then the path,
+  then the colon: `- **Looser** (`fields.order_id.visible_to`): seen by support -&gt; ...`
+  (`p6b_d50_d51_d55_d56_d57_d59_command_line.py`, row "fixed words": 3 of 3 printed so, 0 of 3
+  with the colon right after the words).
+- D74: "closes the child ..., saying why (`closed by its parent: duplicate, by ana`)". The child's
+  last two lines are `cancelled fix#1: closed by its parent: duplicate, by ana` and
+  `closed: by its parent: duplicate, by ana` (`p6b_d52_d66_to_d74_wordings_and_bounds.py`).
+- D50: "A digest equal to an existing release makes none (`same behaviour as refund 2`)". That
+  sentence is printed only for a revert to an older release (`same behaviour as refund 1; nothing
+  released`); the same package released again says `refund: nothing changed since release 1;
+  nothing written`. Both exit 0 and write nothing (`p6b_d50_…command_line.py`).
+
+Proposed fix: none needed in code; if the guides quote these, quote what is printed.
+
+### What held
+
+Each line names the probe that shows it. All ran at `b464f3f`.
+
+- **D20** (`p6b_d20_d22_d23_…`): the code's operator list is the brief's plus `date` (D66), no
+  more and no fewer; 25 unlisted operator names (`now`, `map`, `%`, `!!`, `today`, `max`, …) are
+  each refused when read; `0.1 + 0.2 == 0.3` is true; `1 / 3` gives 34 threes and `2 / 3` ends in
+  7 with the process's own decimal context set to 5 digits and rounding up, so no global default
+  decides; a tie rounds to even both ways; division by zero is an `ExpressionError`; `and` with a
+  first operand `false` and `or` with a first `true` still fail on a missing field; a default in
+  `var`, `var` of the whole data, an `if` chain, a float, truthiness, and coercion in `==` and
+  `cat` are refused; 32 levels read and 33 are refused (D60); the rendering is
+  `review.outcome = "approve" and (a != 1 or not(approved_amount > 100))`.
+- **D22**: the spelling rule reads 5 good and 14 bad identifiers as the brief says (capitals, a
+  space, `:`, a leading `.`, `_`, `@`, `-`, an empty text, a trailing line break, an accented
+  letter, a full-width letter, a digit of another script); a misspelled identifier is refused
+  before a closed entry or an unknown outcome is looked at.
+- **D23**: with several refusals applying at once they come in the brief's order: entry not open,
+  then outcome not offered, then no role.
+- **D33, D44** (`p6b_d33_d44_d46_d47_…`): a timer's age accepts `30m`, `12h`, `1d`, `1m`, `59m`,
+  `01d` and refuses `1w`, `90s`, `60s`, `0m`, `0d`, `1.5h`, signs, spaces, capitals, an empty
+  text, digits of another script, `1_0d` and a number. `max_age` refuses `0m` and `0d` too: the
+  code's comment calls that "at least a minute (brief, D33)", a bound D33's text doesn't state
+  (stricter, so no finding). Two timers due at one second fire in the order they were set, and
+  both before an answer stamped at that second; set timers are listed with their due time in UTC.
+- **D46**: a reminder expands to `remind_review_1d`, `_2d`, `_4d`; an `sla` keeps its own name;
+  `1d` and `24h` together, a reminder on an activity step, a step named like an expanded rule, an
+  entry that is neither a raw rule nor a pattern, and an entry with both `on` and `sla` are each
+  refused when read.
+- **D47**: `count` accepts 1, 2, 3 and refuses `"2"`, `2.0` (as a float, as an exact decimal and
+  as the JSON text `2.0`), `true`, 0, -1 and null; the history and `waiting_for` wordings are
+  exactly the brief's; a second answer by the same person is refused, `reject` included; one
+  rejection ends the entry.
+- **D50, D51, D57, D59** (`p6b_d50_…command_line.py`): no catalog named is refused; a
+  `[tool.ventoux]` key nobody decided is refused, and the nine decided keys are accepted; no
+  releases folder named is refused; `--commit` is required; `releases/refund/1.json`, then
+  `1.wording-2.json`, then `2.json`; the record holds name, release, digest, commit, contracts,
+  the package as written, the changed paths and its notes, with `method: 1`; an older release
+  reworded is refused with exit 1; a record whose stored package no longer gives its digest is
+  refused with exit 1; a missing folder is exit 2; a stray file in a package is exit 1; `ventoux
+  notes` in both forms, `ventoux promises`, `ventoux hashes --lock … --before …` run. A released
+  case's history begins `opened on refund 1, engine 3` (a scratch run, not a probe).
+- **D55**: `ventoux diff` exits 0 whatever it found and 2 on a folder it can't read; the summary
+  line counts not-proven with looser and says it before stricter (`7 may loosen (4 looser, 3 not
+  proven), 1 stricter`).
+- **D56**: a literal a definition writes holding `& < > \ ` * _ [ ] ~ # | !` and a line break is
+  shown in the map with entities, a backslash before each listed character and the break as
+  `\n`; no value starts a line. **D45**: `ventoux simulate` plays the four-eyes story.
+- **D52, D69 to D74, D66, D68, D73** (`p6b_d52_d66_to_d74_…`): `case.change#1`; an edit to the
+  value held, and a proposer approving their own request, are refused; `confirm, required,
+  proposed by support`; `closed: duplicate, by ana; confirm not done`; a required step with a
+  `when` is refused when read; `lee assigned review#1 to sam as support-lead` with and without
+  `, from ana`; `confirm#1 assigned to ana by its rule`; only the holder answers, the refusal
+  naming the holder and how to free the entry; a role that doesn't assign can't; a claim of a
+  `count: 2` approval is refused; 100 records accepted and 101 refused; `draft_line.1#1` and
+  `.2#1`; an item with an undeclared field refused; a field named `each` refused;
+  `repair#1: case repair, open`; an attachment ID of 200 characters is taken and one of 201
+  refused without quoting it; every listed wrong date form (and six more) is refused at the
+  opening, and `0001-01-01` and `9999-12-31` are taken; `string` of a date gives `2026-10-31`;
+  `+` and `-` on dates are refused by the check; a `datetime` in a date field is an error at
+  runtime and refused by the builder; `today` is not an operator.
+- **D76, D77, D78** (`p6b_d76_d77_d78_…`): the code's list of decision kinds is exactly D76's 17,
+  and every kind six varied runs emitted is in it; records are numbered from 1; the sealed part
+  is `audit/claim-7/1/act/values/national_id` and the value is nowhere in clear, even when the
+  definition's sensitive fields aren't given to the export; `FileAudit` refuses a gap and other
+  content, accepts the same record again, keeps nothing of a call with one refused record, and
+  writes one `.jsonl` per stream; the retry policy the case workflow passes to the export
+  activity has 10 attempts and a longest wait of 5 minutes, and the bound is 262144 bytes (read
+  from `CaseWorkflow.export_retries` and `audit_bound`, and the call at
+  `temporal/cases.py` lines 887 to 892; not run on a server); `refund-A-1001` is
+  `ventoux-refund-_41-1001`; `_`, `/`, `.` and a two-byte letter are escaped byte by byte; an
+  empty ID is refused; a name of 128 characters is taken and 129 refused; eleven addresses are
+  read as D78 says (`http://localhost.evil.example`, `http://localhost@evil.example`,
+  `http://127.0.0.2`, `ftp://localhost` and an address with no scheme refused); the timeout is
+  10; the key type is `aes256-gcm96`; the mark's path is
+  `/v1/secret/data/ventoux/forgotten/<name>`; an empty mount is refused; a request the recording
+  doesn't hold is refused, naming it.
+- **D61 to D64** (`p6b_d61_to_d64_…`, recordings only): 4 answer forms are taken and 15 refused
+  (prose, a list, a second key, a number, a list as the name, prose around a block, two blocks,
+  two objects, the key twice, another key's case, an empty answer, `{}`, a name with a space, an
+  empty name); the label is "Suggested by the step advisor (untrusted:llm): goodwill"; with
+  `ANTHROPIC_BASE_URL` set to another host the client the provider builds still asks
+  `https://api.anthropic.com` (the SDK object's `base_url`, read; no request sent, no real key);
+  `ventoux advise` and `ventoux draft` exit 2 with no model named, and with a model and no key
+  say `ANTHROPIC_API_KEY is not set`; `draft` exits 1 abandoned with only the record written, 0
+  drafted with both files, and refuses when either file is already there; the record holds the
+  goal, who asked, the provider, each round's answer and problems, the verdict, the reason and
+  `draft_sha256`; the sheet's six parts come in D64's order and hold none of the model's answer;
+  one space added to the draft, a record without `draft_sha256`, a verdict of `abandoned`, and a
+  drafts folder given as the package are each refused with exit 2; `ventoux release` refuses a
+  drafts folder.
+- **D80 to D83** (`p6b_d80_d81_d82_d83_…`): each of the 62 issue codes has an entry expecting it
+  or is one of the three under `refused_first`, which are exactly `UNKNOWN_PLAN`, `UNKNOWN_CASE`
+  and `NESTED_CASE`; an issue with an unlisted code is refused when made; the 25 definitions
+  under `examples/` are each byte for byte in the suite; `ventoux conformance --unchanged` exits
+  0, `--export DIR` writes the package's 90 files and refuses a folder already there; doctor
+  exits 1 when a rule fails (no `pyproject.toml`: every rule still runs), 2 on a `pyproject.toml`
+  that isn't TOML, and with no Temporal reachable gives 3 FAILED and 14 unchecked lines; its 18
+  rules are named `area.rule`; the deployment guide's table lists the same 18 in the same order,
+  and the test that keeps them equal is an `==` of the two lists, so any difference fails it;
+  `--identity` says "(else operator)" and the address "localhost:7233"; `public.json` holds 73
+  names in 22 modules, each importable, and the builder's `__all__` is exactly the names under
+  `ventoux`; the only extra is `anthropic`; a wheel built to a temporary folder passes
+  `scripts/check_wheel.py` and holds 272 files under `ventoux/` and its `.dist-info` only; a
+  description, a title, examples, an alias, three kinds of constraint, a default other than
+  `None`, and a `model_config` (set, strict, or inherited) are each refused when the contract is
+  made, as an input and as an output. A model's docstring is accepted and written as
+  `description`, as pydantic 2.13 wrote it.
+- **Non-negotiables** (`p6b_non_negotiables_d27_d31_d41.py`): the 90 modules of `core` and `case`
+  import in a fresh interpreter with no `temporalio`, `anthropic`, `httpx` or `openai` module
+  loaded; importing the case, plan and forget workflows and the worker loads no `anthropic` and no
+  `ventoux.authoring`; `eval(`, `exec(`, `compile(`, `importlib`, `__import__`, `pickle`,
+  `marshal`, `yaml.load`, `subprocess`, `os.system` and `runpy` occur on 7 lines of `src/`, in
+  four files, none in `core`, `case`, `temporal` or `authoring`: `ventoux/__init__.py` imports
+  the fixed module `ventoux.tooling.builder`; `tooling/deployment.py` imports the catalog, key
+  service and audit store by the name in configuration (D59, D81); `tooling/check.py` runs the
+  builder files named on the command line or found in the configured `cases` folder (D59);
+  `tooling/cli.py` uses `importlib.metadata` for the version. Nothing read from a definition, a
+  story, a draft or a record reaches any of them. **D31**: `start_case` and `start_plan` refuse
+  an ID with `/` before a key is made or the client is asked anything. **D41**: an event sent to
+  a closing case is refused, with a history line and a flag. **D27**: the case's key is built as
+  `<workflow ID>/<first run ID>` (read in `temporal/cases.py` line 723; not run on a server).
+
+### Unproven
+
+- **What a case does on Temporal with the unbounded age of finding 3.** The definition is read
+  and the protobuf duration refuses the wait; whether the workflow task then fails and is retried
+  for ever, or the SDK refuses earlier, was not run on a server.
+- **`ventoux diff` compares a package that `ventoux release` would refuse.** With a role nobody
+  registered in the new package, `diff` exits 0 and prints verdicts (the command-line probe's row
+  "1 when a package or the diff is refused"). D55 says "1 when a package or the diff is refused"
+  without saying a package is validated first, and the summary's validation is a separate, dated
+  amendment, so this is not shown to contradict the brief. I did not run `release` on that
+  package to show it is refused there.
+- **`suite.json` holds no `changes` key** (its keys are `engine`, `entries`, `refused_first`).
+  D80: "the suite's `changes` list gains a line". An empty list left out is the likely reading;
+  `--since` was not run to see how a base with no list and a head with one compare.
+- **A computed field on a contract's output model is accepted** when the contract is made, and
+  the writer leaves it out, as pydantic's default rendering does. Whether such a field can reach
+  the case file was not followed (the runtime reads `model_fields` only, by a reading of
+  `case/runtime.py` lines 1262 to 1271), so no claim.
+- **D59 says `ventoux check` runs the builder files "in its own process".** The code runs them
+  with `runpy` inside the command's process (`tooling/check.py` line 92). If "its own process"
+  means the command's, they agree; if it means a child process, they don't. The sentence can be
+  read both ways.
+
+### Unchecked
+
+- **Decisions not read in this pass:** D35 to D40, D42, D43, D45 (beyond `simulate` running),
+  D48, D49, D53, D54, D58, D60 (beyond the 32 levels), D65, D75 and D79. D53's "forward only" and
+  D54's registry were not run.
+- **Anything needing a Temporal server:** D27's key seen in a real run and across a
+  continue-as-new, D41's `EventRefused` at the client for a closed case, D44's one workflow
+  timer, D77's retries and the 256 KB hold as a running case meets them (only the constants and
+  the call that passes them were read), D75, D81's live rules and `--identity`.
+- **D62 with a transport:** the provider's address was read from the SDK client it builds, with
+  `ANTHROPIC_BASE_URL` set; no request was sent through a fake transport, and no key was used.
+- **D78 against a Vault:** only the recording transport; the binary was not fetched.
+- **D64's escaping of the goal** and D56's code-span fencing were not given hostile input beyond
+  the one literal in the map.
+- **D57's hash check with a contract changed in place** (the path-by-path lines) was not
+  produced: the run compared the catalog with its own promises, which match.
+- **Contradictions between decisions** were looked for only in the decisions read above. Beyond
+  finding 2, the ones met are already recorded by the brief itself (D67's "Replay" corrected by
+  D68; D82's pydantic bound changed by D83) or are in the lead's known list.

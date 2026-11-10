@@ -61,10 +61,15 @@ if kind == "ok":
 emitted = sorted({decision.kind for run in runs for record in run.audit for decision in record.decisions})
 row("D76", "every kind a run's records hold is one of the list", f"{emitted} (from {len(runs)} runs)", set(emitted) <= set(BRIEF) and len(emitted) >= 8)
 first = runs[0].audit
-row("D76", "'a number from 1' and 'An answer that approves pay and so starts it is one record: approved, admitted, started'",
-    f"numbers {[record.number for record in first]}; the second approval's decisions: {[d.kind for d in first[-2].decisions] if len(first) > 1 else []} / {[d.kind for d in first[-1].decisions]}",
-    [record.number for record in first] == list(range(1, len(first) + 1)))
-
+row("D76", "'a number from 1'", [record.number for record in first], [record.number for record in first] == list(range(1, len(first) + 1)))
+ONE = copy.deepcopy(FOUR)
+ONE["steps"]["pay"]["approval"]["count"] = 1
+one = run_case(ONE, FILE, [REVIEW, ("pay", "approve", "sam")], PEOPLE)
+approving = next(record for record in one.audit if record.act.kind == "answered" and any(d.kind == "approved" for d in record.decisions))
+kinds = [decision.kind for decision in approving.decisions]
+asking = next(([d.kind for d in record.decisions] for record in one.audit if any(d.kind == "admitted" for d in record.decisions)), [])
+row("D76", "'An answer that approves pay and so starts it is one record: approved, admitted, started' (the same decision later: 'admitted is an approval asked')",
+    f"the approving answer's decisions: {kinds}; `admitted` is in the record of the answer that had the approval asked: {asking}", kinds == ["approved", "admitted", "started"])
 # D77: the part a sensitive value is sealed for, and the store's refusals.
 with tempfile.TemporaryDirectory() as temporary:
     keys = FileKeys(Path(temporary) / "keys.json")
