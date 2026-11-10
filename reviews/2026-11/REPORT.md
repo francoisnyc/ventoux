@@ -14,6 +14,8 @@ The summary is at the end of this page.
   `3edb471`'s code, whatever commit of the review branch it names.
 - **Baseline:** `uv sync --locked`, then `uv run pytest -q -p no:cacheprovider`: `4694 passed, 3
   skipped in 326.29s`, before any probe was written.
+- **Every probe behind a finding or a "what held" claim has now been run twice,** once by the
+  reviewer who wrote it and once by the lead reviewer, the three heavy replay probes included.
 - **How to read a proof:** every finding names a probe under `reviews/2026-11/probes/`, run from
   the repository root with `uv run python reviews/2026-11/probes/<name>.py`. Each probe's first
   line says what it shows, and its last line is `RESULT: BROKEN - …` or `RESULT: HELD - …`. Each
@@ -1756,6 +1758,26 @@ Proposed fix: keep a few of those histories as fixtures at each merge (the probe
 do it for any commit), and compare what a replay rebuilds, not only that it raises nothing.
 
 ### What held
+
+*Lead reviewer's check.* The three heavy probes behind this section were run again by the lead
+reviewer, one after another, at source `3edb471`:
+
+```
+p2_old_recordings.py 7913429: {'equal': 384, no key (forgotten or withheld by the test): 17, 'no class to replay with': 2, 'REFUSED by Temporal on replay': 1}
+RESULT: BROKEN - of the histories recorded at 7913429, today's code refuses or rebuilds differently 1 (each named above); 384 equal
+p2_old_recordings.py dc2407e: {'equal': 320, no key: 16, 'no class to replay with': 2}
+RESULT: HELD - 320 histories recorded at dc2407e replay with today's code and rebuild what they recorded
+p2_old_recordings.py 2fde255: {'equal': 257, 'no class to replay with': 2, no key: 15}
+RESULT: HELD - 257 histories recorded at 2fde255 replay with today's code and rebuild what they recorded
+p2_time_travel.py
+RESULT: HELD - every history read rebuilds, with today's code, each value the code that recorded it rebuilt (15 could not be read by one of the two)
+p2_hash_seeds.py
+RESULT: HELD - under seeds 0, 1, 2, 3, 4, every decision of every test gave the same states, lines, records, commands and refusals, in the same order
+```
+
+The one history refused at `7913429` is the one finding 1 is about. The counts differ by one from
+the first run's (384 equal, where it gave 383), a test more having recorded a history this time.
+
 
 **Job A: every recorded history, replayed and compared.**
 `uv run python reviews/2026-11/probes/p2_replay_every_history.py` (commit 9b92c1a; the same table
@@ -4153,24 +4175,269 @@ which workflow called a fake.
 
 ## After the six passes: the decisions not yet checked claim by claim
 
-Ran at ecef3d1 (source 3edb471).
+Scope: D35, D36, D37, D38, D39, D40, D42, D43, D48, D49, D53, D54, D58, D65, D75, D79, and more of
+D45 and D60. Each was read in full in `docs/BRIEF.md`, and its checkable claims were run. Every
+command below ran from the repository root at `ecef3d1` (branch `review-2026-11`; the source is
+`3edb471`). Seven probes, 212 rows in all: 211 agree with the brief, 1 does not (finding 1), and
+three more rows are marked "ASKED" or "MINOR, shown not counted" (findings 2 and 3 come from
+them). No guarantee was found broken; the three findings are minor.
+
+| probe (under `reviews/2026-11/probes/`) | decisions | last line |
+| --- | --- | --- |
+| `p7b_d35_d36_d37_validation_and_runtime.py` | D35, D36, D37 | `RESULT: HELD - 37 of 37 claims agree` |
+| `p7b_d38_d39_d40_rules.py` | D38, D39, D40 | `RESULT: HELD - 40 of 40 claims agree` |
+| `p7b_d42_d43_d48_d49_set_steering_limits_transitions.py` | D42, D43, D48, D49 | `RESULT: HELD - 41 of 41 claims agree` |
+| `p7b_d53_migrations.py` | D53 | `RESULT: HELD - 36 of 36 claims agree` |
+| `p7b_d54_d65_d75_temporal.py` | D54, D65, D75 (time-skipping server) | `RESULT: HELD - 23 of 23 claims agree` |
+| `p7b_d58_d60_d79_builder_schema_caller.py` | D58, D60, D79 | `RESULT: BROKEN - D58: MINOR: 'a value that doesn't read back the same is refused' ...` (24 of 25 agree) |
+| `p7b_d45_reading_and_stories.py` | D45 | `RESULT: HELD - 10 of 10 claims agree` |
+
+The probes reach past `public.json` for `parse_case`, `validate_case`, `ventoux.testing.run_case`
+and its catalog, the plan's `parse_plan` and `validate`, `contract_hash`, `preview_migration` and
+`migration_of`, the registry's functions, the builder's `written` and `package`, the rule reader,
+and (the Temporal probe only) the repository's own test helpers. Each probe's header says which.
 
 ### Findings
 
-(interim) One minor so far: across rules on one moment, every rule's stop acts before any rule's
-start (see p7b_d38_d39_d40_rules.py, row "D38/D40 ASKED").
+#### 7b.1 `ventoux check` ends in a traceback, and leaves an empty `case.json`, when a definition holds a text that can't be written (*minor*)
+
+A builder case whose condition compares a field with a text holding a lone surrogate (`"\ud800"`)
+is accepted by the builder's `written`, and `ventoux check` then fails while writing the file: a
+Python traceback, no sentence saying what is wrong or what to do, and a `packages/odd/case.json`
+of 0 bytes left on disk.
+
+Promise touched, D58: "**The same JSON, byte for byte.** ... a number as the decimal the engine
+holds; a value that doesn't read back the same is refused." And CLAUDE.md, conventions: "its error
+message saying what is wrong, then what to do." A text that can't be encoded can't read back at
+all; it is not refused, the command crashes. (Numbers are refused properly: `NaN`, `Infinity`,
+`1E+7000`, `1E+3` and `-0` each give a `TypeError` or `NotWritable` with a sentence; same probe.)
+
+Proof, at `ecef3d1`:
+
+```
+$ uv run python reviews/2026-11/probes/p7b_d58_d60_d79_builder_schema_caller.py
+D58 | (a text holding a lone surrogate ...: what the builder's `written` does with it) | written(): ok; its text as UTF-8: UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 419 ... | yes
+D58 | MINOR: 'a value that doesn't read back the same is refused' (`ventoux check` on a case whose condition holds a lone surrogate ...) | exit 1; a traceback: True; last line: ["UnicodeEncodeError: 'utf-8' codec can't encode character '\\ud800' in position 415: surrogates not allowed"]; files left: {'packages/odd/case.json': 0} | NO
+RESULT: BROKEN - D58: MINOR: 'a value that doesn't read back the same is refused' ...
+```
+
+Why only minor: nothing wrong is released (exit 1, and `--unchanged` would fail on the empty
+file), and the text has to be written on purpose. Proposed fix, in words: have `written` check
+that its text encodes as UTF-8 (it already reads its own output back), refusing with
+`NotWritable` naming the place; and write a package's files only once every file's text exists,
+so a failure leaves nothing half-written.
+
+#### 7b.2 On one moment, a later rule's `stop` acts before an earlier rule's `start`, and no document says so (*minor*)
+
+With three rules on one moment, written in this order: `s1` starts `follow`, `s2` stops `follow`,
+`s3` starts `follow`, the history shows `s2`'s stop first (it finds nothing to stop), then `s1`'s
+start, and `follow` is left open. A rule's `stop`, `set` and `reach` act when the rule fires; its
+`start` is queued and admitted once every rule on the moment has fired
+(`src/ventoux/case/rules.py`: "admission decides, once the rules on this moment have fired
+(brief, D39)"). So "start it, then stop it" written as two rules does the opposite of what its
+order says.
+
+What the brief says: D38, "**Rules run inside the decision, in order.** Moments are taken as they
+happen, the rules on one moment in the definition's order; a milestone a rule reaches is a moment
+too; admission runs again after"; D40, "Inside one `then`, the stop acts first, then `reach`,
+then `start`" (inside one `then` only); D45, the reading's fine print: "a start being a proposal
+that admission decides at once, as a person's". D38's "admission runs again after" does allow
+what the code does, so this is not a broken promise; but D39 never says a rule's start is decided
+after the other rules on its moment, D45's and the reading's "decided at once" reads the other
+way, and the history lists the two rules against the definition's order.
+
+Proof, at `ecef3d1`:
+
+```
+$ uv run python reviews/2026-11/probes/p7b_d38_d39_d40_rules.py
+D39 | 'A step a rule has started in a decision isn't started again by a rule in it (recorded)' | s3#1 on answered review: follow not started: a rule already started it in this decision | yes
+D38/D40 | ASKED, not a promise in these words: with rules written start (s1), stop (s2), start (s3) on one moment, does s1's start act before s2's stop? ... | order in the history: ['s2:stopping follow', 's2:follow not stopped: no run o', 's1:starting follow', 's3:follow not started: a rule a']; follow is left open | yes
+```
+
+Proposed fix, in words: no change to the engine. Say it where an author reads it: one sentence in
+D39 as an amendment ("a rule's start is admitted once every rule on its moment has fired, so a
+stop written after it on the same moment acts first"), the same in the cases guide's "Rules that
+start steps", and reword the reading's fine print from "decided at once" to "decided once the
+rules on this moment have fired, without waiting".
+
+#### 7b.3 A rule's reading writes "stop pay", the words D45 gives as the reading to avoid (*minor*)
+
+The sentence a rule reads as is "... stop pay, then set owed to amount + 1, then reach big, then
+start follow." What the engine does is said only in the fine print beside it ("Stopping pay
+cancels a run waiting to start, at once; a running call is only asked to stop, may still finish,
+and is flagged if it does; a failed run isn't stopped.").
+
+D45: "An action reads as what the engine does, never as its name alone: "stop pay" would read as
+if the payment stops, and a running refund goes through." The fine print keeps the substance (the
+action is not left alone on the page, and the probe checks the fine print is there), so this is
+wording: the brief's own bad example is printed as the sentence.
+
+Proof, at `ecef3d1`:
+
+```
+$ uv run python reviews/2026-11/probes/p7b_d45_reading_and_stories.py
+D45 | 'Every rule reads as one sentence ... (stop, set, reach, start)' | Each time review is answered, whatever the outcome, if amount > 70 (read when it fires): stop pay, then set owed to amount + 1, then reach big, then start follow. | yes
+D45 | MINOR, shown not counted: the sentence itself writes the action as the words D45 gives as the reading to avoid ... | 'stop pay' in the sentence: True | yes
+```
+
+Proposed fix, in words: either the sentence says "ask pay to stop" (or "stop pay's run"), or D45
+is amended to say the sentence names the action and the fine print says what the engine does.
+
+#### Where the brief reads against itself (proposals only; none is in the report's list)
+
+- **D60 against D82, the schemas' place.** D60: "**Two schemas, generated from the models the
+  engine parses with:** `schema/case.schema.json` from `CaseDefinition` and
+  `schema/plan.schema.json` from `Plan`" (and D1's addition of 2026-10-25: "the schema is
+  published, `schema/case.schema.json`"). D82: "the schemas moving from `schema/` at the root to
+  `src/ventoux/schema/` (their `$id` unchanged)". The code follows D82 (probe row "D60/D82":
+  `schema/` doesn't exist, `src/ventoux/schema/` holds both). D60 carries no "Amended ..., by D82"
+  line, though other decisions get one when a later decision changes them (D53: "Amended
+  2026-10-23, by D54"). Proposal: add that line to D60 and to D1's addition.
+- **D45 against D38 and the code, when a rule's start is decided:** see finding 2 ("decides at
+  once" against "admission runs again after").
+- **D79 against D82, already in the report as 5.3; one detail to add.** D79 names "Ventoux's
+  client functions (`start_case`, `answer`, `close`, `propose_change` and the others in
+  `ventoux.temporal.cases`; `propose_forget` and `answer_forget`)" as what the trusted caller
+  calls. All six exist; `close` and `propose_change` are not in `public.json`, and neither are
+  twelve of "the others" (`approval_sheet`, `assign`, `claim`, `give_back`, `preview_migrations`,
+  `propose`, `propose_migration`, `retry`, `send_event`, `shown`, `unassign`, `view`). Probe:
+  `p7b_d58_d60_d79_builder_schema_caller.py`, the three D79 rows.
 
 ### What held
 
-- D35, D36, D37: 37 of 37 claims, `uv run python reviews/2026-11/probes/p7b_d35_d36_d37_validation_and_runtime.py`.
-- D38, D39, D40: 40 of 40, `uv run python reviews/2026-11/probes/p7b_d38_d39_d40_rules.py`.
-- D42, D43 (plain activity step), D48, D49: 41 of 41, `uv run python reviews/2026-11/probes/p7b_d42_d43_d48_d49_set_steering_limits_transitions.py`.
+Every row below is a line of a probe's table, with the brief's words quoted in it.
+
+- **D35** (`p7b_d35_d36_d37_validation_and_runtime.py`, 17 rows). Twelve errors, each with the
+  runtime refusing the same definition while validation is never called (`run_case` only parses):
+  `UNKNOWN_CONTRACT`, `UNKNOWN_INPUT`, `MISSING_INPUT`, `ENGINE_INPUT`, `APPROVAL_REQUIRED`,
+  `APPROVAL_ROLE` (refused when the approval is answered), `UNKNOWN_ROLE`, `EXPRESSION_INVALID`,
+  `WRONG_KIND`, `UNKNOWN_SOURCE` (the case doesn't open), `INPUT_TYPE`, `UNKNOWN_PLAN`. A role
+  nobody registered gives sight of nothing. A message quotes the misspelt literal and neither a
+  title nor an approval's reason; the runtime's refusal quotes no case-file value. One cause, one
+  issue, for a missing contract and for a misspelt role.
+- **D36** (9 rows). The text `"40"` refused where a decimal is taken: in a case's activity input,
+  in a plan field given by a case, and in a plan run alone. A crm reference refused where an
+  orders reference is taken. Contract inputs refused when the contract is made: `float`, `Any`,
+  `int`, a nested model, `Literal[1, 2]`, `bytes`. `OPENER_DECIDES` is a warning, and the run
+  does what it says (scheduled when a system opens, refused when a person does).
+  `SENSITIVE_TO_WORKFLOW` and `NO_SOURCES` are errors the runtime meets too. `APPROVER_CANT_SEE`
+  is a warning; the answer is refused for a person holding only the approving role and accepted
+  for one who also holds the seeing role.
+- **D37** (11 rows). Each of the four warnings with a definition that gives it and a run doing
+  what it says (`OUTCOME_UNREAD`, `MAY_BE_UNSET`, `NEVER_REFRESHED`, `APPROVAL_ELSEWHERE`). `and`
+  and `or` read every part (warned, and the run fails); `if` guards (no warning, the run closes).
+  `SET_AFTER` is an error and an operator's retry fails the same way. The quickstart's committed
+  package warns about nothing, and a declined refund leaves `call_customer` open.
+- **D38** (`p7b_d38_d39_d40_rules.py`, 10 rows). Six moments are read and a seventh is refused
+  naming the six; rules fire in the definition's order and a reached milestone is a moment;
+  entries are `name#1`; a rule named as a step or a milestone is refused; a rule that can't be
+  read needs attention, and an operator's retry reads it again and it acts; a rule reading
+  untrusted data reaches nothing, naming field and source, never the value; `UNTRUSTED_TRIGGER`;
+  `NEVER_FIRES` (both kinds); a firing on the closing milestone is recorded "not applied".
+- **D39** (21 rows). Six "recorded, and nothing runs" cases, each one line; a missing contract
+  fails needing attention; a person's proposal waits for a fresh fact, is refused while the start
+  waits, and is refused when the fact can't be fetched; a rule's start doesn't wait and an
+  operator's retry fetches; nothing starts beside a failed run (rule and person); a second start
+  by a rule in one decision is recorded; `NEVER_STARTS`; `NEVER_CLOSES` with both endings of its
+  sentence; `LOOPS_UNTIL_CLOSED` and its run; an approval whose `when` reads untrusted data is
+  asked anyway, saying why; an untrusted rule condition refuses a `trusted_only` input, naming
+  field and source.
+- **D40** (9 rows). Order stop, set, reach, start in one `then`; one name in `stop` and `start`
+  refused; a non-step in `stop` refused; an open task cancelled saying why; nothing to stop is
+  recorded; a failed run is never stopped; a run failing after its stop needs attention and is
+  never cancelled; a run finishing after its stop is done and flagged; untrusted data stops
+  nothing; `cancellable: false` hashes as not declared, `true` differs.
+- **D42** (`p7b_d42_d43_d48_d49_set_steering_limits_transitions.py`, 13 rows). One kind of writer
+  per field (a person's field refused when read; a rule's field refused at the opening); a rule
+  that reads nothing; sensitive to plain (in the value and in the `when`); a wider view; a list;
+  a step's outcome as target; a constant under an untrusted condition is untrusted; two rules in
+  order, both recorded, the latest stands; the computed value's obtained time is the oldest
+  fact's; a rule acts whole or not at all; `WRITER_DECIDES` with both runs.
+- **D43, on a plain activity step** (9 rows). A steered run reaches nothing, saying why; its
+  output carries `untrusted:customer` beside `system:orders`; a rule on its start neither reaches
+  nor stops, and a value it sets carries the source; a step it starts has it checked against a
+  `trusted_only` input; a step requiring it is steered too; a task requiring it ends it (its
+  `reaches` apply, and the next step is unsteered); an approval doesn't end it; a retry keeps it.
+- **D48** (14 rows). Each shape refused when read: a sensitive, list or `visible_to` payload
+  field; three spellings of two senders; a list set by a rule; two spellings of
+  `since=first_start`; `count` on a plan's approval; three spellings of roles per approver.
+  `KEPT_FROM_STARTING` is a warning, and the history line names step, field and source, never the
+  value.
+- **D49** (5 rows). `UNTRUSTED_TRANSITION`; `UNTRUSTED_TRIGGER` at the case's input; the
+  refusal's sentence equal, word for word, to the brief's with the plan's names; a transition
+  never tried refuses nothing; one tried stops the plan whatever the value.
+- **D53** (`p7b_d53_migrations.py`, 36 rows). Proposer, approver and opener rules; cancelled by a
+  close; six "held under a name the target lacks" refusals, every problem at once; a done run's
+  outcome the target doesn't declare; nothing loosens (sensitive, a wider or dropped
+  `visible_to`, a type); timers kept, measured again, due at the migration's own time when
+  already past (never earlier), cancelled and said; the engine forward only, and alone; a move
+  to where the case already is refused; the preview leaves the state as it was and is refused
+  for a closed case; no rule fires on a migration; values keep their sources; a stale proposal
+  isn't applied; "closed: nothing left to do; paid not reached".
+- **D54** (`p7b_d54_d65_d75_temporal.py`, 16 rows). No registry: `environment_worker` raises
+  before any worker exists, and neither it, a published manifest nor a misspelt name creates
+  one; production unless created for development, a development one hardened, a second create
+  refused; activation says three problems at once (a poller with no manifest, two wrong hashes
+  with builds and short hashes); retiring refused while active, then with an open case, then
+  done; a retired release opens no case and isn't activated again; a development audit store
+  refused in production (D81's amendment); a workflow type moved under an open case refused.
+  `ventoux environment check` exiting 1 on a problem: the repository's own test, run alone on
+  the dev server, `uv run pytest -q -p no:cacheprovider
+  "tests/test_temporal_activate.py::test_the_environment_check_fails_when_a_contract_has_no_live_worker"`
+  gives `1 passed in 3.27s`; it asserts `(fine, broken) == (0, 1)` and the three printed lines.
+- **D65** (1 row). `case_worker`, `plan_worker`, `registry_worker` and `environment_worker` each
+  give a worker whose `workflow_runner` is `SANDBOX` itself.
+- **D75** (6 rows). The child's workflow ID is `claim-7/repair#1` with parent `claim-7`; the
+  parent's history starts it with `PARENT_CLOSE_POLICY_ABANDON`; forgetting the child alone is
+  refused naming its parent; so is any ID with a `/`; a doorbell rung twice after the report
+  landed is recorded twice as "nothing read" and the report lands once; a case's own ID with a
+  `/` is refused.
+- **D58** (`p7b_d58_d60_d79_builder_schema_caller.py`, 14 rows held). Asking an `Expr` for a bool
+  raises in all five forms; `float` and `bool` numbers raise; a plain `True`, `250` or `"yes"`
+  given as `when=` is refused at run time too (a `TypeError` with a sentence), not only by the
+  type checker; both example builders write their committed packages byte for byte, and `ventoux
+  check --unchanged` exits 0 in the quickstart; a default key is left out; five numbers that
+  don't read back are refused; importing the builder loads no `temporalio` module.
+- **D60** (7 rows). Both `$id`s are `https://ventoux.dev/schema/engine-3/...`, the engine's
+  version; draft 2020-12; no object schema with properties allows an unknown key; `ventoux schema
+  --unchanged` exits 0; 24 lax readings (the four kinds) are all refused by the parser; the four
+  corpus tests exist, and `uv run pytest -q -p no:cacheprovider tests/test_schema.py` gives `64
+  passed`.
+- **D79** (1 row). The six client functions it names exist.
+- **D45** (`p7b_d45_reading_and_stories.py`, 9 rows). One sentence in the engine's order; names,
+  not titles; the condition as the renderer writes it; the fine print for a stop; an unknown
+  moment refused; `ventoux simulate` on an example story exits 0 and prints no `1200`; a story
+  with one expected line removed, or one added, exits 1; `uv run pytest -q -p no:cacheprovider
+  tests/test_simulate.py` gives `43 passed`.
+
+A note for whoever reruns probes that call the command: `python -m ventoux.tooling.cli` runs
+nothing and exits 0 (the module has no `__main__` block; the entry point is
+`ventoux.tooling.cli:main`). My first runs of three rows were empty for that reason; the probes
+now call `main()`.
 
 ### Unproven
 
+- D58, "the builder never runs inside the engine, and never on model output": not something a
+  run of mine could show beyond the import row.
+- D43, "across continue-as-new" for a plain activity step: not run here (pass 1a's probes cover
+  continue-as-new for the repeated and case steps it found failing).
+- D53 on Temporal ("a query on Temporal; a closed case's is refused"): shown only on the pure
+  function the query calls (`preview_migration`), not through `preview_migrations` on a server.
+
 ### Unchecked
 
-D53, D54, D58, D60, D65, D75, D79, D45: in progress.
+- D54: "Its workflow can't end while its registry is unreachable", the registry's
+  continue-as-new "after a count of requests", "A worker in another SDK language publishes the
+  same manifest as JSON", and "Polling now is what Temporal's server lists" (the time-skipping
+  server lists no pollers; only the repository's dev-server test above touches it).
+- D75: the daily check of open children, a child ending without ringing, continue-as-new with an
+  open child, the registry's check of a pinned child's release at activation and retirement, and
+  the 5-second wait of a doorbell's read. The task asked for a sample of four; six rows were run.
+- D53: an event decided under the release current when its turn comes; approvals lapsing "word
+  for word"; a running plan finishing on its own plan; a cohort.
+- D39: "The waiting start crosses continue-as-new (D27)".
+- D36: "A plan step carries its case's sources into its plan ... each activity in the plan is
+  checked with that" beyond the two type rows.
 
 
 ---
