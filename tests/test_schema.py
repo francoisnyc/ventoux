@@ -17,6 +17,7 @@ from ventoux.tooling.schema import case_schema, plan_schema
 
 ROOT = Path(__file__).parent.parent
 EXAMPLES = ROOT / "examples"
+PACKAGED = ROOT / "src" / "ventoux" / "schema"  # the committed schemas, shipped in the wheel
 
 # Every committed case definition: the packages, the quickstart's, and the examples the guides
 # and the checks read. Stories are not definitions.
@@ -243,7 +244,7 @@ def test_ventoux_schema_writes_both_files_naming_the_format_they_describe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    assert main(["schema"]) == 0
+    assert main(["schema", "--out", "schema"]) == 0
     said = capsys.readouterr().out
     for name in SCHEMAS:
         written = tmp_path / "schema" / name
@@ -275,9 +276,9 @@ def test_unchanged_fails_on_a_changed_or_missing_schema_naming_the_line_and_writ
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    assert main(["schema"]) == 0
+    assert main(["schema", "--out", "schema"]) == 0
     capsys.readouterr()
-    assert main(["schema", "--unchanged"]) == 0
+    assert main(["schema", "--out", "schema", "--unchanged"]) == 0
     assert "✓ schema/case.schema.json is unchanged" in capsys.readouterr().out
     # A model changed and the schema not regenerated looks like this: one line differs.
     committed = tmp_path / "schema" / "case.schema.json"
@@ -286,7 +287,7 @@ def test_unchanged_fails_on_a_changed_or_missing_schema_naming_the_line_and_writ
     committed.write_text(text.replace('"Ventoux case definition"', '"An old format"'))
     (tmp_path / "schema" / "plan.schema.json").unlink()
     before = snapshot(tmp_path)
-    assert main(["schema", "--unchanged"]) == 1
+    assert main(["schema", "--out", "schema", "--unchanged"]) == 1
     said = capsys.readouterr().out
     assert (
         f"schema/case.schema.json differs from what the models say, first at line {line}:" in said
@@ -299,13 +300,13 @@ def test_unchanged_fails_on_a_changed_or_missing_schema_naming_the_line_and_writ
 
 
 def test_the_committed_schemas_are_what_the_models_say() -> None:
-    # What CI checks, checked here too: the two files at the repository's root.
+    # What CI checks, checked here too: the two files in the package (brief, D82).
     for name in SCHEMAS:
-        committed = (ROOT / "schema" / name).read_text()
+        committed = (PACKAGED / name).read_text()
         assert json.loads(committed)["$id"].endswith(name)
     from ventoux.tooling.schema import schema_files
 
-    assert {name: (ROOT / "schema" / name).read_text() for name in SCHEMAS} == schema_files()
+    assert {name: (PACKAGED / name).read_text() for name in SCHEMAS} == schema_files()
 
 
 def test_ci_checks_the_committed_schemas_unchanged() -> None:
@@ -326,10 +327,10 @@ def test_unchanged_fails_on_a_missing_schema_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    assert main(["schema"]) == 0
+    assert main(["schema", "--out", "schema"]) == 0
     (tmp_path / "schema" / "plan.schema.json").unlink()
     before = snapshot(tmp_path)
-    assert main(["schema", "--unchanged"]) == 1
+    assert main(["schema", "--out", "schema", "--unchanged"]) == 1
     said = capsys.readouterr().out
     assert "✓ schema/case.schema.json is unchanged" in said
     assert "schema/plan.schema.json is missing: ventoux schema writes it" in said
@@ -340,12 +341,28 @@ def test_unchanged_fails_on_other_line_endings_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    assert main(["schema"]) == 0
+    assert main(["schema", "--out", "schema"]) == 0
     committed = tmp_path / "schema" / "case.schema.json"
     committed.write_bytes(committed.read_bytes().replace(b"\n", b"\r\n"))
     before = snapshot(tmp_path)
-    assert main(["schema", "--unchanged"]) == 1
+    assert main(["schema", "--out", "schema", "--unchanged"]) == 1
     said = capsys.readouterr().out
     assert "schema/case.schema.json differs from what the models say, first at line 1:" in said
     assert "the committed line ends with \\r\\n" in said
     assert snapshot(tmp_path) == before
+
+
+def test_ventoux_schema_keeps_the_schemas_in_the_package_and_nowhere_else() -> None:
+    # In the package, so the wheel holds them and an installed `--unchanged` reads what it
+    # installed; one place, so no copy can drift (brief, D82).
+    from ventoux.tooling.schema import SCHEMAS as KEPT
+
+    assert KEPT == PACKAGED
+    assert not (ROOT / "schema").exists()
+    named_old = [
+        str(path.relative_to(ROOT))
+        for folder in ("docs/guides", "examples", "README.md")
+        for path in ([ROOT / folder] if folder.endswith(".md") else (ROOT / folder).rglob("*.md"))
+        if "](schema/" in path.read_text() or "`schema/" in path.read_text()
+    ]
+    assert named_old == []

@@ -134,7 +134,7 @@ def schema_files() -> dict[str, str]:
         described = schema.pop("description", "")
         header = {
             "$schema": DRAFT,
-            "$id": f"https://ventoux.dev/schema/engine-{ENGINE}/{name}",
+            "$id": f"{SCHEMA_BASE}{name}",
             "title": title,
             "description": f"{what} {described} {SHAPE_ONLY}",
         }
@@ -142,6 +142,15 @@ def schema_files() -> dict[str, str]:
         # which a definition never does; the layout is the same, two spaces and a final newline.
         files[name] = json.dumps(header | schema, indent=2, ensure_ascii=False) + "\n"
     return files
+
+
+# What each schema's `$id` starts with: the format, named by the engine that parses it (brief, D51,
+# D60).
+SCHEMA_BASE = f"https://ventoux.dev/schema/engine-{ENGINE}/"
+
+# Where the schemas are kept: in the package, so the wheel holds them and an installed
+# `ventoux schema --unchanged` reads what it installed (brief, D82).
+SCHEMAS = Path(__file__).parent.parent / "schema"
 
 
 def write_schemas(out: Path, unchanged: bool) -> int:
