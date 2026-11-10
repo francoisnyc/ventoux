@@ -230,6 +230,24 @@ def test_other_contract_differences_are_said_not_proven() -> None:
     ]
 
 
+def test_a_contracts_differences_dont_read_pydantics_rendering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The diff reads the models as Ventoux writes them, never pydantic's rendering, which
+    # changes between versions (brief, D83): the same lines with it made to fail if read.
+    with_a_fee = create_model("RefundOutput", refund_id=(str, ...), fee=(Decimal, ...))
+    catalog = catalog_with(refund_contract(6, refund_input(trusted_only()), output=with_a_fee))
+    before = lines(diff(packed(refund()), packed(calling("payments.refund@6")), catalog))
+
+    def unread(model: type[BaseModel], /, *args: object, **kwargs: object) -> dict[str, object]:
+        raise AssertionError(f"pydantic's rendering of {model.__name__} was read")
+
+    monkeypatch.setattr(BaseModel, "model_json_schema", classmethod(unread))
+    after = lines(diff(packed(refund()), packed(calling("payments.refund@6")), catalog))
+    assert after == before
+    assert any("output.required" in line for line in after)
+
+
 def test_a_verdict_names_its_comparison() -> None:
     # Looser or stricter only from a comparison on the closed list; not proven from none.
     with pytest.raises(ValueError, match="looser needs one of COMPARISONS"):

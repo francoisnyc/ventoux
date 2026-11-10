@@ -1,0 +1,298 @@
+{
+  "pydantic": "2.13.5",
+  "models": {
+    "Plain": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "yes_or_no": {
+          "title": "Yes Or No",
+          "type": "boolean"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Amount"
+        },
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "one": {
+          "const": "only",
+          "title": "One",
+          "type": "string"
+        },
+        "one_of": {
+          "enum": [
+            "low",
+            "high"
+          ],
+          "title": "One Of",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "yes_or_no",
+        "amount",
+        "day",
+        "one",
+        "one_of"
+      ],
+      "title": "Plain",
+      "type": "object"
+    },
+    "Optional": {
+      "properties": {
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Text"
+        },
+        "text_or_none": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Or None"
+        },
+        "yes_or_no": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Yes Or No"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount"
+        },
+        "day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Day"
+        },
+        "one": {
+          "anyOf": [
+            {
+              "const": "only",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "One"
+        },
+        "one_of": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "One Of"
+        }
+      },
+      "required": [
+        "text",
+        "one_of"
+      ],
+      "title": "Optional",
+      "type": "object"
+    },
+    "Marked": {
+      "properties": {
+        "customer": {
+          "title": "Customer",
+          "type": "string",
+          "x-input-policies": [
+            {
+              "kind": "trusted_only"
+            }
+          ],
+          "x-reference": "crm"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Amount",
+          "x-input-policies": [
+            {
+              "kind": "only_from",
+              "systems": [
+                "opener",
+                "crm"
+              ]
+            }
+          ]
+        },
+        "maybe": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maybe",
+          "x-input-policies": [
+            {
+              "kind": "trusted_only"
+            }
+          ]
+        },
+        "status": {
+          "title": "Status",
+          "type": "string",
+          "x-source": "system:kyc"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "string",
+          "x-source": "untrusted:llm"
+        }
+      },
+      "required": [
+        "customer",
+        "amount",
+        "status",
+        "notes"
+      ],
+      "title": "Marked",
+      "type": "object"
+    },
+    "Named": {
+      "properties": {
+        "address_2nd": {
+          "title": "Address 2Nd",
+          "type": "string"
+        },
+        "URL_v2": {
+          "title": "Url V2",
+          "type": "string"
+        },
+        "camelCase": {
+          "title": "Camelcase",
+          "type": "string"
+        },
+        "a": {
+          "title": "A",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address_2nd",
+        "URL_v2",
+        "camelCase",
+        "a"
+      ],
+      "title": "Named",
+      "type": "object"
+    },
+    "Documented": {
+      "description": "What it is.\n\nIndented, then not.",
+      "properties": {
+        "order_id": {
+          "title": "Order Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "title": "Documented",
+      "type": "object"
+    },
+    "Inherited": {
+      "properties": {
+        "order_id": {
+          "title": "Order Id",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id",
+        "status"
+      ],
+      "title": "Inherited",
+      "type": "object"
+    },
+    "Empty": {
+      "properties": {},
+      "title": "Empty",
+      "type": "object"
+    }
+  }
+}

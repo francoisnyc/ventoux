@@ -8,9 +8,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import GetJsonSchemaHandler
-from pydantic_core import CoreSchema
-
 from ventoux.core.expressions import Expression
 from ventoux.core.provenance import CASE, fields_read, is_trusted, is_untrusted
 
@@ -28,19 +25,8 @@ class Policy:
         raise NotImplementedError
 
     def promise(self) -> dict[str, Any]:
-        """The policy as data, in the input's JSON Schema: `{"kind": "trusted_only"}`."""
+        """The policy as data, in the input's promise: `{"kind": "trusted_only"}` (brief, D83)."""
         raise NotImplementedError
-
-    # Pydantic: on an object inside `Annotated[...]`, `__get_pydantic_json_schema__` is called when
-    # the model's JSON Schema is made, and may add to the field's schema.
-    def __get_pydantic_json_schema__(
-        self, core_schema: CoreSchema, handler: GetJsonSchemaHandler
-    ) -> dict[str, Any]:
-        # The policy goes into the published schema, which the contract hash covers: adding or
-        # changing a policy changes the contract (brief, D21).
-        schema: dict[str, Any] = handler(core_schema)
-        schema.setdefault("x-input-policies", []).append(self.promise())
-        return schema
 
 
 @dataclass(frozen=True)

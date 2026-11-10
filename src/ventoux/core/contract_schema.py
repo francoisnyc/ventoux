@@ -6,6 +6,12 @@ for exactly the field shapes a contract may have. Anything else is refused, neve
 other way (fail closed). See docs/layers/fix-contract-rendering.md.
 """
 
+import inspect
+from datetime import date
+from decimal import Decimal
+from types import NoneType, UnionType
+from typing import Any, Literal, Union, get_args, get_origin
+
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
@@ -31,7 +37,85 @@ def contract_schema(model: type[BaseModel]) -> dict[str, object]:
         raise Unwritable(f"{model.__name__} sets model_config: a contract's model sets none.")
     for name, field in model.model_fields.items():
         refuse_extras(model, name, field)
-    return model.model_json_schema()
+    fields = model.model_fields
+    schema: dict[str, object] = {
+        "properties": {name: field_schema(model, name, field) for name, field in fields.items()},
+        "title": model.__name__,
+        "type": "object",
+    }
+    required = [name for name, field in fields.items() if field.is_required()]
+    if required:  # left out when nothing is, as pydantic 2.13 did
+        schema["required"] = required
+    # The class's own docstring, never a parent's: Python gives each class its own `__doc__`.
+    if model.__doc__:
+        schema["description"] = inspect.cleandoc(model.__doc__)
+    return schema
+
+
+# A decimal is a number, or a text shaped like one, as pydantic 2.13 wrote it. Read left to right:
+#   (?!^[-+.]*$)   not only signs and dots
+#   [+-]?          an optional sign
+#   0*\d*          digits (leading zeros allowed)
+#   \.?\d*         an optional dot, then digits
+DECIMAL = [
+    {"type": "number"},
+    {"pattern": r"^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$", "type": "string"},
+]
+
+
+def field_schema(model: type[BaseModel], name: str, field: FieldInfo) -> dict[str, object]:
+    """One field: its type, possibly optional, `default: null` if it has `= None`, its title,
+    and its marks."""
+    annotation = field.annotation
+    # typing: `str | None` is a union; its other member is the type.
+    optional = get_origin(annotation) in (Union, UnionType) and NoneType in get_args(annotation)
+    if optional:
+        members = [member for member in get_args(annotation) if member is not NoneType]
+        if len(members) != 1:
+            raise Unwritable(f"{name} ({model.__name__}) is {annotation}: {A_FIELD}.")
+        annotation = members[0]
+    schema = type_schema(model, name, annotation)
+    if optional:  # one list of choices, a decimal's two forms included, then null
+        choices = schema.pop("anyOf", None) or [dict(schema)]
+        schema = {"anyOf": [*choices, {"type": "null"}]}
+    if not field.is_required():
+        schema["default"] = None  # the only default a contract's field may have
+    schema["title"] = title(name)
+    for mark in field.metadata:  # in the order written; refuse_extras let only marks through
+        if isinstance(mark, Policy):
+            policies = schema.setdefault("x-input-policies", [])
+            assert isinstance(policies, list)
+            policies.append(mark.promise())
+        elif isinstance(mark, Reference):
+            schema["x-reference"] = mark.system
+        elif isinstance(mark, OutputSource):
+            schema["x-source"] = mark.source
+    return schema
+
+
+def type_schema(model: type[BaseModel], name: str, annotation: Any) -> dict[str, Any]:
+    """A field's type, as pydantic 2.13 wrote it: a text, true or false, a decimal, a day, or one
+    of some texts. `Unwritable` for any other type (fail closed)."""
+    if annotation is str:
+        return {"type": "string"}
+    if annotation is bool:
+        return {"type": "boolean"}
+    if annotation is Decimal:
+        return {"anyOf": [dict(choice) for choice in DECIMAL]}
+    if annotation is date:
+        return {"format": "date", "type": "string"}
+    # typing: `Literal["low", "high"]` takes exactly those values; get_args gives them.
+    texts = get_args(annotation)
+    if get_origin(annotation) is Literal and all(isinstance(text, str) for text in texts):
+        if len(texts) == 1:
+            return {"const": texts[0], "type": "string"}
+        return {"enum": list(texts), "type": "string"}
+    raise Unwritable(f"{name} ({model.__name__}) is {annotation}: {A_FIELD}.")
+
+
+def title(name: str) -> str:
+    """A field's title, as pydantic derives it from its name: `address_2nd` gives `Address 2Nd`."""
+    return name.title().replace("_", " ").strip()
 
 
 # What pydantic would write into a field's schema, or use to name it, beside its type: never in a
