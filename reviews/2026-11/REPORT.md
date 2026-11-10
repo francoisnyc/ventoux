@@ -1,6 +1,9 @@
 # Whole-project review of Ventoux, November 2026
 
-**Status: all six passes are done.** The summary is at the end of this page.
+**Status: all six passes are done,** and a further round is closing what they left unchecked:
+the in-memory findings were run on a Temporal worker (all eleven reproduce there; section 7a),
+and the decisions pass 6 did not check claim by claim are being checked (section 7b, to come).
+The summary is at the end of this page.
 
 - **A correction to the task's own numbers:** `tests/histories` holds 68 files, of which 34 are
   recorded histories and one a carried state; the other 33 are the key files beside them.
@@ -19,6 +22,9 @@
 - **Severity:** *breaks a promise* (a guarantee can be broken, shown by a run); *weakens one* (it
   holds today, but nothing would notice if it stopped); *misleads* (a document or a message says
   something untrue); *minor*.
+- **In memory and on Temporal:** findings 1a.1 to 1a.4, 1b.1, 1b.2, 1b.3, 1b.5, 1b.6, 1b.8 and 3.3
+  were first shown on the in-memory runtime; each was then run on a Temporal worker and gives the
+  same wrong outcome there (section 7a).
 - **Finding numbers** name the pass and the finding in it: `1a.2` is the second finding of pass 1,
   part a.
 
@@ -45,7 +51,7 @@
 | 1b.3 | A child's reported field named `outcome` replaces `<step>.outcome` in the parent with a person's free text, which validation accepts and the step advisor is then sent (D61, D74). |
 | 1c.8 | A raw signal carrying `NaN` or `Infinity` makes the case's workflow task fail for good; needs a caller that signals with Temporal's client directly, which D79 forbids and Temporal doesn't prevent (D17). |
 | 3.1 | A `VAULT_TOKEN` ending with a line break is quoted in an error that is neither `KeyRefused` nor `KeyUnavailable`: it reaches the caller of `start_case`, Temporal's history and the worker's output (D31, D78). |
-| 3.3 | A contract validator's own message is copied in clear into the history, the needs-attention line and the audit record, a sensitive field's value with it (D30, D31); shown on the in-memory engine. |
+| 3.3 | A contract validator's own message is copied in clear into the history, the needs-attention line and the audit record, a sensitive field's value with it (D30, D31). On Temporal it is also in the raw workflow history, as the audit export activity's input, where the same value quoted by the activity's own failure reads `‹sensitive›` (7a). |
 | 3.2 | A `404` from any server is read as Vault's answer "never made", for good, and `ventoux doctor` says `keys.reachable` passed of a server that isn't Vault (D78, D81). |
 | 3.4 | A path that isn't there reads as nothing to compare, exit 0: `ventoux summary --packages`, `conformance --since`, `check` and `check --unchanged` (D55 as amended in 13e: "anything it can't read ... fails the step"; D59, D80). |
 | 2.1 | A migration the case refused, and recorded as refused, for an engine version its code didn't know is taken when a later worker replays the history: the refusal is decided from the code's own list on every replay, behind no engine version or patch (D51, D53, D76). |
@@ -3942,6 +3948,233 @@ Each line names the probe that shows it. All ran at `b464f3f`.
 
 ---
 
+## After the six passes: the in-memory findings, run on a Temporal worker
+
+Ran at `ecef3d1` (branch `review-2026-11`; source is `3edb471`). Every case below ran as a
+`ventoux.case` workflow on Temporal's local time-skipping test server, served by `case_worker`
+with the supported converter (`data_converter`, one key per case) and a `FileAudit` store, through
+the harness an earlier pass wrote (`p1c_harness.py`). A plan step ran as a real `ventoux.plan`
+child workflow, a case step's child as a real `ventoux.case` child workflow (D75). The definitions,
+people and values are the in-memory probes' own: each `p7a_*` probe imports the `p1a_*`, `p1b_*` or
+`p3_*` probe it carries over and reuses its definitions.
+
+Answer in one line: **all eleven findings reproduce on Temporal, with the same wrong outcome, and
+nothing on the Temporal side stops any of them.** One is worse there (3.3: the sensitive value is
+also in clear in the raw workflow history). No stuck workflow task appeared anywhere.
+
+| Finding | On Temporal | What was read there | Probe |
+|---|---|---|---|
+| 1a.1 repeated step drops steering | reproduced | report; what the worker was given | `p7a_trust_on_temporal.py` |
+| 1a.2 case step drops steering | reproduced | parent's and child workflow's reports; worker | `p7a_trust_on_temporal.py` |
+| 1a.3 child's declared untrusted mark dropped | reproduced | both reports; worker | `p7a_trust_on_temporal.py` |
+| 1a.4 `max_age` refresh launders steering | reproduced (three days skipped) | report; worker | `p7a_trust_on_temporal.py` |
+| 1b.1 plan wait's answerer approves | reproduced | report; worker | `p7a_people_on_temporal.py` |
+| 1b.2 change request in child by parent's opener or step's proposer | reproduced (all four) | child workflow's report | `p7a_people_on_temporal.py` |
+| 1b.3 child's reported field named `outcome` | reproduced | report; `view` query; `advisor_view` query | `p7a_people_on_temporal.py` |
+| 1b.5 hidden value into and out of a child | reproduced | `view` query as `support`, on each workflow | `p7a_people_on_temporal.py` |
+| 1b.6 parent's own close, or its rule's stop, cancels the child's failed run | reproduced (both) | both reports | `p7a_people_on_temporal.py` |
+| 1b.8 a `when`'s decider approves inside a plan or child | reproduced (both) | reports; worker | `p7a_people_on_temporal.py` |
+| 3.3 validator's message with a sensitive value in clear | reproduced, and worse | report; raw history bytes; audit file | `p7a_validator_message_on_temporal.py` |
+
+### Findings
+
+These are not new findings: each is the report's finding, now proven on Temporal too. The
+severity, the promise quoted and the proposed fix stay as REPORT.md states them for each. What is
+added is the proof on Temporal, and for 3.3 one more place.
+
+#### The four trust findings reproduce on Temporal (1a.1 to 1a.4; breaks a promise, as reported)
+
+```
+$ uv run python reviews/2026-11/probes/p7a_trust_on_temporal.py      (about 12 s; ran three times, same result)
+1a.1 on Temporal: REPRODUCED - the plain step is refused (untrusted:customer) and nothing reaches the worker; repeated, the worker really ran letters.draft@2 2 times with to_customer 'a@example.com', and: an untrusted `when` chose a trusted-only send; a rule on its start reached settled; a step requiring it reached settled; a repeated step requiring a steered wait sent
+1a.2 on Temporal: REPRODUCED - as a plan step nothing is reached and the plan stops; as a case step the parent reached ['began', 'written', 'followed'], the child workflow's letter reached the worker ('a@example.com'), the value a rule set on its start keeps untrusted:customer: False ('mark#1 on started write: setting seen, from system:opener'; as a plan step '... from system:opener, untrusted:customer'), and the timer on the rule-started step's start reached began: True
+1a.3 on Temporal: REPRODUCED - alone, summary is from system:opener, untrusted:llm and the letter is refused; as the child workflow no line names untrusted:llm, the child reached urgent (True), the worker ran its letter with to_customer 'urgent' (...), and the parent sent the reported value on to the worker (True; 'scheduled reply#1: letters.draft@2 (to_customer from case:intake, system:opener; ...')
+1a.4 on Temporal: REPRODUCED - answered at once, and with no text, confirm#1 fails and the worker is given nothing; after three skipped days check#2 runs clean, the case reached ['began', 'checked', 'confirmed'] and the worker ran letters.draft@2 with to_customer 'delivered'
+RESULT: BROKEN - 4 of 4 findings reproduce on Temporal: 1a.1, 1a.2, 1a.3, 1a.4
+```
+
+What the run adds to the in-memory proof:
+- The trusted-only input really reaches the activity worker. The probe wraps each fake and records
+  what it was called with, by the workflow that scheduled it: in each control the worker is given
+  nothing, in each attack it is called.
+- 1a.2 and 1a.3 hold across a real child workflow. `child_start` hands the child each opening
+  field's sources (`ParentStart`), and the child's own history line reads `to_customer from
+  system:opener`: neither the parent's steering nor the child's own declared `untrusted:llm` is
+  there.
+- 1a.4 needs time to pass: `environment.sleep` of three days on the time-skipping server gives
+  `refreshing check.status for confirm: obtained 3 days ago, at most 1 day`, then a clean
+  `check#2`, exactly as in memory.
+- The history lines are word for word the in-memory ones, apart from the idempotency keys
+  (`<case ID>/<run ID>/<entry>`) and the child's `opened on write 1, engine 3`.
+
+#### The six findings about people reproduce on Temporal (1b.1, 1b.2, 1b.3, 1b.5, 1b.6, 1b.8; as reported)
+
+```
+$ uv run python reviews/2026-11/probes/p7a_people_on_temporal.py     (about 40 s; ran twice, same result)
+1b.1 on Temporal: REPRODUCED - as a task, sam's approval of pay is refused and nothing is paid; with the decision in the plan child workflow, sam's signal answered decide#1, sam approved pay.approval#1 and the worker ran payments.refund@2 (250)
+1b.2 on Temporal: REPRODUCED - in one case the opener's approval is refused; in the child workflow these were approved and applied: an edit, approved by the parent's opener; a skip of a failed run, approved by the parent's opener; an edit, approved by the case step's proposer; a skip, approved by the case step's proposer
+1b.3 on Temporal: REPRODUCED - the child workflow closed by itself ('closed: nothing left to do'), yet the parent's repair.outcome is the text sam typed (from ['case:repair', 'person:sam']), so pay (when repair.outcome == 'done') never starts and the worker is given no payment; the step advisor's view holds the text: True
+1b.5 on Temporal: REPRODUCED - by the `view` query on each workflow: support, who may not see fraud_score, reads 77 as the child's `score`; support, who may not see the child's margin, reads 41 as the parent's repair.margin
+1b.6 on Temporal: REPRODUCED - in one case the failed pay#1 keeps the case open; in a child workflow the failed parts#1 (payments.refund@2, tried 5 times by the worker, each unreachable) was cancelled and the child closed with no person and nothing needing attention, by: the parent's closes_when (flags: none); a parent's rule's stop (flags: none)
+1b.8 on Temporal: REPRODUCED - as a call step sam's approval is refused and nothing is paid; wrapped in a plan step and in a case step sam's approval is taken in the child workflow and the worker ran payments.refund@2
+RESULT: BROKEN - 6 of 6 findings reproduce on Temporal: 1b.1, 1b.2, 1b.3, 1b.5, 1b.6, 1b.8
+```
+
+What the run adds:
+- Each control is refused on Temporal as in memory, as a recorded line (a signal can't raise):
+  `refused sam's answer approve to pay.approval#1: sam set review.outcome, which decides whether
+  pay runs, so cannot approve it`; `refused lee's answer approve to case.change#1: lee opened the
+  case, so cannot approve a change to it`.
+- People answered by the signals the Ventoux API would send (`answer`, `propose`,
+  `propose_change`, `send_event`); a plan's wait by the plan workflow's `answer` signal to
+  `<case ID>/<entry>`, as the repository's own tests do.
+- 1b.5 was read with the `view` query by role, as asked: on the parent, `Fraud score: hidden
+  (needs fraud)`; on the child workflow, `Score given by the parent: 77, from system:opener`; and
+  the parent's values for `support` hold `repair.margin` 41 while the child says `Our margin:
+  hidden (needs fraud)`.
+- 1b.3's second half was read with the `advisor_view` query: its answer holds the person's text.
+- 1b.6: the failure is a real one on Temporal (the worker called five times, the contract's retry
+  policy, each raising `ConnectionError`; time skipped between tries). The child's report said
+  `needs attention ['parts#1: payments.refund@2 failed with ConnectionError: ‹sensitive›']`
+  before the parent acted, and after it `cancelled parts#1: closed by its parent: reviewed
+  reached`, status closed, nothing needing attention, no flag on either case.
+
+#### 7a.3.3 reproduces on Temporal, and there the value is also in clear in the raw workflow history (breaks a promise)
+
+The validator's message is in clear in the case's report (`history` and `needs_attention`) and in
+the audit store's file, as in memory. On Temporal it is in one more place: the raw history of the
+case's workflow, as the input of the `ventoux.audit.append` activity that exports the record.
+For the sensitive field's value this is the only place it crosses Temporal in clear: in the
+comparison case (the activity's own failure quoting the same national ID) the value is nowhere in
+the raw history, since the opening value and the activity's input cross sealed with the case's key
+and the failure is not kept.
+
+Promises touched, as the report quotes them. D30: "**A refusal or a failure names the field and
+the kind of value, never the value**". D31: "everyone reads `‹sensitive›` wherever a value would be
+written: history lines, refusals, failures".
+
+```
+$ uv run python reviews/2026-11/probes/p7a_validator_message_on_temporal.py     (about 5 s)
+=== an input refused by the contract's validator (the sensitive field's value) (case val-input)
+    last line of the report's history: look#1 failed: people.lookup@1 doesn't take these inputs: national_id: Value error, '<THE NATIONAL ID>' is not a national ID: write it without spaces
+    in clear in the case's report: ['history', 'needs_attention']
+    in clear in the raw workflow history: ['marker in val-input run 1'] | ['event 7 ACTIVITY_TASK_SCHEDULED ventoux.audit.append']
+    in clear in the audit store's files: ['val-input.jsonl'] (records not yet written: 0)
+    the activity worker was called 0 times
+=== an output refused by the contract's validator (what the system gave) (case val-output)
+    last line of the report's history: look#1 failed: people.status@1 gave an output its contract doesn't declare: status: Value error, '<WHAT THE SYSTEM GAVE>' is not a status
+    in clear in the case's report: ['history', 'needs_attention']
+    in clear in the raw workflow history: ['marker in val-output run 1'] | ['event 13 ACTIVITY_TASK_COMPLETED', 'event 22 ACTIVITY_TASK_SCHEDULED ventoux.audit.append']
+    in clear in the audit store's files: ['val-output.jsonl'] (records not yet written: 0)
+=== comparison: the activity's own failure quoting the sensitive value (case val-fails)
+    last line of the report's history: look#1 failed: people.status@1 failed with RuntimeError: ‹sensitive›
+    in clear in the case's report: nowhere
+    in clear in the raw workflow history: nowhere | no event
+    in clear in the audit store's files: nowhere (records not yet written: 0)
+3.3 on Temporal: REPRODUCED - ...
+RESULT: BROKEN - 1 of 1 findings reproduce on Temporal: 3.3
+```
+
+Reading it with care:
+- `val-input` is the strong case: `national_id` is declared `sensitive`, and its value is in the
+  report, the history bytes (event 7) and the audit file.
+- `val-output`: event 13 is the activity's own completed result, which the system gave and which
+  no field declares sensitive; I don't count that event. Event 22 (the export of the record whose
+  reason quotes it) and the report and audit file are the finding.
+- The case needed its own case workflow class naming the probe's catalog
+  (`p7a_workflows.ValidatedCases`), as a deployment's does: the development catalog has no
+  contract with a validator. So this is "on Temporal with a deployment's own catalog", not with
+  the development worker's catalog.
+
+Proposed fix: the report's (never copy a validator's text into a reason; name the field and the
+kind of failure). Nothing more is needed for the history: once the reason carries no value, the
+export's input carries none.
+
+### What held
+
+- Nothing on the Temporal side stops, changes or adds to any of the eleven: the case workflow
+  decides as `run_case` does, line for line. No workflow task failed or stuck in any of the runs
+  (each scenario is bounded, and would have said so).
+- Both controls that the in-memory probes rely on hold on Temporal too (a plain step, a plan step,
+  a task, a single case: each refused, and the worker given nothing), shown by the same three
+  probes.
+- An activity's own failure quoting a sensitive value reads `‹sensitive›` in the report and the
+  audit file, and the value is nowhere in the raw history
+  (`p7a_validator_message_on_temporal.py`, case `val-fails`).
+
+### Differences between the two runtimes met on the way (not findings of this pass)
+
+- A number given at the opening as the integer `250`, which `run_case` takes in memory, makes the
+  case workflow's start fail on Temporal (`WORKFLOW_EXECUTION_FAILED`, message "Encoded failure");
+  given as `Decimal(250)` the same case opens (scratch run, not a probe: two cases of
+  `p1b_plan_wait_answerer_approves.with_task()`, one with each). The repository's Temporal tests
+  give `Decimal`. The probes give exact decimals for that reason, and say so in a comment. While
+  it lasted, `report` on the failed start answered a blank open report (`status='open'`,
+  `history=[]`), which is the report's existing finding from `p1c_report_of_refused_opening.py`.
+  I did not look for which rule refuses the integer; a team moving a test's file from `run_case`
+  to `start_case` would meet it.
+- The `view` query hides every field of a case whose definition names no role at all (`Summary:
+  hidden (needs )`), so the 1a probes' sources were read from the report's history lines
+  (`to_customer from system:opener`), not from `view`. That is fail closed, and the same in
+  memory, as far as I can tell; not checked further.
+- A draft whose check has errors (`INPUT_POLICY`, `UNTRUSTED_TRIGGER`) opens on Temporal as it
+  runs in memory: `start_case` on a definition does not run the catalog check. The in-memory
+  probes already show which findings the check flags and which it is silent on; unchanged here.
+
+### Unproven
+
+- That the validator's message stays readable in the raw history once the case is forgotten (its
+  key destroyed). It is plain text in an activity's input, so I expect it to, as the report's
+  1c finding on option checks shows for their inputs, but I did not run a forget on `val-input`.
+
+### Unchecked
+
+- A real Temporal cluster, and the development worker started from the command line: everything
+  ran on the local time-skipping test server with a worker built by `case_worker` in the probe's
+  process.
+- Replay of the recorded histories of these cases (another pass covers replay).
+- 1b.4, 1b.7 and 1b.9 to 1b.11, and the other pass 1a and pass 3 findings: not in this task's list.
+
+### Probes
+
+- `reviews/2026-11/probes/p7a_trust_on_temporal.py` (1a.1 to 1a.4)
+- `reviews/2026-11/probes/p7a_people_on_temporal.py` (1b.1, 1b.2, 1b.3, 1b.5, 1b.6, 1b.8; one
+  finding alone: add its number, e.g. `... p7a_people_on_temporal.py 1b.6`)
+- `reviews/2026-11/probes/p7a_validator_message_on_temporal.py` (3.3)
+- `reviews/2026-11/probes/p7a_harness.py`, `p7a_workflows.py`: helpers, not probes.
+
+Reached past the supported names for: `ventoux.testing` (development catalog, workflows, fakes,
+`release_of`), the tests' server harness through `p1c_harness.py`, the plan workflow's `answer`
+signal (`ventoux.temporal.workflow.Sent`), `Catalog`, `FileAudit`, and `activity.info()` to tell
+which workflow called a fake.
+
+
+---
+
+## After the six passes: the decisions not yet checked claim by claim
+
+Ran at ecef3d1 (source 3edb471).
+
+### Findings
+
+(interim) One minor so far: across rules on one moment, every rule's stop acts before any rule's
+start (see p7b_d38_d39_d40_rules.py, row "D38/D40 ASKED").
+
+### What held
+
+- D35, D36, D37: 37 of 37 claims, `uv run python reviews/2026-11/probes/p7b_d35_d36_d37_validation_and_runtime.py`.
+- D38, D39, D40: 40 of 40, `uv run python reviews/2026-11/probes/p7b_d38_d39_d40_rules.py`.
+- D42, D43 (plain activity step), D48, D49: 41 of 41, `uv run python reviews/2026-11/probes/p7b_d42_d43_d48_d49_set_steering_limits_transitions.py`.
+
+### Unproven
+
+### Unchecked
+
+D53, D54, D58, D60, D65, D75, D79, D45: in progress.
+
+
+---
+
 ## Summary
 
 **Findings by severity** (one line each in the list at the top; a line that names two numbers is
@@ -3992,9 +4225,9 @@ passing (4.1, 4.2, 4.4).
 - **A real Temporal cluster with mTLS, and macOS.** Every Temporal run used the time-skipping
   test server on Linux; one pass also used the local development server. `ventoux doctor`'s live
   rules were not run against a deployment.
-- **Pass 1's in-memory findings on Temporal.** Parts a and b ran on the in-memory runtime; the
-  Temporal case workflow runs the same deciding code, but 1a.1 to 1a.4, the part b findings and
-  3.3 were not run there.
+- **Pass 1's in-memory findings on Temporal:** since checked. All eleven (1a.1 to 1a.4, 1b.1,
+  1b.2, 1b.3, 1b.5, 1b.6, 1b.8, 3.3) reproduce on a Temporal worker (section 7a); the other
+  part b findings (1b.7, 1b.9, 1b.10, 1b.11) were not carried over.
 - **A live model provider.** No key was used; the step advisor and the authoring loop were run on
   recordings.
 - **Pass 3's sweep was not exhaustive:** every `except` handler in `core`, `tooling` and
