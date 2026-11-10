@@ -458,6 +458,25 @@ def test_an_approval_from_a_role_that_may_not_approve_the_risk_is_refused() -> N
     assert "sam answered approve as support-lead" in lines(run)
 
 
+def test_a_role_the_approval_doesnt_list_never_approves_for_it() -> None:
+    # The approval lists `support` alone, which may approve no risk. Sam also holds
+    # `support-lead`, which may approve high risk and isn't listed: it doesn't count, so Sam's
+    # answer is refused on the listed role, and nothing is paid (brief, D23).
+    run = run_plan(
+        approving(roles=["support"]),
+        fields=REFUND,
+        answers=[("approve_refund", "approve", "sam")],
+        people=PEOPLE,
+    )
+    assert refusals(run) == [
+        (
+            "refused sam's answer approve: support may approve no risk, and payments.refund@2 is "
+            "high risk"
+        )
+    ]
+    assert not any("answered approve" in line for line in lines(run))
+
+
 def reviewing_then_approving() -> dict[str, Any]:
     """The guide's review-and-pay: support sets the amount, a team lead approves paying it."""
     plan = reviewing()
