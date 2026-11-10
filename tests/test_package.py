@@ -6,8 +6,8 @@ import ast
 import importlib
 import json
 import subprocess
-import textwrap
 import sys
+import textwrap
 import tomllib
 import zipfile
 from importlib import metadata
