@@ -86,3 +86,24 @@ jobs:
           --before base-promises.json
           --summary-file "$GITHUB_STEP_SUMMARY"
           --base-commit "$BASE_COMMIT" --head-commit "$(git rev-parse HEAD)"
+
+  # The wheel a release would publish (layer 20c, brief D82): built, checked for what it holds and
+  # never may, installed into a fresh environment, and run from outside the repository, where only
+  # what the wheel installed can be read. Never published: the tag and the publish are the
+  # maintainer's (docs/guides/releasing-ventoux.md).
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --out-dir dist
+      - run: uv run --no-project python scripts/check_wheel.py dist/ventoux-*.whl
+      - run: uv venv /tmp/installed
+      - run: uv pip install --python /tmp/installed dist/ventoux-*.whl
+      - run: /tmp/installed/bin/ventoux version
+        working-directory: /tmp
+      - run: /tmp/installed/bin/ventoux schema --unchanged
+        working-directory: /tmp
+      - run: /tmp/installed/bin/ventoux conformance --unchanged
+        working-directory: /tmp

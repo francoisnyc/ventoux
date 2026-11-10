@@ -48,7 +48,7 @@ from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.testing import CATALOG, CaseRefused, EventRefused, run_case, send
 from ventoux.tooling.cli import main
-from ventoux.tooling.schema import case_schema, schema_files
+from ventoux.tooling.schema import SCHEMAS, case_schema, schema_files
 
 ROOT = Path(__file__).parent.parent
 
@@ -202,7 +202,7 @@ def test_the_published_schema_holds_the_date_and_no_today() -> None:
     assert "today" not in written
     # Regenerated with `ventoux schema`; CI's `--unchanged` checks the same bytes.
     for name, text in schema_files().items():
-        assert (ROOT / "schema" / name).read_text() == text
+        assert (SCHEMAS / name).read_text() == text
 
 
 # --- An activity's output: a date is read as every entry point reads one (tutor review) ---

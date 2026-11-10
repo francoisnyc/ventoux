@@ -3479,6 +3479,38 @@ keeps the earlier rule until it continues as new, and a case worker it accepted 
 until it publishes again. Doctor fails a production registry holding a case worker's manifest
 whose key provider or audit store is for development, or that doesn't say, so that window is seen.
 
+### D82. The published package
+
+*Decided 2026-11-08, in layer 20 (`docs/layers/20-deployment.md`, question 5); written
+2026-11-10, before 20c is built. Adds to D51, D59, D60 and D80, whose text is kept.*
+
+- **The package is `ventoux`, versioned on its own:** semantic versioning, `0.y.z` until v1.0
+  (after layer 21), the first release `0.1.0`. The package's version, the engine version (D51)
+  and the schema's `$id` (D60) are three things; `ventoux version` says all three. The version is
+  written once, in `pyproject.toml`; the command reads it from the installed package's metadata.
+- **The wheel holds the code, `py.typed`, the licence, the two JSON Schemas and the conformance
+  suite,** the schemas moving from `schema/` at the root to `src/ventoux/schema/` (their `$id`
+  unchanged), since a wheel holds only the package: one place, read by `ventoux schema
+  --unchanged` in the repository and installed alike. **It never holds** tests, examples, docs,
+  scripts, a key or certificate, a key file, or a recording: a wheel that does, or that lacks a
+  file it must hold, fails CI, naming the file. `ventoux.testing` ships, for teams' tests.
+- **Extras: `anthropic` only.** Vault needs none.
+- **pydantic is bounded below its next minor version** (`>=2.13.5,<2.14`): a contract's hash is
+  made from pydantic's JSON Schema of its models, which 2.14 writes otherwise for a decimal
+  field, so under another minor version contracts would hash differently and the lock and the
+  registry refuse their workers (D54). Found by the package's fresh install in 20c. Raising the
+  bound is a release of its own, checked against the lock; making the hash independent of
+  pydantic's rendering is a later decision.
+- **The supported imports are a committed list,** `src/ventoux/public.json`: the names the guides
+  tell teams to import, the builder's `__all__`, and the protocols a deployment implements.
+  Everything else is internal: importable, unsupported, free to change. A listed name that
+  disappears fails a test, so removing one is a decision, as a contract change is; a name a guide
+  imports that the list doesn't hold fails too.
+- **A release is built and checked, never published, by CI:** `uv build`, then the wheel installed
+  in a fresh environment runs `ventoux version`, `ventoux schema --unchanged` and `ventoux
+  conformance --unchanged` from what it installed. The procedure (bump, changelog, tag, publish)
+  is written in `docs/guides/releasing-ventoux.md`; the tag and the publish are the maintainer's.
+
 ## Concepts
 
 | Term | Meaning |

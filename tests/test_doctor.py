@@ -778,10 +778,13 @@ def test_without_vault_token_the_guides_key_service_fails_token_present_and_doct
     monkeypatch.delitem(sys.modules, "doctor_platform", raising=False)  # imported afresh
     seen = findings(deployment(tmp_path, PLATFORM))
     by_rule = {finding.rule: finding for finding in seen}
+    # The key service can't be loaded, so doctor can't know it is Vault: it says the token is
+    # needed if it is (the tutor's review of #96, optional; carried into 20c).
     assert by_rule["keys.token-present"] == Finding(
         "keys.token-present",
         "FAILED",
-        "VAULT_TOKEN is not set: set it in the environment of each worker, the caller and the "
+        "VAULT_TOKEN is not set, and the key service can't be loaded (keys.named says why): if it "
+        "is VaultKeys, set VAULT_TOKEN in the environment of each worker, the caller and the "
         "shell doctor runs in",
     )
     # The module raised as it was imported: said by its name and the error's kind.

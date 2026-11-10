@@ -306,6 +306,13 @@ async def token_is_present(context: Context) -> Seen:
         return "unchecked", NOT_VAULT  # another provider: Vault's token isn't its
     if token_set:
         return "passed", "VAULT_TOKEN is set"
+    if provider is None:
+        # Not loaded, so not known to be Vault: the token is needed if it is (review of #96).
+        return "FAILED", (
+            "VAULT_TOKEN is not set, and the key service can't be loaded (keys.named says why): "
+            "if it is VaultKeys, set VAULT_TOKEN in the environment of each worker, the caller and "
+            "the shell doctor runs in"
+        )
     return "FAILED", (
         "VAULT_TOKEN is not set: set it in the environment of each worker, the caller and the "
         "shell doctor runs in"

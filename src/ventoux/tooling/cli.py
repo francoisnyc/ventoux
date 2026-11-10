@@ -15,6 +15,7 @@ import json
 import sys
 from collections.abc import Sequence
 from decimal import Decimal
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from ventoux.case.changes import DiffRefused
 from ventoux.case.checked import said
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
 from ventoux.case.diff import Diff, diff
+from ventoux.case.engine import ENGINE
 from ventoux.case.notes import NotesRefused, as_diff, told
 from ventoux.case.plain import plain
 from ventoux.case.reading import ReadingRefused
@@ -69,7 +71,7 @@ from ventoux.tooling.draft_sheet import draft_sheet_command
 from ventoux.tooling.drafting import draft_command
 from ventoux.tooling.environments import environment_command
 from ventoux.tooling.releases import FolderStore, Run, read_package, release
-from ventoux.tooling.schema import write_schemas
+from ventoux.tooling.schema import SCHEMA_BASE, SCHEMAS, write_schemas
 from ventoux.tooling.summary import LIMIT, cant_be_read, for_summary_file, summarize
 
 # What `ventoux simulate` exits with.
@@ -107,7 +109,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema", help="write the JSON Schema of a case and of a plan, from the engine's models"
     )
     publishing.add_argument(
-        "--out", type=Path, default=Path("schema"), help="the folder to write into (schema/)"
+        "--out",
+        type=Path,
+        default=SCHEMAS,
+        help="the folder to write into (the package's own schema/, installed or not)",
     )
     publishing.add_argument(
         "--unchanged",
@@ -241,6 +246,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     advising.add_argument("--recording", type=Path, help="replay a recording instead of a model")
     advising.add_argument("--at", type=int, help="the time, in seconds since the epoch (now)")
     connecting(advising, "reader")
+    commands.add_parser("version", help="the package's version, the engine's and the schema's")
     doctoring = commands.add_parser("doctor", help="check a deployment, changing nothing")
     doctoring.add_argument("environment", help="the environment to check: `production`")
     doctoring.add_argument(
@@ -249,6 +255,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     if arguments.command == "doctor":
         return doctor_command(arguments)
+    if arguments.command == "version":
+        return print_versions()
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
     if arguments.command == "advise":
@@ -352,6 +360,16 @@ def connecting(command: Any, default: str) -> None:
         "--identity",
         help=f"the identity to connect as, from [tool.ventoux.temporal] (else {default})",
     )
+
+
+def print_versions() -> int:
+    """Three versions, each its own (brief, D82): the package's, from its installed metadata, so
+    it can't differ from what pyproject.toml built; the engine's that new cases open at
+    (brief, D51); the schema's `$id` (brief, D60)."""
+    print(f"ventoux {metadata.version('ventoux')}")
+    print(f"engine {ENGINE}")
+    print(f"schema {SCHEMA_BASE}")
+    return 0
 
 
 def releases_folder(flag: Path | None, found: Configuration) -> Path:

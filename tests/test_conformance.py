@@ -446,7 +446,7 @@ def test_ci_checks_the_suite_and_every_change_to_it_against_the_base() -> None:
     from test_unchanged import WORKFLOW, ci_runs
 
     assert ci_runs("- run: uv run ventoux conformance --unchanged")
-    changes = WORKFLOW.read_text().split("\n  changes:")[1]
+    changes = WORKFLOW.read_text().split("\n  changes:")[1].split("\n  package:")[0]
     assert "- run: uv run ventoux conformance --since base/src/ventoux/conformance" in changes
 
 

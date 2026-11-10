@@ -1033,7 +1033,7 @@ wheels = [
 
 [[package]]
 name = "ventoux"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -1059,7 +1059,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=1.13.0,<2" },
     { name = "cryptography", specifier = ">=50.0.2" },
-    { name = "pydantic", specifier = ">=2.13.5" },
+    { name = "pydantic", specifier = ">=2.13.5,<2.14" },
     { name = "temporalio", specifier = ">=1.34.0" },
 ]
 provides-extras = ["anthropic"]

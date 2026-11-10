@@ -2495,8 +2495,11 @@ The format is published as JSON Schema, generated from the models the engine par
 front end in another language or a model drafting a definition (layer 15) can read what a case
 and a plan look like without reading Python (brief, D4, D60):
 
-- `schema/case.schema.json`: a `case.json`.
-- `schema/plan.schema.json`: a plan's file under `plans/`.
+- `case.schema.json`: a `case.json`.
+- `plan.schema.json`: a plan's file under `plans/`.
+
+Both are in the package, `ventoux/schema/` (`src/ventoux/schema/` in the repository), so an
+installed Ventoux holds the schemas it was built with (brief, D82).
 
 Both are draft 2020-12. Each names the format it describes in its `$id`, by the engine version
 that parses it (brief, D51): `https://ventoux.dev/schema/engine-2/case.schema.json` is the format

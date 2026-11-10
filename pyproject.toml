@@ -1,13 +1,16 @@
 [project]
 name = "ventoux"
-version = "0.0.0"
+version = "0.1.0"  # the package's own, written here once (brief, D82)
 description = "Case management and human-in-the-loop workflows for Temporal."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]  # carried in the wheel, as the licence asks (brief, D82)
 requires-python = ">=3.12"
 dependencies = [
     "cryptography>=50.0.2",
-    "pydantic>=2.13.5",
+    # Below the next minor: contracts hash from pydantic's JSON Schema, which 2.14 writes
+    # otherwise (brief, D82, as amended).
+    "pydantic>=2.13.5,<2.14",
     "temporalio>=1.34.0",
 ]
 

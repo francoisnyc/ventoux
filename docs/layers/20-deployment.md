@@ -835,3 +835,134 @@ code was written, or with its branch switched off when the code came first.
 passed, and every `keys.*` branch that asks Vault. `LiveProbes`' Vault calls go through
 `VaultKeys`' own transport (19c's tests); the two that ask Temporal are run live in
 `test_doctor_live.py`.
+## 20c: the published package
+
+Status: 2026-11-10, D82 written; the design, seams and tests agreed and built.
+Branch `layer-20c-package`, from `main` at `ffc27b7`. Question 5 was answered at the layer's
+start: as recommended, the name `ventoux`, the first version `0.1.0`.
+
+### What a published package is for, with a small example
+
+Until now Ventoux has run from this repository: `uv run ventoux …` reads `src/` and finds the
+schemas and the suite beside it. A team doesn't have the repository. It has
+
+```
+$ pip install ventoux==0.1.0
+$ ventoux version
+ventoux 0.1.0
+engine 3
+schema https://ventoux.dev/schema/engine-3/
+```
+
+and whatever the wheel holds is all it has. So three questions decide this part:
+
+- **What must be inside, and what must never be.** The wheel built today (`uv build`, run locally,
+  nothing published) holds the code, `py.typed` and the suite, but **not the schemas** (they are
+  at the root, outside the package) and **not the licence**. Nothing forbidden is in it, but
+  nothing checks that either: a stray `keys.json` beside a module would ship.
+- **What a team may rely on.** Every module is importable, but only some names are promised. The
+  guides already tell teams to import from 14 modules, among them `ventoux.core.references` and
+  `ventoux.core.contract`: a supported list that left those out would call documented imports
+  unsupported. So the list starts from what the guides import, and a test keeps the two equal.
+- **What "it works installed" means.** Tests in the repository can pass while the installed
+  package can't find its schemas. Only a check run against the *installed* wheel, from outside
+  the repository, sees that.
+
+### The design (D82)
+
+| | Proposed |
+|---|---|
+| Version | `0.1.0` in `pyproject.toml`, once; `ventoux version` reads the installed metadata (`importlib.metadata`), so the two can't differ |
+| Schemas | moved to `src/ventoux/schema/`; `ventoux schema` writes there by default (the package's folder, so installed and editable alike); root `schema/` removed; the docs that name the old path updated, decisions left as written |
+| Licence | `license-files = ["LICENSE"]`, so the wheel carries it |
+| The wheel's check | `scripts/check_wheel.py WHEEL`: the files it must hold (the schemas, every file of the suite, `py.typed`, the licence, `ventoux/testing.py`) and the ones it never may (anything under `tests/`, `examples/`, `docs/`, `scripts/`; `*.key`, `*.pem`, `keys.json`; a recording; `__pycache__` or `.pyc`), each problem named; exit 1 on any |
+| Supported imports | `src/ventoux/public.json`, `{module: [names]}`: what the guides, the README and the examples import, the builder's `__all__`, `environment_worker`, `KeyProvider` and `AuditStore`. Shipped, so a team can read it |
+| CI | a `package` job: `uv build`; a fresh environment with the wheel installed (`uv venv`, `uv pip install dist/*.whl`); from outside the repository, `ventoux version`, `ventoux schema --unchanged`, `ventoux conformance --unchanged`; and `scripts/check_wheel.py` |
+| Release guide | `docs/guides/releasing-ventoux.md`: bump the version, the changelog, the CI job green, tag, publish (`uv publish`); the last two the maintainer's, never CI's or this layer's |
+| Carried from #96 | `keys.token-present` says `VAULT_TOKEN` is needed *if the key service is Vault* when the key service can't be loaded (the tutor's optional point) |
+
+No new dependency: `uv build` and `uv publish` are uv's own; no `twine`, no `build`.
+
+### Seams and tests for 20c (proposed)
+
+| Seam | What it is |
+|---|---|
+| `ventoux version` | prints the package's version, the engine version and the schema's `$id` base |
+| `ventoux schema [--out DIR] [--unchanged]` | as before, its default folder the package's own `schema/` |
+| `scripts/check_wheel.py WHEEL` | every problem with a wheel's contents, named; exit 0 or 1 |
+| `src/ventoux/public.json` | the supported imports |
+| `.github/workflows/ci.yml`, job `package` | the wheel built, installed fresh, and checked from outside the repository |
+
+**The tests, in order** (each watched failing first; `tests/test_package.py` unless named):
+1. Negative first: `check_wheel` refuses a wheel missing a file it must hold (a schema, a file of
+   the suite, `py.typed`, the licence), naming each, exit 1 (wheels made in the test, by zip).
+2. `check_wheel` refuses a wheel holding a file it never may (under `tests/`, `examples/`,
+   `docs/`; a `.key`, a `.pem`, a `keys.json`, a recording, a `.pyc`), naming each.
+3. The wheel `uv build` makes passes `check_wheel`, and its schemas and suite are byte-equal to
+   the repository's (built into a temporary folder; nothing leaves the machine).
+4. `ventoux version` says the package's version from its metadata, the engine version and the
+   schema's `$id` base; the version in `pyproject.toml` is `0.1.0`.
+5. `ventoux schema --unchanged` reads the package's `schema/` by default; no `schema/` at the
+   root; the docs name the new place (`test_schema.py`).
+6. Every name in `public.json` imports; a listed name that doesn't is said, naming it (the
+   negative, with a list holding one that doesn't exist).
+7. Every name the guides, the README and the examples import from `ventoux` is in `public.json`.
+8. CI's `package` job builds, installs into a fresh environment, and runs `ventoux version`,
+   `ventoux schema --unchanged`, `ventoux conformance --unchanged` and `check_wheel` (a test reads
+   `ci.yml`, as 20a's does).
+9. The release guide names each step, and says the tag and the publish are the maintainer's.
+10. Carried from #96: with a key service that can't be loaded and no `VAULT_TOKEN`,
+    `keys.token-present` says the token is needed if the key service is Vault (`test_doctor.py`).
+
+**Never here:** publishing, a tag, a change outside the repository, a PyPI check of the name.
+
+### Decided while building 20c
+
+- **The fresh install found that contract hashes depend on pydantic's version.** Installed into
+  a new environment, the wheel resolved pydantic 2.14.3 (the lock holds 2.13.5), and
+  `ventoux conformance --unchanged` failed: 2.13 writes a decimal field's string form with a
+  `pattern`, which 2.14 drops, and a contract's hash is made from that schema
+  (`core/promise.py`). Three of the nine
+  development contracts hashed differently; a team upgrading pydantic would see its lock fail and
+  the registry refuse its workers (D54). *Decided with the user:* bound pydantic below 2.14 now
+  (D82, a test pinning the bound to the installed minor), and make the hash independent of
+  pydantic's rendering in a separate fix, its own pull request and decision. With the bound, the
+  fresh install passes all three commands and every hash equals the locked environment's.
+- **A recording is a data file, never code:** `check_wheel` first refused `ventoux/case/recording.py`,
+  which is the code that writes recordings. The rule leaves `.py` files alone.
+- **The forbidden folders are matched at the wheel's top only:** the suite has an `examples/` of
+  its own, which ships.
+- **The schema tests name their folder (`--out schema`):** with the default now the package's own
+  `schema/`, a test run from a temporary folder would have written into, or deleted from, the
+  package.
+- **The supported imports are read from the docs with `ast`,** each Python block dedented (a
+  block inside a list is indented); `from ventoux.temporal import client` names a submodule, so a
+  listed name imports as `from … import` does: an attribute, or else a submodule. 73 names in 22
+  modules.
+- **`CHANGELOG.md` is new,** with a `## 0.1.0 (not yet released)` entry: the release guide's
+  second step needs it, and a test keeps its first entry the version in `pyproject.toml`.
+- **The two tests reading CI's `changes` job stop where it ends,** now that a job follows it.
+- **`ventoux version`'s schema line is `SCHEMA_BASE`,** the same constant each schema's `$id` is
+  made from, so the two can't differ.
+
+## Promises (20c)
+
+Each claim D82, the note and the guides make about the package, and the test that would fail if it
+weren't true (`tests/test_package.py` unless named). Each was watched failing: before its code
+was written, or with its branch switched off when the code came first.
+
+| Promise | Test |
+|---|---|
+| A wheel missing a file it must hold (a schema, a file of the suite, `py.typed`, the licence) is refused, naming it | `test_a_wheel_missing_a_file_it_must_hold_is_refused_naming_it` |
+| A wheel holding a file it never may (tests, examples, docs, a key, a certificate, a key file, a recording, bytecode) is refused, naming it | `test_a_wheel_holding_a_file_it_never_may_is_refused_naming_it` |
+| A complete wheel passes, the suite's own `examples/` included | `test_a_complete_wheel_passes_its_suite_examples_included` |
+| The wheel `uv build` makes passes, its schemas and suite byte-equal to the repository's | `test_the_wheel_uv_builds_holds_what_it_must_and_its_files_as_the_repository_has_them` |
+| `ventoux version` says the package's version from its metadata, the engine's and the schema's; the version is `0.1.0` | `test_ventoux_version_says_the_package_the_engine_and_the_schema` |
+| The schemas are in the package and nowhere else; the guides name the new place | `test_schema.py::test_ventoux_schema_keeps_the_schemas_in_the_package_and_nowhere_else` |
+| Every supported name imports; one that doesn't is said, naming it | `test_every_supported_name_imports`, `test_a_supported_name_that_doesnt_import_is_said_naming_it` |
+| Every name the guides, the README and the examples import is supported | `test_every_name_the_docs_import_is_supported` |
+| pydantic is bounded below the minor after the one the hashes were made with | `test_pydantic_is_bounded_to_the_minor_version_the_hashes_were_made_with` |
+| CI builds the wheel, checks it, installs it fresh and runs `version`, `schema --unchanged` and `conformance --unchanged` from outside the repository; it never publishes | `test_ci_builds_the_wheel_installs_it_fresh_and_runs_it_from_outside_the_repository` |
+| The release guide names each step, and the tag and the publish are the maintainer's, never CI's | `test_the_release_guide_names_each_step_and_leaves_the_tag_and_publish_to_the_maintainer` |
+| The changelog's first entry is the version being released | `test_the_changelog_has_an_entry_for_the_version_being_released` |
+| With a key service that can't be loaded and no token, doctor says the token is needed if it is Vault | `test_doctor.py::test_without_vault_token_the_guides_key_service_fails_token_present_and_doctor` |
