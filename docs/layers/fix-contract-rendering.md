@@ -6,7 +6,9 @@ there for the time being (brief, D82); made independent here, in its own pull re
 20c's.
 
 Status: two designs put, 2026-11-10 (a new hash method 2, or method 1 written by Ventoux itself);
-the second chosen. Choices below put, each with a recommendation, for the user to answer by number.
+the second chosen. Choices below put, each with a recommendation; answered "1 to 7, all as
+recommended", the same day. The seams are choice 6's: `contract_schema(model)`, making a contract,
+and `contract_hash`. D83 and the dated line on D82 written before building.
 
 ## The bug
 
