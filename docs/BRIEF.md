@@ -3511,6 +3511,24 @@ whose key provider or audit store is for development, or that doesn't say, so th
   conformance --unchanged` from what it installed. The procedure (bump, changelog, tag, publish)
   is written in `docs/guides/releasing-ventoux.md`; the tag and the publish are the maintainer's.
 
+### D83. A contract's promise is written by Ventoux, never by pydantic
+
+*Decided 2026-11-10, in the contract hash fix (`docs/layers/fix-contract-hash.md`), found in 20c.
+Adds to D5 (the contract hash) and D82 (its pydantic bound, amended below it), whose text is
+kept.*
+
+- **The schemas in a contract's promise are written by Ventoux,** from each field's type (the
+  closed set of D20 and D36) and Ventoux's own markers, never by pydantic's `model_json_schema`:
+  a contract's hash changes when its promise does, never when a library writes the same promise
+  otherwise. They are written exactly as pydantic 2.13.5 wrote them, so every hash recorded so far
+  stands and the hash method stays 1.
+- **What Ventoux doesn't describe is refused when the catalog is built** (fail closed): a
+  constraint on a contract's field (`Field(ge=0)`, `max_length`, `pattern`), other metadata, a
+  title, an alias, examples or `json_schema_extra`, and a default that isn't `None`, a `bool` or a
+  text. The hash would otherwise cover a rule the engine neither writes down nor enforces.
+- **Prose stays in the promise** as before: a model's docstring and a field's description.
+  Whether it belongs there, when `display` doesn't, is left open.
+
 ## Concepts
 
 | Term | Meaning |
