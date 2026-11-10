@@ -66,7 +66,7 @@ def replay_all(captured: Path, tree: Path) -> None:
             now = run(replayed(history, [cases], converter))
         except Exception as error:  # noqa: BLE001
             if "was destroyed when it was forgotten" in str(error) or "there is no key" in str(error):
-                counts["its case was forgotten: no key, no replay (brief, D32)"] += 1
+                counts["its case was forgotten or its key withheld by the test: no key, no replay (brief, D32)"] += 1
             else:
                 counts["could not be read"] += 1
                 print(f"UNREAD {label}: {type(error).__name__}: {str(error)[:300]}")
@@ -88,8 +88,11 @@ def replay_all(captured: Path, tree: Path) -> None:
                     continue
             kept_lines.append(line)
         said = kept_lines
-        if now["failure"] and "was destroyed when it was forgotten" in now["failure"]:
-            counts["its case was forgotten: no key, no replay (brief, D32)"] += 1
+        if now["failure"] and (
+            "was destroyed when it was forgotten" in now["failure"]
+            or "there is no key for" in now["failure"]
+        ):
+            counts["its case was forgotten or its key withheld by the test: no key, no replay (brief, D32)"] += 1
         elif now["failure"]:
             counts["REFUSED by Temporal on replay"] += 1
             print(f"REFUSED {label}: {now['failure'][:260]}")

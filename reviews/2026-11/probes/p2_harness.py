@@ -380,7 +380,12 @@ def texts_differ(old: Any, new: Any, path: str, changed: list[str], added: list[
                  f"{path}[{n}]", changed, added)
         except ValueError:
             changed.append(f"{path}[{n}]: recorded {short(a)} | replay {short(b)}")
-        if a_parts != b_parts:
+        grew = len(changed) + len(added) > before and not any(
+            line.startswith(f"{path}[{n}]") for line in changed[-(len(changed)):] if False
+        )
+        if a_parts != b_parts and len(added) > 0 and len(a_parts) < len(b_parts) and grew:
+            added.append(f"{path}[{n}]: a sensitive part in a field added since")
+        elif a_parts != b_parts:
             changed.append(f"{path}[{n}] sensitive parts: recorded {a_parts} | replay {b_parts}")
         if before == len(changed) + len(added):
             changed.append(f"{path}[{n}]: same JSON value, another text: {difference(a, b)}")
