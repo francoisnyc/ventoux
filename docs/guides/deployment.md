@@ -190,28 +190,76 @@ Nothing Ventoux writes says a secret's value: not a log, an error, a `repr`, a r
 
 ## Checking the deployment: `ventoux doctor`
 
-Run it after every change to the deployment, and from your monitoring:
+Run it after every change to the deployment, and from your monitoring. It reads the key service
+and audit store your workers are given as it reads the catalog, by the names your platform code
+gives them:
+
+```toml
+[tool.ventoux]
+catalog = "acme_platform.catalog:CATALOG"
+keys = "acme_platform.keys:KEYS"     # a VaultKeys, as the workers construct it
+audit = "acme_platform.audit:AUDIT"  # your audit store, saying development = False
+```
 
 ```
 $ ventoux doctor production
-passed     temporal.mtls-required: a connection without a client certificate is refused
-passed     temporal.reader-cannot-write: identity reader is refused a signal (PermissionDenied)
-passed     temporal.operator-connects: identity operator reaches namespace ventoux-prod.a1b2c
-passed     environment.production: production's registry exists and is production
-passed     environment.workers: every release active or with open cases can run (environment check)
-passed     environment.production-providers: every case worker's manifest names Vault and an audit store other than FileAudit
-passed     keys.token-present: VAULT_TOKEN is set
-passed     keys.reachable: the key service at https://vault.internal:8200 answers
-passed     keys.policy: the token can't delete a mark, and can't read a key not named ventoux-*
 passed     catalog.named: the catalog is acme_platform.catalog:CATALOG, not the development one
-unchecked  temporal.only-caller-writes: the identities doctor holds are refused, but Temporal
-           doesn't tell a client who else may write: keep the table in "One caller writes"
-unchecked  temporal.resets-restricted: who may reset or terminate is Temporal's authorizer's, which
-           a client can't read: keep it to named operators
-unchecked  audit.no-deletes: whether the audit store lets anyone delete is the store's setting
-unchecked  temporal.retention: how long closed histories are kept is yours to choose
-production: 10 passed, 0 failed, 4 unchecked
+passed     keys.named: the key service is acme_platform.keys:KEYS, VaultKeys
+passed     audit.named: the audit store is acme_platform.audit:AUDIT, WarehouseAudit
+passed     temporal.identities: each identity's files are there (operator, reader): each key
+           readable by its owner only, each certificate in date
+passed     temporal.mtls-required: a connection without a client certificate is refused, with
+           TLS and without
+passed     temporal.reader-cannot-write: identity reader is refused a signal (PermissionDenied)
+passed     environment.exists-production: production's registry exists and is production
+passed     environment.workers: every release active or with open cases can run (environment
+           check)
+passed     environment.production-providers: each case worker's manifest (refunds-a, refunds-b)
+           says production providers
+passed     keys.token-present: VAULT_TOKEN is set
+passed     keys.reachable: the key service at https://vault.internal:8200 answers: a key that
+           can't exist was never made
+passed     keys.policy: the token can't delete a mark, is denied a key not named ventoux-*, and
+           can encrypt and decrypt with ventoux-* keys
+passed     advisor.key-present: no model is configured: no key is needed
+unchecked  temporal.only-caller-writes: Temporal doesn't tell a client which other identities may
+           write: the deployment guide, "The rule everything rests on: one caller writes"
+unchecked  temporal.resets-restricted: who may reset or terminate is Temporal's authorizer's,
+           which a client can't read: the deployment guide, "What only this guide can state"
+unchecked  temporal.retention: how long closed histories are kept is the namespace's setting,
+           yours to choose: the deployment guide, "Temporal"
+unchecked  audit.no-deletes: whether the audit store lets anyone delete a record is the store's
+           setting: the deployment guide, "The audit store"
+unchecked  keys.other-tokens: who else holds a token that can read ventoux-* keys is Vault's to
+           say, not this token's: the deployment guide, "What only this guide can state"
+production: 13 passed, 0 failed, 5 unchecked
 ```
+
+**The rules,** in the order doctor says them:
+
+| Rule | What doctor sees | FAILED when |
+|---|---|---|
+| `catalog.named` | `[tool.ventoux] catalog` | none is named, or it is `ventoux.testing:CATALOG` |
+| `keys.named` | `[tool.ventoux] keys`, imported | none is named, or it is for development (`FileKeys`), or doesn't say |
+| `audit.named` | `[tool.ventoux] audit`, imported | none is named, or it is for development (`FileAudit`), or doesn't say |
+| `temporal.identities` | each identity's files: there, the key's mode, the certificate's date | a file is missing, a key can be read by others, a certificate has expired |
+| `temporal.mtls-required` | a connection with no client certificate, with TLS and without | Temporal answers either |
+| `temporal.reader-cannot-write` | as `reader`, a signal to `ventoux-doctor/never-started` | Temporal lets it through ("not found": nothing changed) |
+| `environment.exists-production` | the registry, by its query | it doesn't exist, or is a development environment |
+| `environment.workers` | `ventoux environment check`'s check | a release active or with open cases can't run |
+| `environment.production-providers` | every case worker's manifest the registry holds | one keeps its keys or records with a development provider, or doesn't say (a worker accepted before the rule: "Workers") |
+| `keys.token-present` | `VAULT_TOKEN`, by its name | it isn't set |
+| `keys.reachable` | the key service's state of a key that can't exist | anything but "never made" |
+| `keys.policy` | Vault's `sys/capabilities-self` on a mark, a key outside `ventoux-*`, encrypt and decrypt | the token could delete a mark, isn't denied the outside key, or can't encrypt and decrypt |
+| `advisor.key-present` | `ANTHROPIC_API_KEY`, by its name, when a `model` is configured | a `model` is configured and the key isn't set |
+| `temporal.only-caller-writes` | nothing: no client can see it | never: always unchecked |
+| `temporal.resets-restricted` | nothing | never: always unchecked |
+| `temporal.retention` | nothing | never: always unchecked |
+| `audit.no-deletes` | nothing | never: always unchecked |
+| `keys.other-tokens` | nothing | never: always unchecked |
+
+Without `[tool.ventoux.temporal]`, doctor connects as the other commands do, to `localhost:7233`
+without TLS, and the Temporal rules fail: a development server has no mTLS and no authorizer.
 
 **Three verdicts, never two.** `passed` means doctor saw the rule hold. `FAILED` means it saw it
 broken. `unchecked` means it couldn't see either way: a rule doctor can't check is never said
@@ -219,9 +267,13 @@ passed, and a check that can't run (Temporal unreachable, a file missing) says `
 why, never `passed`. Each line names its rule, so a failure says what to fix:
 
 ```
-FAILED     temporal.reader-cannot-write: identity reader sent a signal and Temporal accepted it
-           (the case doesn't exist, so nothing changed): give people read-only access (D19)
+FAILED     temporal.reader-cannot-write: identity reader sent a signal and Temporal let it through
+           (the workflow doesn't exist, so nothing changed): give people read-only access
+           (brief, D19)
 ```
+
+**Every probe is bounded:** each call doctor makes (Temporal, the registry, Vault) has 10 seconds.
+One that doesn't answer in time is `unchecked`, saying so, never a hang.
 
 **Exit codes:** 0 when every rule it checks passed; 1 when one failed; 2 when it couldn't run at
 all. `unchecked` alone doesn't fail the command: those rules are this guide's, and doctor lists

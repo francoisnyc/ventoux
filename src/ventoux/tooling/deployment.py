@@ -65,6 +65,8 @@ class Configuration:
     drafts: str | None = None  # where `ventoux draft` writes; none named is refused (brief, D63)
     # Where Temporal is and who commands connect as; None: localhost, no TLS (brief, D81).
     temporal: Temporal | None = None
+    keys: str | None = None  # `module:NAME`, the deployment's key provider (brief, D81)
+    audit: str | None = None  # `module:NAME`, the deployment's audit store (brief, D81)
 
 
 def configuration(start: Path) -> Configuration:
@@ -94,6 +96,8 @@ def read(path: Path) -> Configuration:
             "by_hand",
             "model",
             "drafts",
+            "keys",
+            "audit",
         ):
             raise Unconfigured(f"{path}: [tool.ventoux] has no setting {key}")
     for key, value in said.items():
@@ -114,6 +118,8 @@ def read(path: Path) -> Configuration:
         drafts=said.get("drafts"),
         by_hand=tuple(said.get("by_hand", ())),
         temporal=temporal,
+        keys=said.get("keys"),
+        audit=said.get("audit"),
     )
 
 
@@ -179,19 +185,32 @@ def catalog_named(name: str, root: Path | None) -> Catalog:
     as any of its modules does; nothing from a definition is ever imported (CLAUDE.md)
     (brief, D58).
     """
+    found = named(name, root, "a catalog", DEVELOPMENT)
+    if not isinstance(found, Catalog):
+        raise Unconfigured(f"{name} is not a Catalog: name the deployment's catalog itself")
+    return found
+
+
+def named(name: str, root: Path | None, what: str, example: str) -> object:
+    """The object `name` (`module:NAME`) gives, imported from the project at `root`: the
+    platform team's code, named in its configuration, never read from a definition (brief, D59)."""
     module, colon, attribute = name.partition(":")
     if not colon or not module or not attribute:
-        raise Unconfigured(f'a catalog is named "module:NAME", such as "{DEVELOPMENT}": not {name}')
+        raise Unconfigured(f'{what} is named "module:NAME", such as "{example}": not {name}')
     if root is not None:
         sys.path.insert(0, str(root))  # the project's own modules, as its tests import them
     try:
         loaded = importlib.import_module(module)
-    except ImportError as error:
+    except ModuleNotFoundError as error:
         raise Unconfigured(f"{module} can't be imported: {error}") from None
+    except Exception as error:  # noqa: BLE001 (the platform team's code may raise anything)
+        # Said by its kind alone: its message may hold anything, a secret included.
+        raise Unconfigured(
+            f"{module} can't be imported: it raised {type(error).__name__}"
+        ) from None
     finally:
         if root is not None:
             sys.path.remove(str(root))
-    found = getattr(loaded, attribute, None)
-    if not isinstance(found, Catalog):
-        raise Unconfigured(f"{name} is not a Catalog: name the deployment's catalog itself")
-    return found
+    if not hasattr(loaded, attribute):
+        raise Unconfigured(f"{module} has no {attribute}")
+    return getattr(loaded, attribute)

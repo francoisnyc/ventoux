@@ -102,3 +102,29 @@ async def connect(
         tls=settings.tls if settings.tls is not None else False,
         data_converter=converter,
     )
+
+
+async def answered_without_certificate(
+    found: Configuration, address: str | None, namespace: str | None
+) -> list[str]:
+    """How Temporal answers a connection with no client certificate: `without TLS`, `with TLS and
+    no client certificate`; empty when it refuses each (`ventoux doctor`) (brief, D81). Where
+    from the section (the flags winning), as no identity: `connection` would refuse none."""
+    temporal = found.temporal
+    target = address or (temporal.address if temporal is not None else DEVELOPMENT_ADDRESS)
+    space = namespace or (temporal.namespace if temporal is not None else DEVELOPMENT_NAMESPACE)
+    ca = None
+    if temporal is not None and temporal.server_ca is not None:
+        ca = read_file(f"the server CA, {temporal.server_ca},", temporal.server_ca)
+    tried: list[tuple[str, TLSConfig | bool]] = [
+        ("without TLS", False),
+        ("with TLS and no client certificate", TLSConfig(server_root_ca_cert=ca)),
+    ]
+    answered: list[str] = []
+    for how, tls in tried:
+        try:
+            await Client.connect(target, namespace=space, tls=tls)
+        except RuntimeError:  # Temporal's client: the connection failed, or was refused
+            continue
+        answered.append(how)
+    return answered

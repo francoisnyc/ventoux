@@ -64,6 +64,7 @@ from ventoux.tooling.deployment import (
     deployment_catalog,
     read,
 )
+from ventoux.tooling.doctor import doctor_command
 from ventoux.tooling.draft_sheet import draft_sheet_command
 from ventoux.tooling.drafting import draft_command
 from ventoux.tooling.environments import environment_command
@@ -240,7 +241,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     advising.add_argument("--recording", type=Path, help="replay a recording instead of a model")
     advising.add_argument("--at", type=int, help="the time, in seconds since the epoch (now)")
     connecting(advising, "reader")
+    doctoring = commands.add_parser("doctor", help="check a deployment, changing nothing")
+    doctoring.add_argument("environment", help="the environment to check: `production`")
+    doctoring.add_argument(
+        "--strict", action="store_true", help="fail on a rule doctor can't check, too"
+    )
     arguments = parser.parse_args(argv)
+    if arguments.command == "doctor":
+        return doctor_command(arguments)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
     if arguments.command == "advise":

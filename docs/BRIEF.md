@@ -3473,6 +3473,12 @@ kept; D54 is amended below.*
   `model` is configured) and the identities' key files (present, readable by their owner only);
   no output of doctor's, a failure included, holds a secret's value.
 
+*Amended 2026-11-09, in 20b2 (from the review of #95):* the registry's rule on providers is behind
+a patch, so a registry recorded before it replays as it was recorded; one running at the upgrade
+keeps the earlier rule until it continues as new, and a case worker it accepted stays accepted
+until it publishes again. Doctor fails a production registry holding a case worker's manifest
+whose key provider or audit store is for development, or that doesn't say, so that window is seen.
+
 ## Concepts
 
 | Term | Meaning |

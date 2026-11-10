@@ -621,7 +621,7 @@ switched off when the code came first.
 | A new command offering `--address` can't skip `--identity` | `test_connecting.py::test_a_command_offering_an_address_is_one_the_identity_test_runs` |
 | Every Temporal client is made by `connect`, as an identity | `test_connecting.py::test_only_connecting_connects_to_temporal` |
 
-### Seams and tests for 20b2 (proposed, to be agreed before it is built)
+### Seams and tests for 20b2 (agreed 2026-11-09)
 
 | Seam | What it is |
 |---|---|
@@ -631,6 +631,207 @@ switched off when the code came first.
 | `diagnose(found, environment, probes) -> list[Finding]` | every rule, run whatever the others give |
 | `ventoux doctor ENVIRONMENT [--strict]` | prints each finding, exits 0, 1 or 2 |
 
-Its tests (each rule: passed, FAILED, unchecked, and one meeting an error it doesn't expect;
-against the dev server for Temporal's failing branches; secrets planted and never said) are
-listed when 20b1 is merged.
+**Added when the seams were agreed (2026-11-09):**
+- **Every probe is bounded.** Each call doctor makes (Temporal, Vault, the registry, the audit
+  store) runs under a timeout, `PROBE_BOUND` (10 s; `diagnose` takes another for tests). One that
+  runs out is `unchecked` naming the bound, never a hang: the lesson of #94, where a report with no
+  bound of its own turned a 20 s failure into a killed job.
+- **20b1's window, seen:** `environment.production-providers` fails a production registry holding
+  a case worker's manifest whose keys or audit store is for development, or doesn't say (one
+  accepted before `ventoux-registry-keeping`). D81 has the dated line on that window.
+- **Each rule's passed branch is tested,** not only FAILED and unchecked.
+
+**The rules, with the names the tests pin.** The note's table (question 3) is the list; the
+guide's example output is brought equal to it while building (it says `environment.production`
+and `temporal.operator-connects`, which the table doesn't have), and a test keeps the two equal.
+*Proposed, to agree with the tests:*
+- **`keys.named` and `audit.named`,** new: question 3b says doctor checks the key provider and
+  audit store `[tool.ventoux]` names (named, and not for development), and no rule in the table
+  carries that. `catalog.named`'s pattern.
+- **`keys.other-tokens`,** always unchecked: D81 lists Vault's other tokens among what only the
+  guide states, and the table has no rule for it.
+- **`advisor.key-present` with no `model` configured is passed,** saying "no model is configured:
+  no key is needed": seen in the configuration, not assumed. Unchecked would make `--strict` fail
+  for ever in a deployment with no advisor.
+- **A registry that doesn't exist fails `environment.exists-production`** (seen not to be there,
+  "create it: `ventoux environment create NAME`"); one that can't be reached is unchecked.
+- **`environment.production-providers` in a development environment is unchecked** ("a
+  development environment: its workers may use development providers"):
+  `environment.exists-production` already fails it.
+- **Without `[tool.ventoux.temporal]`, doctor connects as the commands do** (`--address`, else
+  `localhost:7233`, no TLS), so the Temporal rules run against a development server;
+  `temporal.identities` is then unchecked, none being configured.
+
+| Rule | What is seen | passed | FAILED | unchecked |
+|---|---|---|---|---|
+| `catalog.named` | `[tool.ventoux] catalog` | named, not the development one | none named, or `ventoux.testing:CATALOG` | can't be imported (error's kind) |
+| `keys.named` | `[tool.ventoux] keys` | names a provider not for development | none named, or one for development | can't be imported |
+| `audit.named` | `[tool.ventoux] audit` | names a store not for development | none named, or one for development | can't be imported |
+| `temporal.identities` | each identity's files | each there; the key readable by its owner only; the cert not expired | a file missing, a key others can read, a cert expired | none configured |
+| `temporal.mtls-required` | a connection with no client certificate, with TLS and without | both refused | either answers | neither refused nor answered in time |
+| `temporal.reader-cannot-write` | as `reader`, a signal to `ventoux-doctor/never-started` | `PermissionDenied` | not found (the write was allowed) | no `reader`; unreachable |
+| `environment.exists-production` | the registry's query | there, production | not there; development (say `harden`) | unreachable |
+| `environment.workers` | `environment_check` | no problem | each problem it says | unreachable |
+| `environment.production-providers` | every case worker's manifest in the registry | each says production providers | one for development, or not saying | unreachable; a development environment |
+| `keys.token-present` | `VAULT_TOKEN` by name | set | not set | `keys` names no `VaultKeys` |
+| `keys.reachable` | the state of a key that can't exist | "never made" | any other state | no `VaultKeys`; unreachable |
+| `keys.policy` | `sys/capabilities-self` | no delete on a mark; deny outside `ventoux-*`; update on encrypt and decrypt | any of those not so | no `VaultKeys`; unreachable |
+| `advisor.key-present` | `ANTHROPIC_API_KEY` by name, with a `model` | set, or no `model` | a `model` and no key | — |
+| `temporal.only-caller-writes`, `temporal.resets-restricted`, `temporal.retention`, `audit.no-deletes`, `keys.other-tokens` | nothing: no client can see them | — | — | always, naming the guide's section |
+
+**The tests, in order** (each watched failing first; `tests/test_doctor.py` unless named). Probes
+are given as `Probes` stand-ins, answering as recorded, except where the dev server is named.
+
+*The command and its verdicts:*
+1. Negative first: a configuration doctor can't read exits 2, saying why, running no rule.
+2. A rule failed exits 1; nothing failed exits 0, unchecked lines said; `--strict` exits 1 on an
+   unchecked one.
+3. Every rule runs whatever the others give: one FAILED, one raising, the rest still said.
+4. A rule meeting an error it doesn't expect is unchecked with the error's kind, never passed or
+   dropped (one test per rule, parametrized, each probe raising `RuntimeError`).
+5. **Bounds:** a probe that never answers is unchecked naming the bound, and doctor finishes
+   within its bounds (each probe stand-in awaiting for ever; `diagnose` given 0.2 s; the test
+   bounded itself).
+
+*Each rule, each verdict* (parametrized where the probe is all that changes):
+6. `catalog.named`: FAILED unnamed, FAILED development, unchecked unimportable, passed named.
+7. `keys.named`: FAILED unnamed, FAILED `FileKeys`, unchecked unimportable, passed a provider
+   saying `development = False`.
+8. `audit.named`: the same, with `FileAudit`.
+9. `temporal.identities`: FAILED a missing file, FAILED a key readable by its group, FAILED an
+   expired certificate (made with `cryptography` in the test), unchecked none configured, passed.
+10. `temporal.mtls-required`: FAILED with a connection answering (stand-in), unchecked neither
+    refused nor answered, passed both refused (stand-in).
+11. `temporal.reader-cannot-write`: FAILED not found, unchecked no `reader`, passed
+    `PermissionDenied` (stand-in).
+12. `environment.exists-production`: FAILED missing, FAILED development (saying `harden`),
+    unchecked unreachable, passed production.
+13. `environment.workers`: FAILED with `environment_check`'s problems said, passed none,
+    unchecked unreachable.
+14. `environment.production-providers`: FAILED a case worker with `FileKeys`, FAILED one with
+    `FileAudit`, FAILED one saying neither (accepted before the patch), passed production
+    providers, unchecked unreachable, unchecked a development environment.
+15. `keys.token-present`: FAILED unset, passed set, unchecked no `VaultKeys`.
+16. `keys.reachable`: FAILED a state other than "never made", passed "never made", unchecked
+    unreachable and no `VaultKeys`.
+17. `keys.policy`: FAILED delete allowed on a mark, FAILED a key outside `ventoux-*` not denied,
+    FAILED encrypt not allowed, passed, unchecked unreachable.
+18. `advisor.key-present`: FAILED a model and no key, passed with the key, passed with no model.
+19. The always-unchecked rules: each unchecked, naming its section of the guide, and each section
+    there (a test reads the guide).
+
+*Against the world:*
+20. **Curriculum, the dev server:** doctor fails `temporal.mtls-required` and
+    `temporal.reader-cannot-write`, naming each rule, through `LiveProbes`.
+21. Doctor changes nothing: against the dev server, the registry's history has no new event after
+    doctor, and no workflow was started (`ventoux-doctor/never-started` not found).
+22. No secret is said: `VAULT_TOKEN`, `ANTHROPIC_API_KEY` and an identity's key file planted with
+    known values, doctor run through failing branches, none of the values in its output.
+23. `RULES` and the guide's list are equal: every rule in the guide's table, every table row a
+    rule, each always-unchecked one naming a section the guide has.
+
+**Branches only a stand-in reaches,** because the dev server has no mTLS, no authorizer and no
+Vault: `temporal.mtls-required` passed; `temporal.reader-cannot-write` passed; every `keys.*`
+branch that asks Vault (`keys.reachable`, `keys.policy`). `LiveProbes`' Vault calls go through
+`VaultKeys`' own transport, tested in 19c against recorded answers; a real Vault, as the
+three skipped tests have, isn't needed for 20b2.
+
+
+### Decided while building 20b2
+
+- **Test 5 (bounds) landed with test 10,** not before 6: no rule asks the world before
+  `temporal.mtls-required`. Tests 4 and 5 are parametrized over every rule that asks a probe, each
+  joining both as it was built.
+- **Doctor takes no `--address`, `--namespace` or `--identity`.** It reads where Temporal is from
+  `[tool.ventoux.temporal]` (else `localhost:7233`, as the commands), and connects as the
+  identities its rules need: `reader` for the signal, and for the registry's query `reader`, else
+  `operator`. A flag choosing the identity would let a run "pass" as one that may write. The tests
+  reach a development server through `LiveProbes(found, environment, address, namespace)`.
+- **A refusal is read only once Temporal has been reached.** With a section, `LiveProbes` first
+  connects as an identity; a connection with no certificate that then fails was refused. Without
+  one, both attempts failing can't be told from Temporal being down, so the rule is unchecked,
+  never passed.
+- **What a rule meets is said three ways:** an error it doesn't expect by its kind alone (its
+  message could hold anything, a secret included); a probe out of time naming the bound; and
+  `Unanswered` (doctor's own words) or `Unconnectable` (connecting's, naming a file and the error's
+  kind) as they are written. No other text from outside reaches doctor's output.
+- **A provider that doesn't say whether it is for development fails `keys.named` and
+  `audit.named`,** as the registry refuses its worker (fail closed).
+- **`environment.production-providers` uses the registry's own `keeping_problems`,** the function
+  the registry refuses a manifest with, so the two can't disagree on what a production provider is.
+- **`keys.policy` asks about a mark's data and metadata paths, and counts `root` as every
+  capability:** a token with `root` could delete a mark and isn't denied anything.
+- **`[tool.ventoux] keys` and `audit` are read by one loader, `named()`,** which `catalog_named`
+  now uses too: the platform team's code, imported by the name its configuration gives.
+- **`VaultKeys` blocks, so its calls run on a thread under the bound;** a call that runs out
+  leaves the thread to end with `VaultKeys`' own timeout (10 s).
+- **Test 21 counts the registry's events once it has settled:** a registry just created completes
+  its first workflow task on its own, which is no change of doctor's.
+- **`doctor.py` stays one file,** the verdicts, the running of rules and the rules, one function
+  each: splitting the rules out needs a third file to break an import cycle.
+
+### From the tutor's review of #96
+
+Both from one gap: the tests reached the production path only through stand-ins (a `VaultKeys`
+on a recording; a development server with no `[tool.ventoux.temporal]`).
+
+- **A platform module written the guide's way, with no `VAULT_TOKEN`, left six rules unchecked
+  and doctor exiting 0.** The guide's `VaultKeys(address=…, …)` can't be made without the token,
+  so the module raised as it was imported, and only an `ImportError` was read as a module that
+  can't be imported. Now a module raising anything as it is imported is `Unconfigured`, naming the
+  module and the error's kind (never its message); `keys.token-present` reads the environment
+  before it needs the provider, so it fails, and doctor exits 1; `keys.reachable` and
+  `keys.policy` say the key service can't be loaded, not that it isn't Vault.
+  `tests/doctor_platform.py` builds `VaultKeys` as the guide does, with no transport.
+- **`temporal.mtls-required` could never run with `[tool.ventoux.temporal]`,** which every
+  production deployment has: the connection without a certificate went through `connection()`,
+  which refuses no identity (`identities.None`). It is built from the section's address and
+  namespace directly now. And `LiveProbes` first connected *as an identity*, with TLS, to see
+  Temporal reached, which fails on a server without TLS before anything was tried: now the
+  attempts come first, and an answer is itself Temporal reached; only when each is refused is
+  Temporal seen reached as an identity, so a refusal is still never read from silence.
+- **One doctor test runs through `LiveProbes` with the configuration production has:** a section
+  addressing the development server, `reader` and `operator` identities with their files, and the
+  guide's key service. On that server the connection without TLS is answered: FAILED.
+
+## Promises (20b2)
+
+Each claim D81, the note and the guide make about `ventoux doctor`, and the test that would fail
+if it weren't true (`tests/test_doctor.py` unless named). Each was watched failing: before its
+code was written, or with its branch switched off when the code came first.
+
+| Promise | Test |
+|---|---|
+| A configuration doctor can't read exits 2, saying why, running no rule | `test_a_configuration_doctor_cant_read_exits_2_saying_why_and_runs_no_rule` |
+| A rule failed exits 1; nothing failed exits 0 with the unchecked lines said; `--strict` fails an unchecked one; the last line counts each verdict | `test_a_rule_failed_exits_1_nothing_failed_exits_0_and_strict_fails_an_unchecked_one`, `test_the_command_says_each_finding_and_exits_as_its_verdicts_say` |
+| Every rule runs, whatever the others give | `test_every_rule_runs_whatever_the_others_give` |
+| An error a rule doesn't expect is unchecked by its kind, never its message, never passed or dropped | `test_a_probe_raising_what_its_rule_doesnt_expect_is_unchecked` (each probing rule) |
+| Every probe is bounded: one that never answers is unchecked naming the bound, and doctor finishes | `test_a_probe_that_never_answers_is_unchecked_naming_the_bound` |
+| An identity that can't connect is unchecked, naming its file, never its contents | `test_an_identity_that_cant_connect_is_unchecked_saying_which_file` |
+| `catalog.named`, each verdict | `test_catalog_named` |
+| `keys.named` and `audit.named`, each verdict, a provider not saying failed | `test_keys_and_audit_named` |
+| `temporal.identities`, each verdict: a file missing, a key others can read, a certificate expired | `test_temporal_identities` |
+| `temporal.mtls-required`, passed (stand-in) and FAILED | `test_temporal_mtls_required` |
+| `temporal.reader-cannot-write`, passed (stand-in), FAILED, unchecked with no reader | `test_temporal_reader_cannot_write` |
+| `environment.exists-production`: passed; FAILED missing (saying `create`) and development (saying `harden`) | `test_environment_exists_production` |
+| `environment.workers`: passed; FAILED saying each problem | `test_environment_workers` |
+| `environment.production-providers` fails a worker the registry holds with `FileKeys`, `FileAudit`, or saying neither (20b1's window) | `test_environment_production_providers_fails_a_worker_the_registry_holds` |
+| `environment.production-providers`: passed; unchecked in a development environment and with no registry | `test_environment_production_providers` |
+| `keys.token-present`: passed, FAILED, unchecked without `VaultKeys` | `test_keys_token_present` |
+| `keys.reachable`: passed on "never made", FAILED on another state, unchecked without `VaultKeys` | `test_keys_reachable` |
+| `keys.policy`: FAILED on delete or `root` on a mark, an outside key not denied, no encrypt; passed; unchecked without `VaultKeys` | `test_keys_policy_fails`, `test_keys_policy` |
+| `advisor.key-present`: FAILED with a model and no key; passed with the key, and with no model | `test_advisor_key_present` |
+| The rules no client can see are always unchecked, each naming a section the guide has | `test_a_rule_no_client_can_see_is_unchecked_naming_a_section_the_guide_has` |
+| **Curriculum:** against a development server, doctor fails `temporal.mtls-required` and `temporal.reader-cannot-write`, naming each, through `LiveProbes` | `test_doctor_live.py::test_doctor_fails_a_development_server_naming_each_rule_it_breaks` |
+| Doctor changes nothing: no event in the registry's history, no workflow started | `test_doctor_live.py::test_doctor_changes_nothing` |
+| No secret's value is said, a failure included | `test_no_secret_is_said_a_failure_included` |
+| The guide's table lists every rule and no other, in order; its example output and its FAILED example are what doctor says | `test_the_guide_lists_every_rule_doctor_checks_and_no_other`, `test_the_guides_example_output_names_only_rules_doctor_has`, `test_the_guides_failed_example_is_what_doctor_says` |
+| Only `connecting.py` makes a Temporal client, doctor's included | `test_connecting.py::test_only_connecting_connects_to_temporal` |
+| A module raising as it is imported is unchecked, named with the error's kind, never its message | `test_a_module_raising_as_it_is_imported_is_said_by_its_kind_never_its_message`, `test_without_vault_token_the_guides_key_service_fails_token_present_and_doctor` |
+| With the guide's key service and no `VAULT_TOKEN`, `keys.token-present` fails and doctor exits 1; with the token, the key service is named and the token present | `test_without_vault_token_the_guides_key_service_fails_token_present_and_doctor`, `test_with_vault_token_the_guides_key_service_is_named_and_its_token_present` |
+| With `[tool.ventoux.temporal]` and identities, as production has, every rule runs through `LiveProbes`: `temporal.mtls-required` fails on a server answering without TLS | `test_doctor_live.py::test_doctor_with_a_production_configuration_runs_every_rule_through_live_probes` |
+
+**Reached only with a stand-in:** `temporal.mtls-required` passed, `temporal.reader-cannot-write`
+passed, and every `keys.*` branch that asks Vault. `LiveProbes`' Vault calls go through
+`VaultKeys`' own transport (19c's tests); the two that ask Temporal are run live in
+`test_doctor_live.py`.
