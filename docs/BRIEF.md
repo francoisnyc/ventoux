@@ -3511,6 +3511,11 @@ whose key provider or audit store is for development, or that doesn't say, so th
   conformance --unchanged` from what it installed. The procedure (bump, changelog, tag, publish)
   is written in `docs/guides/releasing-ventoux.md`; the tag and the publish are the maintainer's.
 
+*Amended 2026-11-10, by D83 (the contract hash fix, `docs/layers/fix-contract-hash.md`):* the
+pydantic bound above is lifted, `pydantic>=2.13.5`. A contract's promise is written by Ventoux
+now, so a new pydantic changes no hash: installed fresh under pydantic 2.14.3, every development
+contract hashes as under 2.13.5, and the package's three checks pass.
+
 ### D83. A contract's promise is written by Ventoux, never by pydantic
 
 *Decided 2026-11-10, in the contract hash fix (`docs/layers/fix-contract-hash.md`), found in 20c.

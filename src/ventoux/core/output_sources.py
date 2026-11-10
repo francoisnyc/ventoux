@@ -41,8 +41,9 @@ class OutputSource:
     def __get_pydantic_json_schema__(
         self, core_schema: CoreSchema, handler: GetJsonSchemaHandler
     ) -> dict[str, Any]:
-        # The source goes into the published schema, which the contract hash covers: declaring or
-        # changing one changes the contract. A field with none adds nothing (brief, D29).
+        # The source, in pydantic's schema of the field: what 2.13.5 wrote, recorded once
+        # (scripts/record_described.py). The promise the hash covers is Ventoux's own, written by
+        # `described` with the same key (brief, D29) (brief, D83).
         schema: dict[str, Any] = handler(core_schema)
         schema["x-source"] = self.source
         return schema

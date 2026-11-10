@@ -25,8 +25,9 @@ class Reference:
     def __get_pydantic_json_schema__(
         self, core_schema: CoreSchema, handler: GetJsonSchemaHandler
     ) -> dict[str, Any]:
-        # The system goes into the published schema, which the contract hash covers: declaring or
-        # changing one changes the contract. A field with none adds nothing (brief, D30).
+        # The system, in pydantic's schema of the field: what 2.13.5 wrote, recorded once
+        # (scripts/record_described.py). The promise the hash covers is Ventoux's own, written by
+        # `described` with the same key (brief, D30) (brief, D83).
         schema: dict[str, Any] = handler(core_schema)
         schema["x-reference"] = self.system
         return schema

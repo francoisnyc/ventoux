@@ -1,7 +1,7 @@
 """A contract's promise, and what changed between two of them, path by path (layer 13d).
 
 The promise is what the contract hash reads: everything but `display`, its schemas as JSON
-Schema. Two promises are compared leaf by leaf, as the semantic diff names paths, so a hash
+Schema written by Ventoux (brief, D83). Two promises are compared leaf by leaf, as the semantic diff names paths, so a hash
 failure says what changed (design question 16): `retry.maximum_attempts: 5 -> 9`. A promise is
 the platform team's, written in the catalog, never a case's, so its values are shown
 (brief, D57).
@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from ventoux.core.contract import Contract
+from ventoux.core.described import described
 
 
 class PromiseUnreadable(Exception):
@@ -21,10 +22,11 @@ def promise_of(contract: Contract) -> dict[str, Any]:
     """What `contract` promises, as plain JSON values: everything but `display`, schemas as JSON
     Schema, outcomes sorted."""
     # Pydantic: `model_dump(mode="json")` gives the object as plain JSON values (dicts, lists,
-    # texts, numbers); `model_json_schema()` describes a model class as JSON Schema.
+    # texts, numbers).
     promise = contract.model_dump(mode="json", exclude={"display", "input", "output"})
-    promise["input"] = contract.input.model_json_schema()
-    promise["output"] = contract.output.model_json_schema()
+    # Written by Ventoux, never by pydantic, so a new pydantic changes no hash (brief, D83).
+    promise["input"] = described(contract.input)
+    promise["output"] = described(contract.output)
     # Not cancellable is what every workflow contract promised before 11c, so it adds nothing:
     # their hashes and contracts.lock.json stay as they were (brief, D40).
     if promise.get("cancellable") is False:

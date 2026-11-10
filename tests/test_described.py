@@ -9,9 +9,14 @@ from typing import Annotated, Any
 import pytest
 from described_shapes import SHAPES
 from pydantic import BaseModel, ConfigDict, Field
+from test_diff import lines, looking_up, packed
 
+from ventoux.case.diff import diff
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.contract_hash import contract_hash
 from ventoux.core.described import described
+from ventoux.core.promise import promise_of
+from ventoux.testing import CATALOG
 
 
 class Plain(BaseModel):
@@ -172,3 +177,44 @@ def test_every_shape_is_written_as_pydantic_2_13_5_wrote_it(model: type[BaseMode
     # Compared with the recording, never with the pydantic installed: that is the point.
     recorded = json.loads(RECORDED.read_text())
     assert described(model) == recorded[model.__name__]
+
+
+DEVELOPMENT = Path(__file__).parent / "described" / "development-promises.json"
+
+
+def no_schema_from_pydantic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make pydantic's `model_json_schema` raise, so whatever asks it fails."""
+
+    def refused(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("asked pydantic for a model's JSON Schema")
+
+    monkeypatch.setattr(BaseModel, "model_json_schema", classmethod(refused))
+
+
+def test_a_promise_never_asks_pydantic_for_a_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    no_schema_from_pydantic(monkeypatch)
+    for each in CATALOG.contracts():
+        promise_of(each)  # raises if it asks
+
+
+def test_every_development_contract_hashes_as_recorded_under_pydantic_2_13_5() -> None:
+    # The locks, the release records and the recorded histories hold these hashes: method 1,
+    # unchanged (brief, D83).
+    recorded = json.loads(DEVELOPMENT.read_text())
+    made = {each.reference: each for each in CATALOG.contracts()}
+    assert sorted(made) == sorted(recorded)
+    for reference, held in recorded.items():
+        assert promise_of(made[reference]) == held["promise"], reference
+        assert contract_hash(made[reference]) == held["hash"], reference
+
+
+def test_a_package_diff_never_asks_pydantic_for_a_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The diff reads two promises as the hash does, so they are Ventoux's too (brief, D83).
+    no_schema_from_pydantic(monkeypatch)
+    found = diff(
+        packed(looking_up("orders.lookup@1")), packed(looking_up("orders.lookup@2")), CATALOG
+    )
+    assert lines(found)[0] == (
+        "looser     steps.lookup.activity: orders.lookup@1 -> orders.lookup@2: output status: "
+        "was untrusted:undeclared; now system:orders"
+    )

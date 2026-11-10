@@ -7,7 +7,7 @@ hashed differently; 20c bounded pydantic below 2.14 (D82) and left this fix for 
 job); its pull request opens once #97 is merged, rebased onto `main`.
 
 Status: 2026-11-10, the design agreed (option B, both choices as recommended); D83 written; the
-seams and tests below proposed.
+seams and tests agreed and built.
 
 ## The cause
 
@@ -103,3 +103,48 @@ fresh install, resolving the newest pydantic, is the live proof.
    the package job's install is unbounded.
 
 **Never here:** a new hash method, a change to any recorded hash, publishing.
+
+## Decided while building
+
+- **The recordings are made by a script, once, under the version they name:**
+  `scripts/record_described.py` refuses to run under any pydantic but 2.13.5. It records pydantic's
+  schema of every shape (`tests/described_shapes.py`) and every development contract's promise and
+  hash, made with the old `promise_of` before it changed: `ledger.post@1` hashed
+  `9afced75…` there, as it does in the locked environment.
+- **The development recording is independent only as first made:** run again now, the script
+  writes what `promise_of`, and so `described`, gives, which test 4 shows is the same. The shapes'
+  recording stays independent: it is pydantic's own.
+- **The markers' pydantic hooks stay,** their comments corrected: nothing in the product asks
+  pydantic for a contract's schema any more, but the recording script does, and without the hooks
+  a re-recording would silently drop the `x-` keys.
+- **`case/diff.py` imports `described` as `schema_of`:** it has a `described` of its own, for
+  policies.
+- **The constraint in `Field(pattern=…)` is pydantic's `_PydanticGeneralMetadata`,** and the
+  refusal names it so: it says the metadata's kind, as for `Ge` or `MaxLen`.
+- **The live proof:** the wheel, installed fresh with the bound lifted, resolved pydantic 2.14.3;
+  `ventoux version`, `schema --unchanged` and `conformance --unchanged` passed from `/tmp`, and
+  none of the nine development contracts hashed otherwise than under 2.13.5.
+
+## Not in this fix
+
+- **The definition format's public schemas** (`ventoux schema`, `tooling/schema.py`) are still
+  written by pydantic, through its own generator. A new pydantic could change them; `ventoux
+  schema --unchanged` would then fail, saying where, and they would be written again. Nothing is
+  hashed from them, so nothing is refused.
+- **Whether prose belongs in a promise** (a docstring, a field's description), left open.
+
+## Promises
+
+Each claim D83 and this note make, and the test that would fail if it weren't true
+(`tests/test_described.py` unless named). Each was watched failing: before its code was written,
+or with its branch switched off when the code came first.
+
+| Promise | Test |
+|---|---|
+| What Ventoux doesn't describe is refused when the contract is made: a constraint, a title, an alias, examples, `json_schema_extra`, a `Decimal` default, a model's title or `json_schema_extra`, on an input or an output | `test_what_ventoux_doesnt_describe_is_refused_when_the_contract_is_made` |
+| Every shape a contract's field may take is written as pydantic 2.13.5 wrote it | `test_every_shape_is_written_as_pydantic_2_13_5_wrote_it` |
+| A promise never asks pydantic for a schema | `test_a_promise_never_asks_pydantic_for_a_schema` |
+| Every development contract's promise and hash is as recorded under 2.13.5 | `test_every_development_contract_hashes_as_recorded_under_pydantic_2_13_5` |
+| A package diff never asks pydantic for a schema | `test_a_package_diff_never_asks_pydantic_for_a_schema` |
+| pydantic is not bounded | `test_package.py::test_pydantic_is_not_bounded_since_no_hash_depends_on_its_rendering` |
+| No contract the repository has is refused | every test that makes a contract, unchanged and passing |

@@ -36,8 +36,9 @@ class Policy:
     def __get_pydantic_json_schema__(
         self, core_schema: CoreSchema, handler: GetJsonSchemaHandler
     ) -> dict[str, Any]:
-        # The policy goes into the published schema, which the contract hash covers: adding or
-        # changing a policy changes the contract (brief, D21).
+        # The policy, in pydantic's schema of the field: what 2.13.5 wrote, recorded once
+        # (scripts/record_described.py). The promise the hash covers is Ventoux's own, written by
+        # `described` with the same key (brief, D21) (brief, D83).
         schema: dict[str, Any] = handler(core_schema)
         schema.setdefault("x-input-policies", []).append(self.promise())
         return schema

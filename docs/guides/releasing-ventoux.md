@@ -46,11 +46,9 @@ maintainer's,** never CI's, and nothing in the repository does either on its own
    `uv publish` reads its token from the environment (`UV_PUBLISH_TOKEN`), or uses PyPI's trusted
    publishing; never write the token into a file or a command line.
 
-## Before raising a dependency's bound
+## A contract's hash and pydantic
 
-A contract's hash is made from pydantic's JSON Schema of its models, and a new minor version of
-pydantic can write that schema differently (2.14 does, for a decimal field). So the package stays
-below the next minor (`pydantic>=2.13.5,<2.14`) until the hash no longer depends on it. Raising
-the bound is a release of its own: run `ventoux hashes` against the lock and `ventoux conformance
---unchanged` under the new version first; a changed hash refuses every worker serving that
-contract (brief, D54).
+A contract's hash covers its promise, whose schemas Ventoux writes itself (brief, D83), never
+pydantic: a new pydantic changes no hash, so the package takes any pydantic from the one it was
+built with. A contract whose field carries something Ventoux doesn't describe (a constraint, a
+title, an alias) is refused when the catalog is built, saying so.

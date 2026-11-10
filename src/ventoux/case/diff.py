@@ -57,6 +57,7 @@ from ventoux.case.releases import (
 from ventoux.case.visibility import roles_named, seen_by
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract
+from ventoux.core.described import described as schema_of  # `described` here is policies'
 from ventoux.core.expressions.model import Declared, Node
 from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan
@@ -476,8 +477,9 @@ def promised(contract: Contract) -> dict[str, object]:
     promise = contract.model_dump(
         mode="json", exclude={"display", "input", "output", "name", "version"}
     )
-    promise["input"] = without_policies(contract.input.model_json_schema())
-    promise["output"] = without(contract.output.model_json_schema(), "x-source")
+    # Ventoux's own description, as the hash reads it, never pydantic's (brief, D83).
+    promise["input"] = without_policies(schema_of(contract.input))
+    promise["output"] = without(schema_of(contract.output), "x-source")
     return promise
 
 

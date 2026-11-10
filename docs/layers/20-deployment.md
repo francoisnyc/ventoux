@@ -961,7 +961,7 @@ was written, or with its branch switched off when the code came first.
 | The schemas are in the package and nowhere else; the guides name the new place | `test_schema.py::test_ventoux_schema_keeps_the_schemas_in_the_package_and_nowhere_else` |
 | Every supported name imports; one that doesn't is said, naming it | `test_every_supported_name_imports`, `test_a_supported_name_that_doesnt_import_is_said_naming_it` |
 | Every name the guides, the README and the examples import is supported | `test_every_name_the_docs_import_is_supported` |
-| pydantic is bounded below the minor after the one the hashes were made with | `test_pydantic_is_bounded_to_the_minor_version_the_hashes_were_made_with` |
+| pydantic is bounded below the minor after the one the hashes were made with *(lifted 2026-11-10 by the contract hash fix, D83: its test replaced by `test_pydantic_is_not_bounded_since_no_hash_depends_on_its_rendering`)* | `test_pydantic_is_bounded_to_the_minor_version_the_hashes_were_made_with`, until then |
 | CI builds the wheel, checks it, installs it fresh and runs `version`, `schema --unchanged` and `conformance --unchanged` from outside the repository; it never publishes | `test_ci_builds_the_wheel_installs_it_fresh_and_runs_it_from_outside_the_repository` |
 | The release guide names each step, and the tag and the publish are the maintainer's, never CI's | `test_the_release_guide_names_each_step_and_leaves_the_tag_and_publish_to_the_maintainer` |
 | The changelog's first entry is the version being released | `test_the_changelog_has_an_entry_for_the_version_being_released` |
