@@ -1,7 +1,6 @@
 # Whole-project review of Ventoux, November 2026
 
-**Status: in progress.** Passes 1, 2, 3, 5 and 6 are written below. Pass 4 (test strength) is
-still running; the summary at the end is written when all six are.
+**Status: all six passes are done.** The summary is at the end of this page.
 
 - **A correction to the task's own numbers:** `tests/histories` holds 68 files, of which 34 are
   recorded histories and one a carried state; the other 33 are the key files beside them.
@@ -68,6 +67,11 @@ still running; the summary at the end is written when all six are.
 | 2.4 | The 34 kept histories leave whole areas with none: no plan run, no timer, no child case or doorbell, no registry that continued as new, no case migrated to engine 3, nine signal types; and the tests that replay them check only that no error is raised, never what the replay rebuilds (D51). |
 | 2.2 | A request to forget stamps its audit records with the code's `ENGINE` constant, not with anything recorded: with the constant moved, a recorded request replays with no error and rebuilds records that say another engine version (D51, D76, D77). |
 | 5.3, 6b.1 | Thirteen names the documents tell a team to use are not in `public.json`, so they are "internal: importable, unsupported, free to change": among them `ventoux.testing.run_case` and `CATALOG`, `Catalog`, `registry_worker`, and `propose`, `retry`, `close`, `view` and `propose_change` in `ventoux.temporal.cases`. A case of one's own can't be run, in a test or to its close, without them; the guides call `run_case` 20 times without ever showing its import, so the test that compares the guides' imports with the list can't notice (D82). |
+| 4.2 | `closes_when` can be changed to close a case on any one of its milestones, where the rule is all of them, and all 4,694 tests still pass (D10). |
+| 4.1 | The rule that an approver's role must be one the approval lists can be removed, for a plan's approval and a case step's, and all 4,694 tests still pass (D11, D23). |
+| 4.4 | The runtime's own refusal of a repeated high-risk step can be removed and all 4,694 tests still pass; only the refusal at validation is tested (D34 "the runtime depends on nothing validation did", D73). |
+| 4.5 | Nine refusals the brief states have no negative test, each removed with no test noticing among the 4,385 that need no Temporal server: among them a migration's label that isn't its target's, a release record of another package, and notes with no record before (D45, D50, D53, D55, D57, D83). |
+| 4.6 | Four readers have no negative test for an input they don't know: the expression type checker's last refusal, the plain reading, the diff's value renderer and the digest's canonical form (CLAUDE.md: "Every evaluator has a negative test for an input it doesn't know"). |
 
 ### Misleads
 
@@ -110,6 +114,8 @@ still running; the summary at the end is written when all six are.
 | 5.10 | Guides run commands on the repository's `examples/` folder, which an installed wheel doesn't have, without saying so. |
 | 6b.3 | An age has no upper bound: an `sla` of a 30-digit number of days is read, validated and run in memory, and raises `ValueError` as the duration a workflow timer's wait is written into (D44 states no bound). |
 | 6b.4 | Three quoted wordings are printed slightly otherwise: D55's "Looser:", D74's `closed by its parent: …`, and D50's `same behaviour as refund 2`, which is said only for a revert to an older release. |
+| 4.7 | Small bounds nobody tests: a form number may be an infinite decimal, an option or attachment may be the empty text, and four more. |
+| 4.8 | Three rules on Temporal survive their own test files: the forget request's identifier check, the hold at exactly 256 KB, and a boolean read as a carried time. |
 
 ### Where the brief reads against itself (found in pass 1; proposals only)
 
@@ -2308,17 +2314,564 @@ record in D20 that a result below decimal128's range is zero, in both evaluators
 
 ## Pass 4: test strength
 
-Source commit 3edb471 (worktree at f79b0e5, which differs only under reviews/). Every mutation was
-run with `reviews/2026-11/probes/mutate.sh` in a detached worktree; the command lines are in
-`reviews/2026-11/probes/p4_mutations.sh` and the raw results in `reviews/2026-11/probes/p4_mutations.log`.
+All runs are at commit f79b0e5 (source 3edb471: the two differ only under reviews/), in a detached
+worktree, with `reviews/2026-11/probes/mutate.sh`. The exact command lines are in
+`reviews/2026-11/probes/p4_mutations.sh`, the raw output in `reviews/2026-11/probes/p4_mutations.log`.
+Each mutation is one exact-string replacement of a line that enforces a stated rule. "QUICK" is 75
+test files that need no Temporal server (2,622 tests); "REST" is the other ten such files (with
+QUICK: 4,385 tests, every test that isn't Temporal-backed); "TEMP" is every `tests/test_temporal*.py`.
+A mutation is called a survivor only after the sets named in its row all passed.
 
-### Findings (so far)
+### Counts
 
-Core: 60 mutations run against the 75 quick test files (2,622 tests, `-x`): 54 killed, 6 survived
-that set (core02 approver role not listed; core06 digest number/text; core22 infinite number fits;
-core23 empty option fits; core24 empty attachment fits; core35 a moment as a literal). Each is being
-re-run against the wider set before it is called a survivor. Case, temporal, tooling and authoring
-are running.
+| package | mutations | killed | survived | equivalent/backstop |
+|---|---|---|---|---|
+| core | 76 | 67 | 7 | 2 |
+| case | 97 | 83 | 13 | 1 |
+| temporal | 32 | 29 | 3 | 0 |
+| tooling | 33 | 31 | 2 | 0 |
+| authoring | 25 | 24 | 1 | 0 |
+| total | 263 | 234 | 26 | 3 |
+
+(`tool22`, sampled for D81, mutates case/registry.py and is counted under case.)
+
+#### Every mutation that passed at least one set
+
+| mutation | file | rule | sets run | verdict |
+|---|---|---|---|---|
+| auth12_unfenced_prose | authoring/answers.py | D63 one fenced block only | targeted files: passed, FAST: passed | survived |
+| case26_repeated_high_risk | case/runtime.py | D73 a repeated high-risk step is refused | QUICK: passed, REST: passed, TEMP: passed | survived |
+| case41_closes_when_any | case/closing.py | D10 every milestone in closes_when | QUICK: passed, REST: passed, TEMP: passed | survived |
+| case44_forget_family_ignores_children | case/forgetting.py | D75 strictest of the family | QUICK: passed, REST: passed, TEMP: killed | killed |
+| case69_digest_method | case/releases.py | D51 a method this code knows | QUICK: passed | equiv |
+| core02_approver_role_not_listed | core/approval.py | D11/D23 the approval lists its roles | QUICK: passed, FAST: passed, TEMP: passed | survived |
+| core06_digest_number_as_text | core/approval.py | D11 250 and "250" never share a digest | QUICK: passed, FAST: passed | survived |
+| core22_infinite_number_fits | core/form.py | D20 a number is a finite decimal | QUICK: passed, FAST: passed | survived |
+| core23_empty_option_fits | core/form.py | D67 an option | QUICK: passed, FAST: passed | survived |
+| core24_empty_attachment_fits | core/form.py | D68 attachment ID | QUICK: passed, FAST: passed | survived |
+| core35_moment_read | core/expressions/evaluate.py | D66 a moment is not a date | QUICK: passed, FAST: passed | equiv |
+| caseR01_migration_label_mismatch | case/requests.py | D53 a migration is its release and its mapping | QUICK: passed, REST: passed | survived |
+| caseR02_shown_unset | case/runtime.py | D16 a reference not set has no record | QUICK: passed, REST: passed | survived |
+| caseR03_notes_no_record_before | case/notes.py | D57 notes compare with the record before | QUICK: passed, REST: passed | survived |
+| caseR04_notes_contract_missing | case/notes.py | D57 notes read the promise recorded | QUICK: passed, REST: passed | survived |
+| caseR06_reading_unknown_type | case/reading.py | CLAUDE.md: plain reading has a negative test for an unknown input | QUICK: passed, REST: passed | survived |
+| caseR07_reading_unknown_state | case/reading.py | CLAUDE.md: plan reading of an unknown state kind | QUICK: passed, REST: passed | survived |
+| caseR08_plain_unknown_reading | case/plain.py | CLAUDE.md: plain reading of an unknown kind | QUICK: passed, REST: passed | survived |
+| caseR09_digest_unknown_value | case/releases.py | D50 fail closed: never left out of the digest | QUICK: passed, REST: passed | survived |
+| caseR10_record_other_package | case/releases.py | D50 a record of this package | QUICK: passed, REST: passed | survived |
+| caseR11_diff_unknown_value | case/changes.py | D55 fail closed: never left unsaid | QUICK: passed, REST: passed | survived |
+| caseR15_story_answer_names_one | case/story.py | D45 a story's answer names one | QUICK: passed, REST: passed | survived |
+| coreR01_promise_key_not_text | core/promise.py | D83 a promise holds no key that isn't a text | QUICK: passed, REST: passed | survived |
+| coreR11_item_outside | core/expressions/evaluate.py | fail closed: item only inside count/sum (backstop) | QUICK: passed, REST: passed | equiv |
+| temp16_hold_strict | temporal/cases.py | D77 hold at the bound | targeted files: passed | survived |
+| temp20_forget_child_alone | temporal/forget.py | D75 a child is not forgotten alone | targeted files: passed, TEMP: killed | killed |
+| temp26_forget_identifier | temporal/forget.py | D22 identifier spelling | targeted files: passed | survived |
+| temp31_carried_bool_number | temporal/carried.py | D27 carried state read fail closed | targeted files: passed | survived |
+| tool11_vault_token_unset | tooling/vault.py | D62/D78 token only from env | targeted files: passed, FAST: passed | survived |
+| tool21_doctor_bound | tooling/doctor.py | D81 bound | targeted files: passed, FAST: passed | survived |
+| coreU02_type_check_unknown | core/expressions/check.py | CLAUDE.md: every evaluator has a negative test for an input it doesn't know: type checker | QUICK: passed, REST: passed | survived |
+
+
+"Equivalent/backstop" means the mutated line can't be reached through the public reading of a
+definition because an earlier check refuses first; each is explained under "What held".
+
+### Findings
+
+*Lead reviewer's check.* The three survivors behind F1, F2 and F4 were run again by the lead
+reviewer, in the main tree, against the whole suite (`reviews/2026-11/probes/mutate.sh <name>
+<file> <old> <new> tests`, at source `3edb471`):
+
+```
+== case41_closes_when_any: 4694 passed, 3 skipped in 338.99s (0:05:38)
+== core02_approver_role_not_listed: 4694 passed, 3 skipped in 342.67s (0:05:42)
+== case26_repeated_high_risk: 4694 passed, 3 skipped in 346.73s (0:05:46)
+```
+
+So each of those three rules can be removed and all 4,694 tests still pass. The other survivors
+were run by the pass's reviewer only, against the test sets the table names.
+
+
+Every finding here is *weakens one*: the rule holds today (the unmutated suite passes), and the
+run shows that removing the rule changes no test's result. None is a broken promise.
+
+#### 4.1 An approver's role need not be one the approval lists, and no test notices (weakens)
+
+`approver_role` (core/approval.py:45) keeps only the roles "that the approval lists and that may
+approve its risk". With `if role in roles` made `if True`, a person holding one listed role that
+may NOT approve the risk, and another registered role the approval does not list that may, is
+accepted. D23: "the person has one of its roles. An approval adds: the role may approve the
+activity's risk". The same function judges a plan's approval state and a case step's approval
+(case/answers.py), so the gap is in both.
+Proof: `core02_approver_role_not_listed` passed QUICK, FAST (4,385 passed) and TEMP (284 passed): every test file but the three that only start a development server.
+Fix: one negative test per engine: an approver with roles {listed, low risk} and {unlisted,
+high risk} is refused a high-risk approval, with the risk refusal's message.
+
+#### 4.2 `closes_when` could close on ANY of its milestones, and no test notices (weakens)
+
+case/closing.py:213 `all(milestone in state.milestones ...)` made `any(...)`. D10: "`closes_when=
+<milestones>` closes the case as soon as they are reached". Every test of `closes_when` in the
+non-Temporal suite names one milestone, or reaches all of them in the same decision.
+Proof: `case41_closes_when_any` passed QUICK, REST and TEMP (284 passed). Fix: a case with two `closes_when` milestones, one reached: still open.
+
+#### 4.3 (withdrawn) The family's forgetting
+
+`case44_forget_family_ignores_children` passed all 4,385 non-Temporal tests and is killed by one
+Temporal test, `tests/test_temporal_children.py::test_the_familys_forgetting_is_the_strictest_of_its_cases`.
+So D75's "The stricter `forgetting` of the parent and its pinned children applies to all" is
+tested, by that one slow test only; an in-memory test of `forget` would say it in milliseconds.
+Not a finding.
+
+#### 4.4 The runtime's own refusal of a repeated high-risk step has no test (weakens)
+
+case/runtime.py:2044 `if contract.risk == "high": raise StepStopped(... is high risk, and {name} is
+repeated)` made `if False`. D73: "no approval on a repeated step, so a high-risk contract can't be
+repeated, and `ventoux check` says so"; D34's title: "the runtime on its own". The check-time
+refusal is tested; the runtime's, which is what stands when a definition reaches a worker
+unchecked, is not. Compare `case27_high_risk_no_approval`, the same rule on a single step, killed.
+Proof: `case26_repeated_high_risk` passed QUICK, REST and TEMP (284 passed). Fix: run a repeated step calling a high-risk contract through
+`run_case` without validating: each item's run needs attention with that line.
+
+#### 4.5 Stated refusals with no negative test (weakens)
+
+Part 4 took the refusals the source raises (378 with a constant message; a scan,
+`p4_refusals_scan.py`, lists those whose text appears in no test and no tested guide), sampled the
+ones a decision states, and removed each. These survived every non-Temporal test:
+
+| mutation | the refusal removed | decision |
+|---|---|---|
+| caseR01 | a migration request whose migration names another release than its target ("a migration to X carries that release") | D53 "by names, refused never terminated"; code: "Fail closed: a migration is its release and its mapping, never anything else" |
+| caseR02 | showing a reference field that isn't set ("is not set: there is no record to show") | D16 |
+| caseR03 | notes for a release with no record before it ("no record before it to compare with") | D57 "From the stored packages" |
+| caseR04 | notes when a contract the earlier record names is no longer in the catalog | D57 "the notes would compare a promise that release never ran" |
+| caseR09 | the behaviour digest meeting a kind of value it doesn't know ("never left out of the digest") | D50, fail closed |
+| caseR10 | a record of another package in this package's folder ("is a record of") | D50 "The record is immutable"; `stored` |
+| caseR11 | the diff asked to show a kind of value it doesn't know ("never left unsaid") | D55, fail closed |
+| caseR15 | a story's answer naming both its step and its entry, or neither | D45 |
+| coreR01 | a promise holding a key that isn't a text | D83 |
+
+Killed, so tested: caseR05, R12, R13, R14, coreR02–R10 (see the table).
+Fix: one negative test each; they are one-liners against public functions.
+
+#### 4.6 Four readers (the type checker, the plain reading, the diff, the digest) have no negative test for an input they don't know (weakens; CLAUDE.md)
+
+CLAUDE.md: "Every evaluator has a negative test for an input it doesn't know." Checked by
+replacing each evaluator's final fail-closed `raise` with a permissive return:
+
+| evaluator | mutation | result |
+|---|---|---|
+| expression evaluator | coreU01 | killed |
+| type checker (core/expressions/check.py:238) | coreU02 | SURVIVED QUICK; wider rows in the table |
+| renderer | coreU03 | killed |
+| what an expression reads (provenance) | coreU04 | killed |
+| a plan's state kinds (interpreter) | coreU05 | killed |
+| policy kinds | core15 | killed |
+| change-request kinds | case55 | killed |
+| migration mapping sections | case64 | killed |
+| a rule's moments | caseU01 | killed |
+| plain reading: a field's type | caseR06 | SURVIVED |
+| plain reading: a plan state's kind | caseR07 | SURVIVED |
+| plain reading: a reading's kind (`parts_of`) | caseR08 | SURVIVED |
+| the diff's value renderer | caseR11 | SURVIVED |
+| the digest's canonical form | caseR09 | SURVIVED |
+
+So the type checker (core/expressions/check.py:238, passed QUICK and REST), the plain reading (case/reading.py:760 and :836, case/plain.py:104), the diff's `shown` and the
+digest's `canonical` each fail closed in code and have no test that an unknown input is refused.
+Not sampled: the codec's part names, audit record kinds, step kinds of a case (see Unchecked).
+
+#### 4.7 Small bounds and edge refusals nobody tests (minor)
+
+- `core22`: a form's number may be an infinite `Decimal` (core/form.py `fits`: "a number is a finite
+  `Decimal`"). Reading it later is refused (`core31`, killed) and Temporal's converter refuses it,
+  so only the in-memory answer path is open.
+- `core23`, `core24`: an option or an attachment may be the empty text (form.py: `value != ""`,
+  `0 < len(value)`). D68 states the upper bound (200), which is tested (`core20` killed).
+- `core06`: the approval digest marking a number apart from a text ("so `250` and `"250"` never
+  share a digest", approval.py). I found no way to make one input change type, so this may be
+  unreachable; it is untested either way.
+- `tool11`: the Vault transport's refusal when `VAULT_TOKEN` is unset after the provider was built
+  (tooling/vault.py:370 "unset since: said so, never asked without one").
+- `tool21`: doctor's probe bound of 10 seconds (D81 "none can hang doctor"): tests pass their own bound.
+- `auth12`: `unfenced` accepting text that only ENDS with a fence (prose on the first line); D63
+  "Text around a block stays, and is refused as not JSON".
+
+#### 4.8 Temporal: three rules that survived their own test files (minor)
+
+- `temp26_forget_identifier`: the forget request's own check of how the answering person is
+  written (D22 "written one way, before anything is checked against it"). The case's `forget`
+  checks both names again (case/forgetting.py), so this is the first of two checks.
+- `temp16_hold_strict`: the hold at exactly the bound (`>=` made `>`); D77: "Past 256 KB of
+  unwritten records ... the case holds". The bound's value is tested (`temp15` killed), its edge is not.
+- `temp31_carried_bool_number`: a carried time that is `True` is refused by name
+  (temporal/carried.py:497); only run against three files.
+
+### What held
+
+- Core, the 54+ killed rows: every approval rule sampled except F1 (risk, someone else on inputs
+  and on conditions, digest lapse, one approval one run, exclusions D25, identifier spelling D22),
+  every input check before an activity (key, reference system D30, policies D21, steering
+  D38/D39, unknown input, strict types D36), policy comparison (D55), every expression rule
+  sampled (no coercion, nothing truthy, decimal128, division by zero), the 1,000-entry bound,
+  D49 at validation and at runtime, the 100-item and 200-character bounds, D83's writer refusals,
+  D17's idempotency key, the catalog's label and system registration.
+- Case: D11/D25/D26/D39/D47 exclusions and distinct approvers, D69/D70 holder-only and nobody
+  chooses their own judge, D41 sender, D73 distinct keys, D33 max_age (bound and unknown age),
+  D44 due time, order and the tie rule, D40 a failed run never stopped, D17/D38/D72 what holds
+  `closes_when`, D32 never / two people / opener, D52 every exclusion and both re-checks, D31
+  unwrapped sensitive, D72 required never skipped, D51/D53 engine versions, type, sensitive,
+  visible_to, D50 digest (wording left out, defaults left out, record re-checked), D51 rewording
+  an older release, D54 every poller / environment / hash / binding, D74 one level and
+  sensitive to sensitive.
+- Tooling: all Vault checks sampled except `tool11` (exportable, type, http, no proxy, no
+  redirect, mark outlives key, mark first), FileKeys, doctor's verdicts, D59 no default catalog,
+  D64's four links, D63 nothing written when abandoned, D50 immutable record, D57 notes required.
+- Authoring: D63 rounds (both ends, count of asks), D62 (no model, no key, base URL pinned,
+  refusal, cut short, empty, error kind only, recordings compared), D61, D64 re-check.
+- Temporal: 29 of 32 killed: the codec and failure converter (D31), the log filter, the converter's refusals, the export's refusal in clear, 10 attempts, a refusal never retried and the 256 KB bound (D77), the digest re-check at opening and for a wording (D51), every forget lookup refusal (D32), and `temp20` (D75 "any ID with a `/` is refused for forgetting alone"), which passed test_forget.py and test_temporal_forget.py and is killed only by tests/test_temporal_children.py::test_a_child_is_never_forgotten_alone.
+- Equivalent/backstop, each shown: `core35` (a moment as a literal) and `coreR11` (`item` outside
+  `count`/`sum`): `parse_expression` refuses both first (run: `parse_expression({"item": "sku"})`
+  → `ExpressionInvalid item reads a field of the current element...`; `parse_expression(datetime(2027,1,1))`
+  → `ExpressionInvalid not an expression`). `case69` (`is_release` on an unknown digest method):
+  the final `behaviour_digest(...) == given` compares the method too, so the early return is redundant.
+- Tests that can't fail (part 3), all checked on the worktree:
+  - No `assert True`/constant assertion (AST scan, `p4_scan_tests.py`: 0).
+  - 35 tests have no assertion of their own: most replay a recorded history (the replayer raises),
+    the others assert that a definition is accepted by not raising. None is vacuous.
+  - 28 tests assert only inside a loop or an `if`. Run with a line tracer
+    (`p4_assertcount.py`): 27 execute their assertions at least twice;
+    `test_builder_coverage.py::test_every_call_takes_every_key_of_its_kind` executes none, by
+    design: `keys_taken` yields only the missing keys, so the assert runs only to fail.
+  - `pytest.raises(Exception)`: 5 uses; 3 have `match=`, 2 (test_case_data.py:344,
+    test_catalog.py:428) check the guide's text against `str(refused.value)` on the next line.
+    The 18 `raises(ValueError/TypeError)` with no `match=` all compare the whole message next.
+  - Skipped: 3, all in tests/test_vault_keys.py (`skipif VAULT is None`: no Vault binary here).
+    xfail: `SILENT_ON_MAIN` in test_retry_rejected.py is empty, so none is expected to fail.
+  - Computed parameter lists: none empty now (counts taken with `--collect-only`): the guides'
+    refusal rows 15/6/27/8/4, the guides' tables 6/12/7/21, witnesses 5+20 (tied to `COMPARISONS`
+    by test_diff.py:887). pytest reports an empty list as a skip, and the suite shows only the 3 above.
+  - Monkeypatches replace a collaborator to inject a fault (notes.diff, hash_check.promise_changes,
+    OPENING), never the function under test; conftest wraps `decide` to add an invariant.
+  - Goldens: tests/digests/method-1.json is a committed pin, never rewritten by a test (and
+    `case72`, `case73` are killed by it); the conformance suite's `expected` is committed data;
+    `--unchanged` tests edit a copy in tmp_path.
+
+### Unproven
+
+- That `core06` (number/text in the approval digest) is unreachable: I found no path, and did not prove there is none.
+- A computed parameter list going empty would show as a skip, not a failure: nothing fails the
+  suite on a skip. Not proven by a run (it needs a change to docs/).
+
+### Unchecked
+
+- Only F1, F2 and F4 were run against the Temporal-backed tests (TEMP rows). The survivors of F5 to
+  F8 passed every non-Temporal test (or, for F8, their own files) and a Temporal test could still
+  kill one, as it did `case44` and `temp20`. tests/test_dev_server.py, test_doctor_live.py and
+  test_skipping_server.py were never run.
+- Part 4's sample is the mutations above, not the 60+ refusals asked for one by one; the scan
+  (`p4_refusals_scan.py`) lists 96 raise sites whose message text appears in no test or guide, of
+  which 26 were confirmed by mutation (17 killed through another message or path, 9 survived).
+- Not sampled: step kinds of a case, audit record kinds, the codec's unknown part names, the
+  non-determinism boundary test (tests/test_layers.py), the builder, `ventoux check` beyond
+  `--unchanged`, the JSON Schema.
+- The three Vault tests that need a Vault binary are skipped here.
+
+### Every mutation run
+
+| mutation | where | old → new (first line) | tests | result | rule |
+|---|---|---|---|---|---|
+| auth01_rounds_upper | authoring/loop.py:24 | `ROUNDS = range(1, 6)` → `ROUNDS = range(1, 7)` | authoring drafting approve draft_sheet | killed (2 failed, 56 passed in 2.92s) | D63 1 to 5 rounds |
+| auth02_rounds_lower | authoring/loop.py:24 | `ROUNDS = range(1, 6)` → `ROUNDS = range(0, 6)` | authoring drafting approve draft_sheet | killed (1 failed, 57 passed in 2.97s) | D63 at least 1 round |
+| auth03_rounds_unchecked | authoring/loop.py:62 | `if rounds not in ROUNDS:` → `if False:` | authoring drafting approve draft_sheet | killed (3 failed, 55 passed in 2.94s) | D63 rounds bound |
+| auth04_extra_round | authoring/loop.py:68 | `for _ in range(rounds):` → `for _ in range(rounds + 1):` | authoring drafting approve draft_sheet | killed (3 failed, 55 passed in 2.88s) | D63 at most `rounds` asks |
+| auth05_failed_provider_retried | authoring/loop.py:73 | `return Authored("no answer", None, tuple(done), why)` → `continue` | authoring drafting approve draft_sheet | killed (2 failed, 56 passed in 2.96s) | D62 a provider failure is never asked again |
+| auth06_abandoned_keeps_plan | authoring/loop.py:81 | `return Authored(` → `return Authored(` | authoring drafting approve draft_sheet | killed (1 failed, 57 passed in 3.29s) | D63 nothing kept when abandoned |
+| auth07_wrong_plan | authoring/loop.py:115 | `if drafted != plan:` → `if False:` | authoring drafting approve draft_sheet | killed (1 failed, 57 passed in 3.45s) | D63 draft of the plan its step names |
+| auth08_warnings_as_errors | authoring/loop.py:123 | `errors = [said(issue) for issue in issues if is_error(issue)]` → `errors = []` | authoring drafting approve draft_sheet | killed (11 failed, 47 passed in 2.98s) | D63 checked as a release checks it |
+| auth09_step_naming | authoring/loop.py:93 | `if isinstance(step, PlanStep) and step.plan == plan:` → `if isinstance(step, PlanStep):` | authoring drafting approve draft_sheet | killed (1 failed, 57 passed in 3.08s) | D63 only a plan a step names |
+| auth10_key_twice | authoring/answers.py:54 | `if repeated:` → `if False:` | authoring drafting approve draft_sheet advisor | killed (2 failed, 86 passed in 3.20s) | D63 a key given twice |
+| auth11_not_object | authoring/answers.py:33 | `if not isinstance(read, dict):` → `if False:` | authoring drafting approve draft_sheet advisor | killed (1 failed, 87 passed in 3.05s) | D63 one object |
+| auth12_unfenced_prose | authoring/answers.py:43 | `if not (text.startswith("```") and text.endswith("```") and "\n" in te` → `if not (text.startswith("```") or text.endswith("```")):` | authoring drafting approve draft_sheet advisor | SURVIVED (88 passed in 3.21s) | D63 one fenced block only |
+| auth12_unfenced_prose@FAST | authoring/answers.py:43 | `if not (text.startswith("```") and text.endswith("```") and "\n" in te` → `if not (text.startswith("```") or text.endswith("```")):` | FAST | SURVIVED (4385 passed, 3 skipped in 73.61s (0:01:13)) | D63 one fenced block only |
+| auth13_no_model | authoring/anthropic.py:28 | `if not model:` → `if False:` | anthropic_provider authoring advisor | killed (1 failed, 60 passed in 2.76s) | D62 no model named |
+| auth14_no_key | authoring/anthropic.py:34 | `if not key:` → `if False:` | anthropic_provider authoring advisor | killed (1 failed, 60 passed in 2.21s) | D62 key only from env |
+| auth15_base_url | authoring/anthropic.py:75 | `return AsyncAnthropic(api_key=key, base_url=API)` → `return AsyncAnthropic(api_key=key)` | anthropic_provider authoring advisor | killed (1 failed, 60 passed in 2.16s) | D62 base URL pinned |
+| auth16_refusal_answer | authoring/anthropic.py:60 | `if response.stop_reason == "refusal":` → `if False:` | anthropic_provider authoring advisor | killed (1 failed, 60 passed in 2.39s) | D62 refusal is no answer |
+| auth17_cut_short | authoring/anthropic.py:62 | `if response.stop_reason not in WHOLE:` → `if False:` | anthropic_provider authoring advisor | killed (2 failed, 59 passed in 2.50s) | D62 cut short is no answer |
+| auth18_empty_text | authoring/anthropic.py:65 | `if not text:` → `if False:` | anthropic_provider authoring advisor | killed (1 failed, 60 passed in 2.28s) | D62 no text is no answer |
+| auth19_api_error_quoted | authoring/anthropic.py:58 | `raise ProviderFailed(f"the model's API failed: {type(error).__name__}"` → `raise ProviderFailed(f"the model's API failed: {error}") from None` | anthropic_provider authoring advisor | killed (1 failed, 60 passed in 2.09s) | D62 kind only, never the message |
+| auth20_replay_differs | authoring/provider.py:92 | `if recorded.request is not None and (where := difference(recorded.requ` → `if False and (where := difference(recorded.request, request)):` | advisor temporal_advisor authoring drafting approve draft_sheet | killed (3 failed, 94 passed in 5.07s) | D62 recordings compare the request |
+| auth21_replay_system | authoring/provider.py:100 | `if asked.system != recorded.system:` → `if False:` | advisor temporal_advisor authoring drafting approve draft_sheet | killed (1 failed, 96 passed in 5.84s) | D62 recordings compare the system text |
+| auth22_advisor_admission | authoring/advisor.py:114 | `if (why := await refused(step)) is not None:` → `if False:` | advisor temporal_advisor | killed (3 failed, 36 passed in 2.60s) | D61 admission decides |
+| auth23_advisor_second_key | authoring/advisor.py:139 | `if list(read) != ["step"]:` → `if False:` | advisor temporal_advisor | killed (2 failed, 37 passed in 2.36s) | D61 one step name |
+| auth24_advisor_name_strict | authoring/advisor.py:145 | `return NAME.validate_python(step, strict=True)` → `return str(step)` | advisor temporal_advisor | killed (3 failed, 36 passed in 2.58s) | D61 a name written as the case writes names |
+| auth25_approve_errors | authoring/approve.py:51 | `if errors:` → `if False:` | approve draft_sheet | killed (2 failed, 22 passed in 2.02s) | D64 checked again, never on the record's word |
+| case01_untrusted_removes_approval | case/approvals.py:41 | `for field, untrusted in untrusted_of(read).items():` → `for field, untrusted in {}.items():` | QUICK | killed (1 failed, 298 passed in 5.10s) | D11/D39 untrusted data can't remove an approval |
+| case02_approval_not_withdrawn_on_change | case/approvals.py:101 | `reason = not_admitted(case, required[name], state) or changed(approval` → `reason = not_admitted(case, required[name], state)` | QUICK | killed (1 failed, 78 passed in 3.39s) | D11 open approval follows the case file (D25) |
+| case03_given_not_lapsed | case/approvals.py:107 | `if different := changed_fields(given, step, state):` → `if different := []:` | QUICK | killed (1 failed, 1623 passed in 13.69s) | D11/D25 a given approval lapses when its values change |
+| case04_case_lapsed_digest | case/approvals.py:179 | `if now != given.digest:` → `if False:` | QUICK | killed (1 failed, 81 passed in 3.49s) | D11 inputs changed since approved |
+| case05_approval_outcome_open | case/answers.py:70 | `if answer.outcome not in (APPROVE, REJECT):` → `if False:` | QUICK | killed (1 failed, 1972 passed in 15.60s) | D9/D23 approval's outcomes are a closed list |
+| case06_approval_risk | case/answers.py:79 | `if approver is None:` → `if False:` | QUICK | killed (1 failed, 85 passed in 3.82s) | D11 approver role may approve the risk |
+| case07_unseen_approves | case/answers.py:83 | `refuse_unless(unseen(case, catalog, answer, name, step))` → `pass` | QUICK | killed (1 failed, 85 passed in 3.63s) | D30 an approver judges what they see |
+| case08_same_person_twice | case/answers.py:88 | `if answer.by in approved:` → `if False:` | QUICK | killed (1 failed, 72 passed in 3.64s) | D47 count different people |
+| case09_opener_approves | case/answers.py:104 | `if by == state.opened_by:` → `if False:` | QUICK | killed (1 failed, 73 passed in 3.31s) | D11/D25 the opener approves none of its steps |
+| case10_parent_excluded_ignored | case/answers.py:108 | `if by in state.excluded:` → `if False:` | QUICK | killed (1 failed, 761 passed in 6.23s) | D25/D74 who the parent excluded |
+| case11_proposer_approves | case/answers.py:111 | `if by == state.proposers.get(name):` → `if False:` | QUICK | killed (1 failed, 38 passed in 3.29s) | D25 the proposer approves nothing |
+| case12_rule_reader_approves | case/answers.py:117 | `if asked is not None and by in asked.read_from:` → `if False:` | QUICK | killed (1 failed, 73 passed in 3.57s) | D11/D39 whose answer a rule's condition read |
+| case13_retry_exclusion_dropped | case/answers.py:122 | `if latest is not None and latest.status == "retrying" and by in latest` → `if False:` | QUICK | killed (1 failed, 2188 passed in 19.46s) | D26 a retried run keeps its exclusions |
+| case14_claim_held_by_other | case/claims.py:40 | `if holder is not None:` → `if False:` | QUICK | killed (1 failed, 803 passed in 7.64s) | D69 the holder is asked, never overruled |
+| case15_multi_approval_held | case/claims.py:65 | `if isinstance(found, OpenApproval) and found.count > 1:` → `if False:` | QUICK | killed (1 failed, 111 passed in 4.18s) | D69/D47 an approval needing several people is held by nobody |
+| case16_give_back_by_other | case/claims.py:131 | `if holder.by != event.by:` → `if False:` | QUICK | killed (1 failed, 805 passed in 7.58s) | D69 only the holder gives back |
+| case17_answer_held_by_other | case/claims.py:140 | `if holder is None or holder.by == by:` → `if True:` | QUICK | killed (1 failed, 92 passed in 3.89s) | D69 only the holder answers |
+| case18_assigner_role | case/assigning.py:48 | `if role is None:` → `if False:` | QUICK | killed (1 failed, 91 passed in 3.98s) | D70 only a registered assigner |
+| case19_own_judge | case/assigning.py:88 | `if (why := why_excluded(case, state, found.step, step, by)) is not Non` → `if False:` | QUICK | killed (1 failed, 100 passed in 3.89s) | D70 nobody chooses their own judge |
+| case20_assignee_not_judged | case/assigning.py:34 | `role_to_hold(case, catalog, state, found, asked)` → `pass` | QUICK | killed (1 failed, 94 passed in 3.80s) | D69/D70 being assigned grants nothing |
+| case21_sender_system | case/runtime.py:436 | `if event.by != f"system:{sent_by.system}":` → `if False:` | QUICK | killed (1 failed, 1330 passed in 13.97s) | D41 one sender, its system |
+| case22_people_event_from_system | case/runtime.py:443 | `if event.by.startswith("system:"):` → `if False:` | QUICK | killed (1 failed, 1333 passed in 13.83s) | D41 an event sent by roles never from a system |
+| case23_sender_role | case/runtime.py:452 | `raise EventRefused(f"{name} is sent by {roles}, and {event.by} has {kn` → `pass` | QUICK | killed (1 failed, 1214 passed in 10.78s) | D41/D22 sender's role |
+| case24_event_after_close | case/runtime.py:375 | `if state.phase == "closed":` → `if False:` | QUICK | killed (1 failed, 1348 passed in 13.44s) | D41 a closed case takes no events |
+| case25_duplicate_item_keys | case/runtime.py:1992 | `if len(set(keys)) < len(keys):` → `if False:` | QUICK | killed (1 failed, 2071 passed in 16.72s) | D73 key distinct |
+| case26_repeated_high_risk | case/runtime.py:2044 | `if contract.risk == "high":` → `if False:` | QUICK | SURVIVED (2622 passed in 21.74s) | D73 a repeated high-risk step is refused |
+| case26_repeated_high_risk@REST | case/runtime.py:2044 | `if contract.risk == "high":` → `if False:` | REST | SURVIVED (1763 passed, 3 skipped in 53.22s) | D73 a repeated high-risk step is refused |
+| case26_repeated_high_risk@TEMP | case/runtime.py:2044 | `if contract.risk == "high":` → `if False:` | TEMP | SURVIVED (284 passed in 258.76s (0:04:18)) | D73 a repeated high-risk step is refused |
+| case27_high_risk_no_approval | case/runtime.py:2076 | `if contract.risk == "high" and step.approval is None:` → `if False:` | QUICK | killed (1 failed, 320 passed in 4.98s) | D11 high risk needs approval, at runtime |
+| case28_retry_not_failed | case/runtime.py:1403 | `if run is None or run.status != "failed":` → `if run is None:` | QUICK | killed (1 failed, 340 passed in 5.38s) | D26 only a failed run is retried |
+| case29_stale_unknown_age | case/runtime.py:1606 | `if stale.age is None:  # fail closed: an age that can't be told is nev` → `if False:  # fail closed: an age that can't be told is never fresh` | QUICK | killed (1 failed, 1619 passed in 14.05s) | D18/D33 unknown age never fresh |
+| case30_max_age_ge | case/freshness.py:68 | `elif at - obtained.at > seconds_in(limit):` → `elif at - obtained.at >= seconds_in(limit):` | QUICK | killed (1 failed, 2503 passed in 22.03s) | D33 max_age boundary |
+| case31_max_age_no_time | case/freshness.py:66 | `if obtained is None:` → `if False:` | QUICK | killed (1 failed, 1619 passed in 14.32s) | D33 fail closed: its age is unknown |
+| case32_bool_time | case/freshness.py:25 | `if isinstance(at, bool) or not isinstance(at, int):` → `if not isinstance(at, int):` | QUICK | killed (1 failed, 1597 passed in 14.24s) | fail closed: a bool is no time |
+| case33_timer_wrong_time | case/timers.py:41 | `if event.at != timer.due:` → `if False:` | QUICK | killed (1 failed, 2467 passed in 21.08s) | D44 a timer fires at its due time |
+| case34_timer_due_strict | case/timers.py:81 | `due = [timer for timer in state.timers if timer.due <= at]` → `due = [timer for timer in state.timers if timer.due < at]` | QUICK | killed (1 failed, 1799 passed in 15.19s) | D44 every timer due by then fires |
+| case35_timer_tie | case/timers.py:85 | `first = min(due, key=lambda timer: timer.due)` → `first = min(reversed(due), key=lambda timer: timer.due)` | QUICK | killed (1 failed, 2473 passed in 21.78s) | D44 tie: earlier set wins |
+| case36_timers_failed_ends | case/timers.py:58 | `if status in ("done", "rejected", "cancelled", "skipped"):` → `if status in ("done", "rejected", "cancelled", "skipped", "failed"):` | QUICK | killed (1 failed, 719 passed in 6.56s) | D44 a failed run hasn't ended for its timers |
+| case37_failed_run_stopped | case/stopping.py:46 | `if latest is not None and latest.status in ("failed", "retrying"):` → `if False:` | QUICK | killed (1 failed, 1644 passed in 14.64s) | D40 a failed run is never stopped |
+| case38_close_over_failed | case/closing.py:207 | `if any(run.status in ("failed", "retrying") for run in state.runs):` → `if False:` | QUICK | killed (1 failed, 371 passed in 5.65s) | D17/D26 closes_when waits for a failed run |
+| case39_close_over_failed_rule | case/closing.py:209 | `if any(firing.status == "failed" for firing in state.firings):` → `if False:` | QUICK | killed (1 failed, 2183 passed in 19.49s) | D38 nor a rule that couldn't be read |
+| case40_close_over_owed | case/closing.py:211 | `if owed(case, state):` → `if False:` | QUICK | killed (1 failed, 2106 passed in 18.16s) | D72 required owed blocks closes_when |
+| case41_closes_when_any | case/closing.py:213 | `if all(milestone in state.milestones for milestone in case.closes_when` → `if any(milestone in state.milestones for milestone in case.closes_when` | QUICK | SURVIVED (2622 passed in 21.83s) | D10 every milestone in closes_when |
+| case41_closes_when_any@REST | case/closing.py:213 | `if all(milestone in state.milestones for milestone in case.closes_when` → `if any(milestone in state.milestones for milestone in case.closes_when` | REST | SURVIVED (1763 passed, 3 skipped in 52.23s) | D10 every milestone in closes_when |
+| case41_closes_when_any@TEMP | case/closing.py:213 | `if all(milestone in state.milestones for milestone in case.closes_when` → `if any(milestone in state.milestones for milestone in case.closes_when` | TEMP | SURVIVED (284 passed in 250.02s (0:04:10)) | D10 every milestone in closes_when |
+| case42_close_role | case/closing.py:49 | `if role is None:` → `if False:` | QUICK | killed (1 failed, 342 passed in 5.49s) | D10 close reason's roles |
+| case43_forget_never | case/forgetting.py:62 | `if family_forgetting(case, children) == "never":` → `if False:` | QUICK | killed (1 failed, 1595 passed in 14.57s) | D32 forgetting: never |
+| case44_forget_family_ignores_children | case/forgetting.py:100 | `said = [case.forgetting, *(child.forgetting for child in children)]` → `said = [case.forgetting]` | QUICK | SURVIVED (2622 passed in 21.21s) | D75 strictest of the family |
+| case44_forget_family_ignores_children@REST | case/forgetting.py:100 | `said = [case.forgetting, *(child.forgetting for child in children)]` → `said = [case.forgetting]` | REST | SURVIVED (1763 passed, 3 skipped in 54.92s) | D75 strictest of the family |
+| case44_forget_family_ignores_children@TEMP | case/forgetting.py:100 | `said = [case.forgetting, *(child.forgetting for child in children)]` → `said = [case.forgetting]` | TEMP | killed (1 failed, 141 passed in 116.30s (0:01:56)) | D75 strictest of the family |
+| case45_forget_self_approve | case/forgetting.py:45 | `if approved_by == proposed_by:` → `if False:` | QUICK | killed (1 failed, 1591 passed in 13.97s) | D32 two people |
+| case46_forget_opener_approves | case/forgetting.py:77 | `if state.engine >= 2 and event.approved_by == state.opened_by:` → `if False:` | QUICK | killed (1 failed, 721 passed in 6.27s) | D32 opener can't approve forgetting (engine 2) |
+| case47_forget_proposer_role | case/forgetting.py:67 | `if proposed is not None:` → `if False:` | QUICK | killed (1 failed, 1592 passed in 15.07s) | D32 forgetters role for proposing |
+| case48_change_self_approve | case/requests.py:264 | `if by == request.by:` → `if False:` | QUICK | killed (1 failed, 700 passed in 7.03s) | D52 nobody approves their own |
+| case49_change_opener_approves | case/requests.py:266 | `if by == state.opened_by:` → `if False:` | QUICK | killed (1 failed, 701 passed in 6.61s) | D25/D52 |
+| case50_edit_setter_approves | case/requests.py:275 | `if f"person:{by}" in state.sources.get(request.target, ()):` → `if False:` | QUICK | killed (1 failed, 712 passed in 6.63s) | D11/D52 who set it doesn't judge |
+| case51_edit_hidden_approves | case/requests.py:272 | `if (hidden := unseen(case, catalog, request.target, by, event.roles)) ` → `if False:` | QUICK | killed (1 failed, 711 passed in 6.59s) | D30/D52 approver sees the value |
+| case52_skip_approver_approves | case/requests.py:289 | `if run.approved is not None and by in run.approved.approvers:` → `if False:` | QUICK | killed (1 failed, 714 passed in 6.67s) | D52 who approved the run can't approve its skip |
+| case53_edit_recheck_changed | case/requests.py:309 | `if problem is None and inputs_digest({name: Var(var=name)}, state.valu` → `if False:` | QUICK | killed (1 failed, 196 passed in 4.45s) | D52 checked again: changed since proposed |
+| case54_migrate_recheck_moved | case/requests.py:362 | `if released(case, state) != request.against:` → `if False:` | QUICK | killed (1 failed, 1715 passed in 14.85s) | D53 case moved since proposed |
+| case55_change_kind_unknown | case/requests.py:88 | `if event.kind not in KINDS:` → `if False:` | QUICK | killed (1 failed, 703 passed in 6.68s) | D52 change-request kinds closed |
+| case56_edit_sensitive_unwrapped | case/requests.py:176 | `if declared.sensitive and not isinstance(value, Sensitive):` → `if False:` | QUICK | killed (1 failed, 710 passed in 6.37s) | D31 unwrapped sensitive refused |
+| case57_edit_same_value | case/requests.py:186 | `if plain(value) == plain(state.values[name]):` → `if False:` | QUICK | killed (1 failed, 706 passed in 6.61s) | D52 an edit that changes nothing |
+| case58_skip_required | case/requests.py:206 | `if case.steps[run.step].required:` → `if False:` | QUICK | killed (1 failed, 2099 passed in 17.78s) | D72 a required step is never skipped |
+| case59_mig_unknown_engine | case/migrations.py:128 | `if migration.engine not in KNOWN:` → `if False:` | QUICK | killed (1 failed, 1700 passed in 14.83s) | D51 unknown engine version |
+| case60_mig_engine_back | case/migrations.py:133 | `elif migration.engine < state.engine:` → `elif False:` | QUICK | killed (1 failed, 1700 passed in 14.51s) | D53 the engine never goes back |
+| case61_mig_type_change | case/migrations.py:409 | `if before.declared != after.declared:` → `if False:` | QUICK | killed (1 failed, 1705 passed in 15.13s) | D53 never changes type |
+| case62_mig_loses_sensitive | case/migrations.py:416 | `if before.sensitive and not after.sensitive:` → `if False:` | QUICK | killed (1 failed, 1705 passed in 14.74s) | D53 never loses sensitive |
+| case63_mig_widens_visible | case/migrations.py:420 | `if widened(case, target, name, new):` → `if False:` | QUICK | killed (1 failed, 1705 passed in 14.55s) | D53 never widens visible_to |
+| case64_mig_unknown_section | case/migrations.py:199 | `if section not in SECTIONS:` → `if False:` | QUICK | killed (1 failed, 1703 passed in 15.26s) | D53 mapping sections closed list |
+| case65_mig_two_to_one | case/migrations.py:209 | `if new in mapped_to:` → `if False:` | QUICK | killed (1 failed, 1703 passed in 14.62s) | D53 by names, one to one |
+| case66_mig_approval_kept | case/migrations.py:523 | `if not same_behaviour(case, target, name):` → `if False:` | QUICK | killed (1 failed, 204 passed in 4.68s) | D53 approvals of what changed withdrawn |
+| case67_view_unregistered_role | case/visibility.py:61 | `counting = {role for role in roles if role in registered}` → `counting = set(roles)` | QUICK | killed (1 failed, 474 passed in 5.51s) | D22/D35 an unknown role sees nothing |
+| case68_child_has_cases | case/releases.py:223 | `if child.cases:` → `if False:` | QUICK | killed (1 failed, 772 passed in 7.04s) | D74 one level |
+| case69_digest_method | case/releases.py:351 | `if given.method != METHOD:` → `if False:` | QUICK | SURVIVED (2622 passed in 22.10s) | D51 a method this code knows |
+| case70_record_digest_recheck | case/releases.py:518 | `if digest(kept) != record.digest:` → `if False:` | QUICK | killed (1 failed, 2027 passed in 16.14s) | D50 record checked against its own package |
+| case71_reword_older_release | case/releases.py:489 | `if number != newest:` → `if False:` | QUICK | killed (1 failed, 2033 passed in 16.40s) | D51 only the latest release takes new wording |
+| case72_digest_default_kept | case/releases.py:299 | `if at_default and not names_its_shape:` → `if False:` | QUICK | killed (1 failed, 1227 passed in 11.48s) | D50 defaults left out |
+| case73_digest_wording_kept | case/releases.py:292 | `if isinstance(value, WORDING):` → `if False:` | QUICK | killed (1 failed, 774 passed in 7.96s) | D50 display left out |
+| case74_act_no_poller | case/activation.py:79 | `if not pollers.get(queue):` → `if False:` | QUICK | killed (1 failed, 3 passed in 3.35s) | D54 a worker polls |
+| case75_act_unmanifested_poller | case/activation.py:106 | `if manifest is None or (manifest.environment, manifest.task_queue) != ` → `if manifest is None:` | QUICK | killed (1 failed, 2 passed in 3.23s) | D54 every poller, in this environment |
+| case76_act_hash | case/activation.py:168 | `if served != needed:` → `if False:` | QUICK | killed (1 failed, 1 passed in 3.23s) | D54 same hash |
+| case77_act_bind_differently | case/activation.py:132 | `if len(set(bindings.values())) > 1:` → `if False:` | QUICK | killed (1 failed, 4 passed in 3.24s) | D54/D29 one binding |
+| case78_required_with_when | case/definition.py:994 | `if step.required and step.when is not None:` → `if False:` | QUICK | killed (1 failed, 2093 passed in 17.29s) | D72 a required step has no when |
+| case79_report_sensitive | case/definition.py:970 | `elif field.sensitive:` → `elif False:` | QUICK | killed (1 failed, 744 passed in 6.79s) | D74 a report carries no sensitive field |
+| case80_sensitive_to_child | case/calls.py:161 | `if read in case.fields and case.fields[read].sensitive:` → `if False:` | QUICK | killed (1 failed, 750 passed in 7.44s) | D74 sensitive to sensitive |
+| core01_risk_not_checked_for_approver | core/approval.py:47 | `and may_approve(catalog.roles[role], contract.risk)` → `and True` | QUICK | killed (1 failed, 85 passed in 3.71s) | D11 a role approves up to its risk |
+| core02_approver_role_not_listed | core/approval.py:45 | `if role in roles` → `if True` | QUICK | SURVIVED (2622 passed in 20.20s) | D11/D23 the approval lists its roles |
+| core02_approver_role_not_listed@FAST | core/approval.py:45 | `if role in roles` → `if True` | FAST | SURVIVED (4385 passed, 3 skipped in 75.57s (0:01:15)) | D11/D23 the approval lists its roles |
+| core02_approver_role_not_listed@TEMP | core/approval.py:45 | `if role in roles` → `if True` | TEMP | SURVIVED (284 passed in 258.23s (0:04:18)) | D11/D23 the approval lists its roles |
+| core03_own_answer_approves | core/approval.py:79 | `if f"person:{person}" in sources.get(field, frozenset()):` → `if False:` | QUICK | killed (1 failed, 73 passed in 3.70s) | D11 someone else |
+| core04_conditions_not_someone_else | core/approval.py:96 | `((inputs, f"{step} uses"), (conditions, f"decides whether {step} runs"` → `((inputs, f"{step} uses"),)` | QUICK | killed (1 failed, 788 passed in 7.23s) | D11 someone else, on what decides the run |
+| core05_digest_of_sensitive_plain | core/approval.py:122 | `return Sensitive(digest) if read else digest` → `return digest` | QUICK | killed (1 failed, 2280 passed in 19.26s) | D31 a digest of a sensitive value is sensitive |
+| core06_digest_number_as_text | core/approval.py:119 | `default=lambda number: {"number": str(number)}` → `default=str` | QUICK | SURVIVED (2622 passed in 20.23s) | D11 250 and "250" never share a digest |
+| core06_digest_number_as_text@FAST | core/approval.py:119 | `default=lambda number: {"number": str(number)}` → `default=str` | FAST | SURVIVED (4385 passed, 3 skipped in 75.20s (0:01:15)) | D11 250 and "250" never share a digest |
+| core07_key_given_by_definition | core/before_activity.py:64 | `if contract.idempotency_key is not None and contract.idempotency_key i` → `if False:` | QUICK | killed (1 failed, 468 passed in 5.41s) | D17/D35 the engine fills the key |
+| core08_reference_wrong_system | core/before_activity.py:71 | `if field in inputs and (wrong := not_a_reference_to(system, inputs[fie` → `if False and (wrong := not_a_reference_to(system, inputs[field], types` | QUICK | killed (1 failed, 387 passed in 5.63s) | D30 a reference of its system |
+| core09_input_policy_not_checked | core/before_activity.py:85 | `if policy.refuses(found) is not None:` → `if False:` | QUICK | killed (1 failed, 298 passed in 5.02s) | D21 every policy on every input |
+| core10_steering_not_checked | core/before_activity.py:93 | `if policy.refuses(steering.sources) is not None:` → `if False:` | QUICK | killed (1 failed, 561 passed in 5.82s) | D38/D39 untrusted data can't choose what is sent |
+| core11_unknown_input_passed | core/before_activity.py:108 | `if unknown:` → `if False:` | QUICK | killed (1 failed, 466 passed in 5.46s) | fail closed: an activity never gets an undeclared field |
+| core12_inputs_not_strict | core/before_activity.py:118 | `model_validate(unwrapped(given), strict=True)` → `model_validate(unwrapped(given), strict=False)` | QUICK | killed (1 failed, 509 passed in 6.32s) | D36 the text "40" is refused |
+| core13_only_from_no_source | core/policy.py:75 | `if not sources:` → `if False:` | QUICK | killed (1 failed, 1925 passed in 15.28s) | D21 only_from: no source is no system |
+| core14_only_from_union | core/policy.py:124 | `systems = named if systems is None else systems & named` → `systems = named if systems is None else systems \| named` | QUICK | killed (1 failed, 1111 passed in 10.08s) | D21 every policy applies |
+| core15_unknown_policy_kind | core/policy.py:117 | `if type(policy) not in KINDS:` → `if False:` | QUICK | killed (1 failed, 1114 passed in 9.70s) | D21 closed list of kinds, fail closed |
+| core16_within_any | core/policy.py:139 | `return False  # an untrusted source is accepted by `inner` only` → `return True  # an untrusted source is accepted by `inner` only` | QUICK | killed (1 failed, 1100 passed in 9.88s) | D55 policies compared |
+| core17_within_systems | core/policy.py:144 | `return systems <= outer_systems` → `return systems >= outer_systems` | QUICK | killed (1 failed, 1108 passed in 9.90s) | D55 policies compared |
+| core18_risk_strictly_below | core/roles.py:34 | `return RISKS.index(risk) <= RISKS.index(approves)` → `return RISKS.index(risk) < RISKS.index(approves)` | QUICK | killed (1 failed, 38 passed in 3.34s) | D11 approves up to |
+| core19_unregistered_role_counts | core/roles.py:43 | `if role in allowed and role in registered)` → `if role in allowed)` | QUICK | killed (1 failed, 471 passed in 5.52s) | D22 a role the catalog doesn't know counts for nothing |
+| core20_longest_id_201 | core/form.py:52 | `LONGEST_ID = 200` → `LONGEST_ID = 201` | QUICK | killed (1 failed, 163 passed in 4.28s) | D68 at most 200 characters |
+| core21_most_items_101 | core/form.py:55 | `MOST_ITEMS = 100` → `MOST_ITEMS = 101` | QUICK | killed (1 failed, 2047 passed in 17.24s) | D73 at most 100 items |
+| core22_infinite_number_fits | core/form.py:93 | `return isinstance(value, Decimal) and value.is_finite()` → `return isinstance(value, Decimal)` | QUICK | SURVIVED (2622 passed in 21.96s) | D20 a number is a finite decimal |
+| core22_infinite_number_fits@FAST | core/form.py:93 | `return isinstance(value, Decimal) and value.is_finite()` → `return isinstance(value, Decimal)` | FAST | SURVIVED (4385 passed, 3 skipped in 73.73s (0:01:13)) | D20 a number is a finite decimal |
+| core23_empty_option_fits | core/form.py:105 | `return isinstance(value, str) and value != ""` → `return isinstance(value, str)` | QUICK | SURVIVED (2622 passed in 20.55s) | D67 an option |
+| core23_empty_option_fits@FAST | core/form.py:105 | `return isinstance(value, str) and value != ""` → `return isinstance(value, str)` | FAST | SURVIVED (4385 passed, 3 skipped in 71.14s (0:01:11)) | D67 an option |
+| core24_empty_attachment_fits | core/form.py:109 | `0 < len(value) <= LONGEST_ID` → `0 <= len(value) <= LONGEST_ID` | QUICK | SURVIVED (2622 passed in 20.77s) | D68 attachment ID |
+| core24_empty_attachment_fits@FAST | core/form.py:109 | `0 < len(value) <= LONGEST_ID` → `0 <= len(value) <= LONGEST_ID` | FAST | SURVIVED (4385 passed, 3 skipped in 71.13s (0:01:11)) | D68 attachment ID |
+| core25_form_extra_field | core/form.py:40 | `if field not in sets:` → `if False:` | QUICK | killed (1 failed, 1813 passed in 16.15s) | D9 the answer gives exactly the fields |
+| core26_item_extra_field | core/form.py:149 | `if any(name not in declared.fields for name in item):` → `if False:` | QUICK | killed (1 failed, 2044 passed in 16.50s) | D73 each item exactly the declared fields |
+| core27_outcome_any_text | core/form.py:99 | `return isinstance(value, str) and value in declared.outcomes` → `return isinstance(value, str)` | QUICK | killed (1 failed, 2296 passed in 21.34s) | D9 outcome type closed list |
+| core28_role_any_spelling | core/roles.py:18 | `if not is_label(name):` → `if False:` | QUICK | killed (1 failed, 699 passed in 6.59s) | D22 roles are labels |
+| core29_eq_coerces | core/expressions/evaluate.py:213 | `if kind(left) != kind(right):` → `if False:` | QUICK | killed (1 failed, 1407 passed in 13.81s) | D20 no coercion in == |
+| core30_in_coerces | core/expressions/evaluate.py:104 | `if kind(found) != kind(options[0]):` → `if False:` | QUICK | killed (1 failed, 1457 passed in 14.20s) | D20 no coercion in `in` |
+| core31_nonfinite_read | core/expressions/evaluate.py:167 | `if isinstance(value, Decimal) and not value.is_finite():` → `if False:` | QUICK | killed (1 failed, 1438 passed in 14.29s) | D20 non-finite number refused at runtime |
+| core32_decimal128_not_checked | core/expressions/evaluate.py:171 | `if isinstance(value, Decimal) and not fits_decimal128(value):` → `if False:` | QUICK | killed (1 failed, 1583 passed in 14.01s) | D20 decimal128 |
+| core33_truthy | core/expressions/evaluate.py:249 | `if not isinstance(value, bool):` → `if False:` | QUICK | killed (1 failed, 1416 passed in 14.54s) | D20 nothing is truthy |
+| core34_div_zero_named | core/expressions/evaluate.py:90 | `if isinstance(expression, Div) and numbers[1] == 0:` → `if False:` | QUICK | killed (1 failed, 1430 passed in 13.53s) | D20/D30 division by zero names the expression |
+| core35_moment_read | core/expressions/evaluate.py:60 | `if isinstance(expression, date) and not is_day(expression):` → `if False:` | QUICK | SURVIVED (2622 passed in 20.58s) | D66 a moment is not a date |
+| core35_moment_read@FAST | core/expressions/evaluate.py:60 | `if isinstance(expression, date) and not is_day(expression):` → `if False:` | FAST | SURVIVED (4385 passed, 3 skipped in 76.09s (0:01:16)) | D66 a moment is not a date |
+| core36_records_not_mappings | core/expressions/evaluate.py:181 | `if not isinstance(held, list) or not all(isinstance(element, Mapping) ` → `if not isinstance(held, list):` | QUICK | killed (1 failed, 1475 passed in 14.38s) | D20 count/sum read a list of records |
+| core37_ge_as_gt | core/expressions/evaluate.py:238 | `return a >= b` → `return a > b` | QUICK | killed (1 failed, 1399 passed in 13.74s) | D20 operators |
+| core38_loop_bound_1001 | core/interpreter.py:98 | `ENTRIES_WITHOUT_A_WAIT = 1000` → `ENTRIES_WITHOUT_A_WAIT = 1001` | QUICK | killed (1 failed, 1681 passed in 14.19s) | D48 1,000 states without a wait |
+| core39_undeclared_outcome | core/interpreter.py:287 | `if outcome.name not in contract.outcomes:` → `if False:` | QUICK | killed (1 failed, 1654 passed in 13.96s) | D17 only outcomes the contract declares |
+| core40_changed_inputs_approved | core/interpreter.py:370 | `if now != approval.digest:` → `if False:` | QUICK | killed (1 failed, 1828 passed in 15.13s) | D11 inputs changed since approval |
+| core41_high_risk_unapproved | core/interpreter.py:381 | `if contract.risk == "high":` → `if False:` | QUICK | killed (1 failed, 1831 passed in 14.99s) | D11 high risk needs an approval, checked at runtime |
+| core42_approval_reused | core/interpreter.py:364 | `approval = approvals.pop(here, None)` → `approval = approvals.get(here)` | QUICK | killed (1 failed, 1832 passed in 14.62s) | D11 one approval unlocks one run |
+| core43_identifier_not_checked | core/interpreter.py:400 | `if answer.by is not None and (wrong := identifier_problem(answer.by)) ` → `if False and (wrong := identifier_problem(answer.by)) is not None:` | QUICK | killed (1 failed, 1844 passed in 14.46s) | D22 who answered is written one way |
+| core44_excluded_approves | core/interpreter.py:441 | `if by in excluded:` → `if False:` | QUICK | killed (1 failed, 1903 passed in 15.55s) | D25 the case's opener and proposer approve nothing |
+| core45_untrusted_path | core/interpreter.py:497 | `if untrusted:` → `if False:` | QUICK | killed (1 failed, 1915 passed in 15.23s) | D49 untrusted data never chooses a plan's path |
+| core46_person_times_out | core/interpreter.py:454 | `if answer.by is not None:` → `if False:` | QUICK | killed (1 failed, 1669 passed in 14.76s) | D9 a timeout never from a person |
+| core47_unknown_outcome | core/interpreter.py:459 | `if answer.outcome not in question.outcomes:` → `if False:` | QUICK | killed (1 failed, 1668 passed in 14.37s) | D9 outcomes are a closed list |
+| core48_case_source_given | core/interpreter.py:549 | `elif CASE in given.sources:` → `elif False:` | QUICK | killed (1 failed, 1648 passed in 14.50s) | layer 5: a field given with the source `case` is refused |
+| core49_no_sources_given | core/interpreter.py:541 | `elif not given.sources:` → `elif False:` | QUICK | killed (1 failed, 511 passed in 5.92s) | fail closed: no sources |
+| core50_condition_not_boolean | core/interpreter.py:512 | `if not isinstance(decided, bool):` → `if False:` | QUICK | killed (1 failed, 1665 passed in 14.51s) | D20 nothing is truthy (transition) |
+| core51_v_untrusted_transition | core/validate.py:201 | `if name in plan.sources:` → `if False:` | QUICK | killed (1 failed, 255 passed in 5.16s) | D49 at validation |
+| core52_v_approval_role_risk | core/validate.py:262 | `if role in catalog.roles and not may_approve(catalog.roles[role], cont` → `if False` | QUICK | killed (1 failed, 1824 passed in 15.48s) | D11 APPROVAL_ROLE |
+| core53_v_reserved_outcome | core/validate.py:398 | `if TIMEOUT in state.wait.outcomes:` → `if False:` | QUICK | killed (1 failed, 888 passed in 9.02s) | timeout is reserved |
+| core54_v_approve_goes_elsewhere | core/validate.py:434 | `if transition.target != of:` → `if False:` | QUICK | killed (1 failed, 856 passed in 8.63s) | D23 approve leads to what it approves |
+| core55_v_engine_input | core/validate.py:494 | `if name == key:` → `if False:` | QUICK | killed (1 failed, 2557 passed in 21.30s) | D17 ENGINE_INPUT |
+| core56_v_missing_input | core/validate.py:513 | `if field.is_required() and name not in state.inputs:` → `if False:` | QUICK | killed (1 failed, 2556 passed in 20.79s) | MISSING_INPUT |
+| core57_v_condition_boolean | core/validate.py:534 | `if condition and not isinstance(found, BooleanType):` → `if False:` | QUICK | killed (1 failed, 2567 passed in 20.24s) | D20 a condition gives a boolean |
+| core58_v_approval_required | core/validate.py:605 | `if name in reached and isinstance(state, ActivityState) and is_high_ri` → `if False:` | QUICK | killed (1 failed, 1821 passed in 14.96s) | D11 APPROVAL_REQUIRED |
+| core59_v_approval_reused | core/validate.py:625 | `if again:` → `if False:` | QUICK | killed (1 failed, 215 passed in 4.40s) | D11 APPROVAL_REUSED |
+| core60_v_sets_unknown_field | core/validate.py:280 | `if field not in plan.fields:` → `if False:` | QUICK | killed (1 failed, 896 passed in 8.68s) | UNKNOWN_FIELD |
+| caseR01_migration_label_mismatch | case/requests.py:113 | `if not isinstance(migration, Migration) or migration.label != event.ta` → `if not isinstance(migration, Migration):` | QUICK | SURVIVED (2622 passed in 22.90s) | D53 a migration is its release and its mapping |
+| caseR01_migration_label_mismatch@REST | case/requests.py:113 | `if not isinstance(migration, Migration) or migration.label != event.ta` → `if not isinstance(migration, Migration):` | REST | SURVIVED (1763 passed, 3 skipped in 53.72s) | D53 a migration is its release and its mapping |
+| caseR02_shown_unset | case/runtime.py:493 | `if event.field not in state.values:` → `if False:` | QUICK | SURVIVED (2622 passed in 22.97s) | D16 a reference not set has no record |
+| caseR02_shown_unset@REST | case/runtime.py:493 | `if event.field not in state.values:` → `if False:` | REST | SURVIVED (1763 passed, 3 skipped in 51.80s) | D16 a reference not set has no record |
+| caseR03_notes_no_record_before | case/notes.py:67 | `if not found:` → `if False:` | QUICK | SURVIVED (2622 passed in 21.56s) | D57 notes compare with the record before |
+| caseR03_notes_no_record_before@REST | case/notes.py:67 | `if not found:` → `if False:` | REST | SURVIVED (1763 passed, 3 skipped in 53.31s) | D57 notes compare with the record before |
+| caseR04_notes_contract_missing | case/notes.py:79 | `except NotInCatalog:` → `except NotInCatalog:` | QUICK | SURVIVED (2622 passed in 21.69s) | D57 notes read the promise recorded |
+| caseR04_notes_contract_missing@REST | case/notes.py:79 | `except NotInCatalog:` → `except NotInCatalog:` | REST | SURVIVED (1763 passed, 3 skipped in 52.02s) | D57 notes read the promise recorded |
+| caseR05_notes_wording_diff | case/notes.py:35 | `if kept.wording > 1 and (found.changes or found.rewritten):` → `if False:` | QUICK | killed (1 failed, 1731 passed in 15.48s) | D57 a wording revision says only wording |
+| caseR06_reading_unknown_type | case/reading.py:759 | `if kind not in kinds:` → `if False:` | QUICK | SURVIVED (2622 passed in 23.06s) | CLAUDE.md: plain reading has a negative test for an unknown input |
+| caseR06_reading_unknown_type@REST | case/reading.py:759 | `if kind not in kinds:` → `if False:` | REST | SURVIVED (1763 passed, 3 skipped in 55.54s) | CLAUDE.md: plain reading has a negative test for an unknown input |
+| caseR07_reading_unknown_state | case/reading.py:836 | `raise ReadingRefused(f"can't read {name}: {state!r} is no kind of stat` → `return f"{name}."` | QUICK | SURVIVED (2622 passed in 22.57s) | CLAUDE.md: plan reading of an unknown state kind |
+| caseR07_reading_unknown_state@REST | case/reading.py:836 | `raise ReadingRefused(f"can't read {name}: {state!r} is no kind of stat` → `return f"{name}."` | REST | SURVIVED (1763 passed, 3 skipped in 55.52s) | CLAUDE.md: plan reading of an unknown state kind |
+| caseR08_plain_unknown_reading | case/plain.py:104 | `raise TypeError(f"no reading of the kind {type(reading).__name__}")  #` → `return "", ()  # fail closed` | QUICK | SURVIVED (2622 passed in 21.54s) | CLAUDE.md: plain reading of an unknown kind |
+| caseR08_plain_unknown_reading@REST | case/plain.py:104 | `raise TypeError(f"no reading of the kind {type(reading).__name__}")  #` → `return "", ()  # fail closed` | REST | SURVIVED (1763 passed, 3 skipped in 54.27s) | CLAUDE.md: plain reading of an unknown kind |
+| caseR09_digest_unknown_value | case/releases.py:284 | `raise TypeError(f"the behaviour digest can't read a {type(value).__nam` → `return None` | QUICK | SURVIVED (2622 passed in 22.37s) | D50 fail closed: never left out of the digest |
+| caseR09_digest_unknown_value@REST | case/releases.py:284 | `raise TypeError(f"the behaviour digest can't read a {type(value).__nam` → `return None` | REST | SURVIVED (1763 passed, 3 skipped in 53.91s) | D50 fail closed: never left out of the digest |
+| caseR10_record_other_package | case/releases.py:507 | `if record.name != name:` → `if False:` | QUICK | SURVIVED (2622 passed in 22.38s) | D50 a record of this package |
+| caseR10_record_other_package@REST | case/releases.py:507 | `if record.name != name:` → `if False:` | REST | SURVIVED (1763 passed, 3 skipped in 54.19s) | D50 a record of this package |
+| caseR11_diff_unknown_value | case/changes.py:138 | `raise DiffRefused(f"the diff can't show a {type(value).__name__}")` → `return ""` | QUICK | SURVIVED (2622 passed in 21.81s) | D55 fail closed: never left unsaid |
+| caseR11_diff_unknown_value@REST | case/changes.py:138 | `raise DiffRefused(f"the diff can't show a {type(value).__name__}")` → `return ""` | REST | SURVIVED (1763 passed, 3 skipped in 55.10s) | D55 fail closed: never left unsaid |
+| caseR12_event_two_senders | case/definition.py:133 | `if (self.system is None) == (self.roles is None):` → `if False:` | QUICK | killed (1 failed, 1317 passed in 13.95s) | D41 one sender |
+| caseR13_assign_answered_no_step | case/definition.py:230 | `if self.to == "answered" and self.step is None:` → `if False:` | QUICK | killed (1 failed, 120 passed in 4.04s) | D71 answered names its task |
+| caseR14_reminder_no_age | case/definition.py:531 | `if not ages:` → `if False:` | QUICK | killed (1 failed, 1785 passed in 15.31s) | D46 a reminder of nothing |
+| caseR15_story_answer_names_one | case/story.py:73 | `if (self.step is None) == (self.entry is None):` → `if False:` | QUICK | SURVIVED (2622 passed in 21.17s) | D45 a story's answer names one |
+| caseR15_story_answer_names_one@REST | case/story.py:73 | `if (self.step is None) == (self.entry is None):` → `if False:` | REST | SURVIVED (1763 passed, 3 skipped in 52.48s) | D45 a story's answer names one |
+| coreR01_promise_key_not_text | core/promise.py:59 | `if not isinstance(key, str):` → `if False:` | QUICK | SURVIVED (2622 passed in 20.59s) | D83 a promise holds no key that isn't a text |
+| coreR01_promise_key_not_text@REST | core/promise.py:59 | `if not isinstance(key, str):` → `if False:` | REST | SURVIVED (1763 passed, 3 skipped in 53.15s) | D83 a promise holds no key that isn't a text |
+| coreR02_schema_model_config | core/contract_schema.py:38 | `if model.model_config:` → `if False:` | QUICK | killed (1 failed, 993 passed in 9.86s) | D83 a contract's model sets no model_config |
+| coreR03_schema_default | core/contract_schema.py:191 | `if not field.is_required() and field.default is not None:` → `if False:` | QUICK | killed (1 failed, 985 passed in 9.69s) | D83 a default other than None |
+| coreR04_schema_unknown_mark | core/contract_schema.py:194 | `if any(not isinstance(mark, MARKS) for mark in field.metadata):` → `if False:` | QUICK | killed (1 failed, 613 passed in 6.53s) | D83 an unknown constraint or mark |
+| coreR05_plan_no_roles | core/plan.py:130 | `if not roles:` → `if False:` | QUICK | killed (1 failed, 1809 passed in 15.10s) | D22 no roles would mean anyone |
+| coreR06_plan_source_label | core/plan.py:151 | `if f"{origin}:" != UNTRUSTED_ORIGIN or not is_label(label):` → `if False:` | QUICK | killed (1 failed, 1892 passed in 15.27s) | D12 a declared source is untrusted:<label> |
+| coreR07_only_from_no_system | core/policy.py:67 | `if not self.systems:` → `if False:` | QUICK | killed (1 failed, 605 passed in 6.22s) | D21 only_from names a system |
+| coreR08_idempotency_required | core/contract.py:153 | `if self.effect in ("write", "notify") and self.idempotency_key is None` → `if False:` | QUICK | killed (1 failed, 573 passed in 6.38s) | D17 a side-effecting activity names its key |
+| coreR09_output_label_unregistered | core/catalog.py:204 | `if origin == "untrusted" and label not in self._labels:` → `if False:` | QUICK | killed (1 failed, 608 passed in 6.02s) | D12 an output's label registered |
+| coreR10_output_system_unregistered | core/catalog.py:210 | `if origin == "system" and label not in self._systems:` → `if False:` | QUICK | killed (1 failed, 609 passed in 6.10s) | D29/D30 an output's system registered |
+| coreR11_item_outside | core/expressions/evaluate.py:69 | `if element is None:` → `if False:` | QUICK | SURVIVED (2622 passed in 19.88s) | fail closed: item only inside count/sum (backstop) |
+| coreR11_item_outside@REST | core/expressions/evaluate.py:69 | `if element is None:` → `if False:` | REST | SURVIVED (1763 passed, 3 skipped in 53.53s) | fail closed: item only inside count/sum (backstop) |
+| temp01_codec_no_case | temporal/codec.py:81 | `if self.case is None:` → `if False:` | temporal_sensitive sensitive | killed (1 failed, 28 passed in 4.99s) | D31 a sensitive part with no case is refused |
+| temp02_codec_skips_parts | temporal/codec.py:78 | `names = sorted(name for name in payload.metadata if name.startswith(be` → `names = []` | temporal_sensitive sensitive | killed (5 failed, 24 passed in 4.92s) | D31 each sensitive part sealed |
+| temp03_failure_not_sealed | temporal/codec.py:111 | `"message": Sensitive(failure.message),` → `"message": failure.message,` | temporal_sensitive sensitive | killed (2 failed, 27 passed in 5.10s) | D31 a failure's message sealed |
+| temp04_failure_message_kept | temporal/codec.py:115 | `failure.message, failure.stack_trace = ENCODED_FAILURE, ""` → `failure.stack_trace = ""` | temporal_sensitive sensitive | killed (2 failed, 27 passed in 5.79s) | D31 failure message moved out of the clear |
+| temp05_log_keeps_exception | temporal/logs.py:33 | `record.exc_info, record.exc_text, record.stack_info = None, None, None` → `pass` | temporal_sensitive sensitive | killed (2 failed, 27 passed in 5.04s) | D31 log filter: exception type only |
+| temp06_log_filter_not_installed | temporal/logs.py:45 | `logger.addFilter(TYPE_ONLY)` → `pass` | temporal_sensitive sensitive | killed (2 failed, 27 passed in 4.78s) | D31 log filter installed |
+| temp07_converter_reads_encrypted | temporal/converter.py:114 | `if any(name.startswith(ENCRYPTED) for name in payload.metadata):` → `if False:` | temporal_sensitive sensitive | killed (1 failed, 28 passed in 5.80s) | D31 fail closed: encrypted part never read |
+| temp08_client_without_codec | temporal/converter.py:180 | `if not isinstance(converter.payload_codec, SensitiveCodec) or (` → `if False and (` | temporal_sensitive sensitive temporal | killed (2 failed, 57 passed in 23.61s) | D31 refuse a client that doesn't encrypt |
+| temp09_converter_float | temporal/converter.py:47 | `if isinstance(value, float):` → `if False:` | temporal_sensitive sensitive temporal expressions | killed (1 failed, 267 passed in 23.58s) | D20 no float crosses |
+| temp10_converter_mark_key | temporal/converter.py:74 | `if MARK in value:` → `if False:` | temporal_sensitive sensitive temporal | killed (1 failed, 58 passed in 22.75s) | converter's own key never data |
+| temp11_export_in_clear | temporal/audit.py:82 | `if field in sensitive and not isinstance(value, Sensitive):` → `if False:` | audit_export audit_records | killed (1 failed, 42 passed in 11.54s) | D77 a value of one in clear fails the whole call |
+| temp12_export_restricted_unsaid | temporal/audit.py:178 | `if field in self.restricted:` → `if False:` | audit_export audit_records | killed (1 failed, 42 passed in 11.81s) | D30/D77 a restricted value says who may see it |
+| temp13_export_retries_11 | temporal/cases.py:443 | `maximum_attempts=10,` → `maximum_attempts=11,` | audit_export audit_records | killed (1 failed, 42 passed in 11.97s) | D77 10 attempts |
+| temp14_export_refused_retried | temporal/cases.py:447 | `non_retryable_error_types=["ExportRefused", "AuditRefused", "KeyRefuse` → `non_retryable_error_types=["AuditRefused", "KeyRefused"],` | audit_export audit_records | killed (1 failed, 42 passed in 11.68s) | D77 a refusal never retried |
+| temp15_audit_bound_257 | temporal/cases.py:473 | `audit_bound: ClassVar[int] = 256 * 1024` → `audit_bound: ClassVar[int] = 257 * 1024` | audit_export audit_records | killed (1 failed, 42 passed in 11.81s) | D77 256 KB hold |
+| temp16_hold_strict | temporal/cases.py:860 | `return waiting_size(self.state.audit) >= self.audit_bound` → `return waiting_size(self.state.audit) > self.audit_bound` | audit_export audit_records | SURVIVED (43 passed in 11.60s) | D77 hold at the bound |
+| temp17_opens_unreleased | temporal/cases.py:961 | `if not is_release(case, release.plans, release.digest, release.cases):` → `if False:` | temporal_case_release temporal_children | killed (2 failed, 45 passed in 46.43s) | D51 digest recheck at opening |
+| temp18_wording_unchecked | temporal/cases.py:685 | `if not is_release(case, plans, self.release.digest):` → `if False:` | temporal_case_release notes releases | killed (1 failed, 61 passed in 19.45s) | D51 a wording read is the release's |
+| temp19_engine_not_opening | temporal/cases.py:1562 | `if event.value.engine in KNOWN and event.value.engine not in OPENING:` → `if False:` | temporal_migrations migrations | killed (1 failed, 29 passed in 13.56s) | D51 a known engine version no case opens at |
+| temp20_forget_child_alone | temporal/forget.py:108 | `if "/" not in case:` → `if True:` | forget temporal_forget | SURVIVED (32 passed in 19.49s) | D75 a child is not forgotten alone |
+| temp20_forget_child_alone@TEMP | temporal/forget.py:108 | `if "/" not in case:` → `if True:` | TEMP | killed (1 failed, 139 passed in 118.78s (0:01:58)) | D75 a child is not forgotten alone |
+| temp21_forget_unreadable_definition | temporal/forget.py:123 | `if found.forgetting == "":` → `if False:` | forget temporal_forget | killed (3 failed, 29 passed in 18.08s) | D32 fail closed: unknown forgetting |
+| temp22_forget_while_open_closed | temporal/forget.py:131 | `if found.forgetting == "while_open" and not found.running:` → `if False:` | forget temporal_forget | killed (3 failed, 29 passed in 18.12s) | D32 while_open refuses a closed case |
+| temp23_forget_never | temporal/forget.py:129 | `if found.forgetting == "never":` → `if False:` | forget temporal_forget | killed (3 failed, 29 passed in 18.08s) | D32 never |
+| temp24_forget_same_person | temporal/forget.py:150 | `if by == found.by:` → `if False:` | forget temporal_forget | killed (2 failed, 30 passed in 18.36s) | D32 two people / opener |
+| temp25_closed_first_ignored | temporal/forget.py:344 | `if self.found.forgetting == "while_open":` → `if False:` | forget temporal_forget | killed (1 failed, 31 passed in 19.13s) | D32 closed before the approval reached it |
+| temp26_forget_identifier | temporal/forget.py:375 | `if (wrong := identifier_problem(sent.by)) is not None:` → `if False:` | forget temporal_forget | SURVIVED (32 passed in 18.61s) | D22 identifier spelling |
+| temp27_contract_check_new_work | temporal/contract_check.py:183 | `if event.event_id > asked and (what := new_work(event)) is not None:` → `if False:` | temporal_workflow_step workflow_step temporal_keys | killed (1 failed, 38 passed in 33.88s) | D29/D40 a cancellable contract schedules nothing new |
+| temp28_contract_check_ends_early | temporal/contract_check.py:194 | `if started:` → `if False:` | temporal_workflow_step workflow_step temporal_keys | killed (1 failed, 38 passed in 35.10s) | cancellable: ends only once all ended |
+| temp29_contract_check_undeclared_output | temporal/contract_check.py:235 | `if name not in contract.output.model_fields` → `if False` | temporal_workflow_step workflow_step temporal_keys | killed (1 failed, 38 passed in 31.88s) | contract out of date |
+| temp30_manifest_refused | temporal/registry.py:313 | `if not answer.done:` → `if False:` | temporal_registry temporal_activate | killed (2 failed, 24 passed in 33.62s) | D54 a manifest the registry refuses |
+| temp31_carried_bool_number | temporal/carried.py:497 | `if isinstance(number, bool) or not isinstance(number, int \| Decimal) o` → `if not isinstance(number, int \| Decimal) or number % 1 != 0:` | temporal_case repeated required | SURVIVED (150 passed in 34.58s) | D27 carried state read fail closed |
+| temp32_carried_bad_date | temporal/carried.py:489 | `if day is None:` → `if False:` | temporal_dates dates temporal_case | killed (1 failed, 114 passed in 34.71s) | D66 carried date |
+| tool01_vault_exportable | tooling/vault.py:320 | `if config[setting] is not False:` → `if False:` | vault_keys doctor | killed (1 failed, 71 passed, 3 skipped in 7.87s) | D78 exportable key refused |
+| tool02_vault_type | tooling/vault.py:324 | `if config["type"] != KEY_TYPE:` → `if False:` | vault_keys doctor | killed (1 failed, 71 passed, 3 skipped in 5.01s) | D78 key of another type refused |
+| tool03_vault_http | tooling/vault.py:342 | `if parts.scheme == "https" or (parts.scheme == "http" and parts.hostna` → `if True:` | vault_keys doctor | killed (1 failed, 71 passed, 3 skipped in 5.29s) | D78 http refused |
+| tool04_vault_proxy | tooling/vault.py:366 | `urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirec` → `urllib.request.build_opener(NoRedirect())` | vault_keys doctor | killed (1 failed, 71 passed, 3 skipped in 5.14s) | D78 no proxy |
+| tool05_vault_redirect | tooling/vault.py:366 | `urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirec` → `urllib.request.build_opener(urllib.request.ProxyHandler({}))` | vault_keys doctor | killed (1 failed, 71 passed, 3 skipped in 4.24s) | D78 no redirects |
+| tool06_vault_mark_ignored_use | tooling/vault.py:198 | `if self.marked(case, name):` → `if False:` | vault_keys doctor | killed (6 failed, 66 passed, 3 skipped in 4.98s) | D78 mark outlives key: marked key never used |
+| tool07_vault_state_mark | tooling/vault.py:163 | `if self.marked(case, name):` → `if False:` | vault_keys doctor | killed (6 failed, 66 passed, 3 skipped in 4.39s) | D78 state reads the mark |
+| tool08_vault_destroy_no_mark | tooling/vault.py:151 | `self.ask(case, "POST", self.mark_path(name), mark, {200, 204})` → `pass` | vault_keys doctor | killed (1 failed, 71 passed, 3 skipped in 4.01s) | D78 mark first |
+| tool09_vault_destroy_none | tooling/vault.py:145 | `if self.key_config(case, name) is None:` → `if False:` | vault_keys doctor | killed (1 failed, 71 passed, 3 skipped in 5.14s) | D78 no key to destroy refused |
+| tool10_vault_name_long | tooling/vault.py:48 | `if len(name) > LONGEST:` → `if False:` | vault_keys doctor | killed (1 failed, 71 passed, 3 skipped in 4.90s) | D78 key name bound |
+| tool11_vault_token_unset | tooling/vault.py:370 | `if not token:` → `if False:` | vault_keys doctor | SURVIVED (72 passed, 3 skipped in 4.79s) | D62/D78 token only from env |
+| tool11_vault_token_unset@FAST | tooling/vault.py:370 | `if not token:` → `if False:` | FAST | SURVIVED (4385 passed, 3 skipped in 72.82s (0:01:12)) | D62/D78 token only from env |
+| tool12_filekeys_reuse | tooling/keys.py:73 | `if case in keys:` → `if False:` | vault_keys temporal_keys forget | killed (1 failed, 34 passed, 3 skipped in 13.22s) | D31 a key never made again |
+| tool13_filekeys_destroyed_used | tooling/keys.py:122 | `if stored is DESTROYED:` → `if False:` | vault_keys temporal_keys forget temporal_sensitive | killed (1 failed, 50 passed, 3 skipped in 18.61s) | D15 destroyed key unusable |
+| tool14_filekeys_damaged | tooling/keys.py:107 | `except InvalidTag:` → `except InvalidTag:` | vault_keys temporal_sensitive sensitive | killed (2 failed, 47 passed, 3 skipped in 9.31s) | codec: a damaged part is an error, never a guess |
+| tool15_doctor_dev_provider | tooling/doctor.py:126 | `if development is True:` → `if False:` | doctor doctor_live connecting | killed (2 failed, 74 passed in 3.67s) | D81 development provider fails |
+| tool16_doctor_unsaid_provider | tooling/doctor.py:131 | `if development is not False:` → `if False:` | doctor doctor_live connecting | killed (2 failed, 74 passed in 4.03s) | D81 a provider that doesn't say fails |
+| tool17_doctor_dev_catalog | tooling/doctor.py:98 | `if name == DEVELOPMENT:` → `if False:` | doctor doctor_live connecting | killed (1 failed, 75 passed in 4.12s) | D59/D81 development catalog |
+| tool18_doctor_dev_env | tooling/doctor.py:233 | `if registry.development:` → `if False:` | doctor doctor_live connecting | killed (1 failed, 75 passed in 4.15s) | D81 production environment |
+| tool19_doctor_outside_deny | tooling/doctor.py:357 | `if held[outside] != ["deny"]:` → `if False:` | doctor doctor_live connecting | killed (1 failed, 75 passed in 4.51s) | D78/D81 token denied other keys |
+| tool20_doctor_mark_delete | tooling/doctor.py:355 | `if {"delete", "root"} & set(held[path])` → `if False` | doctor doctor_live connecting | killed (2 failed, 74 passed in 4.05s) | D78/D81 token can't delete a mark |
+| tool21_doctor_bound | tooling/doctor.py:52 | `PROBE_BOUND = 10.0  # seconds` → `PROBE_BOUND = 11.0  # seconds` | doctor doctor_live connecting | SURVIVED (76 passed in 2.97s) | D81 bound |
+| tool21_doctor_bound@FAST | tooling/doctor.py:52 | `PROBE_BOUND = 10.0  # seconds` → `PROBE_BOUND = 11.0  # seconds` | FAST | SURVIVED (4385 passed, 3 skipped in 73.78s (0:01:13)) | D81 bound |
+| tool22_keeping_dev_keys | case/registry.py:127 | `elif manifest.keys.development:` → `elif False:` | doctor doctor_live connecting temporal_registry activation | killed (4 failed, 114 passed in 27.54s) | D81 production refusing development providers |
+| tool23_deploy_no_catalog | tooling/deployment.py:171 | `if name is None:` → `if False:` | deployment_catalog check cli diff | killed (1 failed, 86 passed in 2.18s) | D59 never the development catalog by default |
+| tool24_connect_identity | tooling/connecting.py:61 | `if identity is None or identity not in temporal.identities:` → `if False:` | doctor doctor_live connecting | killed (8 failed, 68 passed in 3.01s) | D81 connecting as a configured identity |
+| tool25_sheet_not_drafted | tooling/draft_sheet.py:76 | `if record.verdict != "drafted":` → `if False:` | drafting draft_sheet approve authoring | killed (1 failed, 57 passed in 2.89s) | D64 only a draft that passed |
+| tool26_sheet_hash | tooling/draft_sheet.py:84 | `if hashlib.sha256(written).hexdigest() != record.draft_sha256:` → `if False:` | drafting draft_sheet approve authoring | killed (1 failed, 57 passed in 2.79s) | D64 draft hash check |
+| tool27_sheet_reference | tooling/draft_sheet.py:91 | `if (reference := reference_of(text)) != record.plan:` → `if False:` | drafting draft_sheet approve authoring | killed (1 failed, 57 passed in 3.54s) | D64 record's plan |
+| tool28_sheet_package | tooling/draft_sheet.py:97 | `if before.name != record.package:` → `if False:` | drafting draft_sheet approve authoring | killed (1 failed, 57 passed in 3.07s) | D64 package drafted for |
+| tool29_drafts_folder_default | tooling/drafting.py:93 | `if found.drafts is None:` → `if False:` | drafting draft_sheet approve authoring | killed (1 failed, 57 passed in 3.15s) | D63 no default drafts folder |
+| tool30_abandoned_written | tooling/drafting.py:67 | `if authored.verdict == "drafted" and authored.plan is not None:` → `if True:` | drafting draft_sheet approve authoring | killed (3 failed, 55 passed in 2.80s) | D63 nothing written when abandoned |
+| tool31_record_overwritten | tooling/releases.py:123 | `raise RecordRefused(` → `return False` | releases summary notes | killed (1 failed, 91 passed in 1.77s) | D50 immutable record |
+| tool32_record_without_notes | tooling/releases.py:110 | `if kept.notes is None:` → `if False:` | releases summary notes | killed (1 failed, 91 passed in 1.62s) | D57 nothing recorded without its notes |
+| tool33_unchanged_bytes | tooling/check.py:218 | `elif committed.read_bytes() != text.encode():` → `elif False:` | check unchanged cli | killed (3 failed, 24 passed in 1.69s) | D59 --unchanged |
+| tool34_record_path_name | tooling/releases.py:93 | `if path.name != file_name(kept):` → `if False:` | releases summary notes | killed (1 failed, 91 passed in 1.59s) | D50 record in its own file |
+| coreU01_evaluator_unknown | core/expressions/evaluate.py:134 | `raise ExpressionError(f"can't evaluate {expression!r}: it isn't a pars` → `return False` | QUICK | killed (1 failed, 1389 passed in 12.99s) | CLAUDE.md: every evaluator has a negative test for an input it doesn't know: expression evaluator |
+| coreU02_type_check_unknown | core/expressions/check.py:238 | `raise refused(path, f"can't check {expression!r}")` → `return BooleanType()` | QUICK | SURVIVED (2622 passed in 21.02s) | CLAUDE.md: every evaluator has a negative test for an input it doesn't know: type checker |
+| coreU02_type_check_unknown@REST | core/expressions/check.py:238 | `raise refused(path, f"can't check {expression!r}")` → `return BooleanType()` | REST | SURVIVED (1763 passed, 3 skipped in 53.21s) | CLAUDE.md: every evaluator has a negative test for an input it doesn't know: type checker |
+| coreU03_render_unknown | core/expressions/render.py:74 | `raise ExpressionInvalid(f"can't render {expression!r}: it isn't a pars` → `return ""` | QUICK | killed (1 failed, 1522 passed in 13.30s) | CLAUDE.md: every evaluator has a negative test for an input it doesn't know: renderer |
+| coreU04_fields_read_unknown | core/provenance.py:126 | `raise TypeError(f"not an expression: {type(expression).__name__}")` → `return []` | QUICK | killed (1 failed, 1958 passed in 15.12s) | CLAUDE.md: every evaluator has a negative test for an input it doesn't know: what an expression reads |
+| coreU05_state_kind_unknown | core/interpreter.py:251 | `raise Stop(f"{here} is a kind of state this engine doesn't know: {kind` → `run.status = "succeeded"` | QUICK | killed (1 failed, 1680 passed in 14.18s) | CLAUDE.md: every evaluator has a negative test for an input it doesn't know: step kinds of a plan |
+| caseU01_moment_unknown | case/rules.py:60 | `raise ValueError(f"{moment!r} is not a moment Ventoux knows")` → `return "opened"  # type: ignore` | QUICK | killed (1 failed, 2193 passed in 19.80s) | CLAUDE.md: every evaluator has a negative test for an input it doesn't know: moments |
 
 
 ---
@@ -3385,3 +3938,79 @@ Each line names the probe that shows it. All ran at `b464f3f`.
 - **Contradictions between decisions** were looked for only in the decisions read above. Beyond
   finding 2, the ones met are already recorded by the brief itself (D67's "Replay" corrected by
   D68; D82's pydantic bound changed by D83) or are in the lead's known list.
+
+
+---
+
+## Summary
+
+**Findings by severity** (one line each in the list at the top; a line that names two numbers is
+one finding seen from two passes):
+
+| Severity | Findings |
+|---|---|
+| Breaks a promise | 21 |
+| Weakens a promise | 18 |
+| Misleads | 15 |
+| Minor | 19 |
+| **All** | **73** |
+
+**The three that matter most.**
+
+1. **Forgetting doesn't reach everything, and can be done where the definition forbids it**
+   (1c.1 with 1b.4, 1c.5, 1c.2, 1c.7). A sensitive option or attachment is written in plain text
+   into the case's Temporal history as its check's input, and is still there once the key is
+   destroyed. A closed case that keeps its records (`forgetting: while_open`) refuses the
+   approval and is forgotten anyway. A second request to forget shares the first one's audit
+   stream, so the request that really destroys the key leaves no record of who proposed and who
+   approved. These are the promises a data-protection role would rely on, and each is reachable
+   through Ventoux's own client functions.
+2. **Untrusted data decides, through the two newest kinds of step, while `ventoux check` says it
+   can't** (1a.1, 1a.2, with 1a.3 and 1a.4). A repeated step and a case step keep nothing of what
+   steered them, so on a customer's word they send trusted-only inputs and reach the milestones a
+   case closes on. For the repeated step, validation reports the very same paths as errors that
+   can never happen, which is worse than silence: a reviewer reading the check is told the
+   opposite of what runs.
+3. **A value hidden by `visible_to` is shown to roles it is hidden from, once it crosses a join**
+   (1b.5 with 1c.4). Passed into a child case's field, back through a child's report, or into a
+   plan step, it is read by anyone, and from the audit store `read_audit` shows it to a reader
+   with no role at all. "A view hiding more than its source" is a non-negotiable, and validation
+   says nothing at any of the three places.
+
+**One thing the passes show together.** Most of what breaks is at child cases (layer 18c and
+18d): what steered the step (1a.2), a declared mark (1a.3), who may approve a change (1b.2),
+who sees a value (1b.5), a failed run let go (1b.6), a report overwriting an outcome (1b.3).
+Each rule holds inside one case and was not carried across the step that opens another. And the
+tests would not have noticed several rules going: three rules, among them "a case closes when
+all of its `closes_when` milestones are reached", can each be removed with all 4,694 tests still
+passing (4.1, 4.2, 4.4).
+
+**What stayed unchecked.**
+
+- **The Vault binary and a real Vault.** The three development-Vault tests skip here; every
+  finding about Vault (3.1, 3.2) was shown with a stand-in transport or a plain web server.
+- **A real Temporal cluster with mTLS, and macOS.** Every Temporal run used the time-skipping
+  test server on Linux; one pass also used the local development server. `ventoux doctor`'s live
+  rules were not run against a deployment.
+- **Pass 1's in-memory findings on Temporal.** Parts a and b ran on the in-memory runtime; the
+  Temporal case workflow runs the same deciding code, but 1a.1 to 1a.4, the part b findings and
+  3.3 were not run there.
+- **A live model provider.** No key was used; the step advisor and the authoring loop were run on
+  recordings.
+- **Pass 3's sweep was not exhaustive:** every `except` handler in `core`, `tooling` and
+  `authoring` was read, about a third of those in `case` and under half in `temporal`.
+- **Pass 4's limits:** only three survivors were run against the Temporal-backed tests; the
+  others could still be noticed by one. A case's step kinds, audit record kinds and the
+  non-determinism boundary test were not sampled.
+- **Pass 5:** not every example in `cases.md`, `case-data.md`, `plans.md`, `expressions.md` and
+  `activities.md` was run; forgetting, a migration, plans on Temporal, `simulate`, `summary` and
+  `draft-sheet` were not followed from the guides.
+- **Pass 6:** D35 to D40, D42, D43, D48, D49, D53, D54, D58, D65, D75 and D79 were not checked
+  claim by claim; D77's ten attempts, five minutes and 256 KB were read in the code and not seen
+  in a run.
+- **The TypeScript evaluator** D20 speaks of is not in this repository.
+- Each pass's own "Unproven" and "Unchecked" sections, above, say the rest.
+
+**The review's own footprint.** Nothing outside `reviews/2026-11/` was changed. The probes are
+not formatted to the project's lint rules, so CI's lint job is red on this branch, as the task
+allowed.
