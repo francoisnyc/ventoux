@@ -11,6 +11,7 @@ from typing import Any, Literal, Self, Union, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ventoux.core.contract_schema import Unwritable, contract_schema
 from ventoux.core.expressions import BooleanType, FieldType, NumberType, OutcomeType, StringType
 from ventoux.core.output_sources import HELD, HELD_NAMES, OutputSource, is_output_source
 from ventoux.core.policy import KIND_NAMES, KINDS, Policy
@@ -242,6 +243,17 @@ class Contract(BaseModel):
                     f"exactly. An output is {HELD_NAMES}: numbers are exact decimals, never "
                     "binary floats (brief, D20)."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def models_can_be_written(self) -> Self:
+        # Ventoux writes the models the contract hash covers, never pydantic, whose rendering
+        # changes between versions; what it can't write exactly is refused (brief, D83).
+        for side, model in (("input", self.input), ("output", self.output)):
+            try:
+                contract_schema(model)
+            except Unwritable as unwritable:
+                raise ValueError(f"{self.reference}: {side} {unwritable} (brief, D83)") from None
         return self
 
     @model_validator(mode="after")
