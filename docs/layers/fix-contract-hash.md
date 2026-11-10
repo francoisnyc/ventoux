@@ -1,5 +1,10 @@
 # Fix: a contract's hash, independent of pydantic
 
+**Set aside, 2026-11-10:** the same fix was made in #98 (`docs/layers/fix-contract-rendering.md`),
+which goes ahead instead; this branch has no pull request and won't merge. Kept for its record:
+it differs in keeping a field's description in the promise, allowing a `bool` or text default,
+and leaving pydantic unbounded with the lock on 2.13.5.
+
 A fix, not a layer: no warm-up. Found in 20c (`docs/layers/20-deployment.md`, "Decided while
 building 20c"), where the package's fresh install resolved pydantic 2.14.3 and three contracts
 hashed differently; 20c bounded pydantic below 2.14 (D82) and left this fix for later. Branch
