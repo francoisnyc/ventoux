@@ -1617,6 +1617,9 @@ Adds to D29, D38, D39, D40, D41 and D42, whose text is kept.*
 - **Cases already open** on a path the fix decides differently replay differently, and wait until
   the code is fixed (D17), as 11b's did: carried to layer 12. A later moment a run brings (11f's
   timers `since` a start) carries what steered the run too.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds to it): a repeated step's runs
+  are steered by their list's untrusted sources too; the absence of a step's run carries what kept
+  it from starting; and a case step may not be steered at all.
 
 ### D44. Timers: time passing after a moment, set on it, fired as an event at its own time
 
@@ -3108,6 +3111,8 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
   changes, so it would fail again; a person closes the case.
 - **No new engine version (D51):** no definition readable before holds `for_each`, and no case
   could hold a list value.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds to it): each item's run, and a
+  step done at once on an empty list, carries the list's untrusted sources as what steered it.
 
 ### D74. Child cases: a whole case opened from a step, pinned by its parent, reporting back
 
@@ -3183,6 +3188,8 @@ child asking as it opens. Until then a case step on Temporal fails, needing atte
   parent's own close (`closes_when`) is held and a rule's stop of the step is recorded and does
   nothing else; a person's close of the parent still closes the child, saying which failed run it
   let go.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds a deliberate limit): a case
+  step may not be steered by untrusted data; a person decides first.
 
 ### D75. Child cases on Temporal: a child workflow abandoned to itself, a doorbell, a report read
 
@@ -3607,6 +3614,40 @@ decision B; finding 1b.6). Adds to D17, D26, D40 and D74, whose text is kept.*
 - **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
 - **Set aside:** letting a child's failed runs go and flagging both cases (the review's option
   (ii)): a flag is read by someone or not, and it would skip what D17 forbids skipping.
+
+### D86. Steering reaches a repeated step's runs and a person's missing work, and never opens a child
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision C; findings 1a.1, 1a.2, 1a.5). Adds to D43, D48, D73 and D74, whose text is kept.*
+
+- **The bug it fixes.** D43 keeps what steered a run inside one case and one plan, and three
+  routes lost it: a repeated step's runs, over a list a customer typed, kept nothing, so a
+  trusted-only input took the customer's text and steps after them reached `closes_when`
+  milestones, while `ventoux check` said this could never happen; a case step kept nothing, so a
+  child opened on untrusted data took it as trusted and reported back to milestones in its
+  parent; and a person's work that untrusted data kept from existing let a rule or a requirement
+  close the case with nobody in it.
+- **A repeated step's runs are steered by their list** (adds to D73). Each item's run exists only
+  because its item is in the list, so it keeps the list's untrusted (or unrecognised) sources as
+  what steered its start, beside what D43 already keeps: its inputs' policies refuse them, what it
+  gives carries them, and it reaches nothing. A step done at once on an empty list carries them
+  too, since the list's writer made it empty. Validation grows it in the same fixpoint (D42, D43).
+- **The absence of a run carries what kept it from starting.** A step whose `when` was false, or
+  that was kept from starting, has no run because of what that condition read: a rule reading its
+  missing answer or outcome, and a step requiring it, count those sources as read, as D43 already
+  counts an activity's unset output. So a case closes only on a trusted decision or a person's
+  work, never on a person's work being made absent. `ventoux check` claims and warns as for any
+  steered read (`UNTRUSTED_TRIGGER`, `WRITER_DECIDES`).
+- **A case step may not be steered** (a deliberate limit, D48; adds to D74). Following steering
+  through a whole second case, and back through its report, is set aside for now. `ventoux check`
+  refuses a case step that every way of starting steers (`UNTRUSTED_TRIGGER`) and warns where
+  only some do (`WRITER_DECIDES`); at runtime a steered start fails the step, saying what steered
+  it and never a value, and waits for a person (D17). To open a child on what a customer said,
+  put a task before the case step: a person is where steering ends (D39, D43).
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3.
+- **Set aside:** carrying steering into a child case and back (a later decision may loosen the
+  limit, with its own fixpoint across the step); and warning about a person's absent work while
+  allowing it (a warning is read or not, and the case would still close with nobody in it).
 
 ## Concepts
 
