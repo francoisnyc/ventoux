@@ -4,9 +4,9 @@ Start with the [quickstart](QUICKSTART.md), whoever you are: a refund case in 15
 five ideas everything else builds on (a case, its case file, steps, approvals and rules). Then
 follow the path for what you do.
 
-Most of what the guides describe is built: layers 0 to 15 of the [curriculum](CURRICULUM.md).
-Not yet: a published package, the inbox, and the quickstart's `ventoux init`, `ventoux dev` and
-`ventoux start`, which are still design.
+Most of what the guides describe is built: layers 0 to 20 of the [curriculum](CURRICULUM.md).
+Not yet: a published package; the quickstart's `ventoux init`, `ventoux dev` and `ventoux start`,
+which are still design; and the inbox, which comes after v1.0.
 
 ## You write cases
 
@@ -35,6 +35,10 @@ server.
 3. [Cases, "Running a case on Temporal"](guides/cases.md#running-a-case-on-temporal): the
    workflow, the worker, and opening a case from your own code.
 4. [Case data](guides/case-data.md): resolvers and the key provider behind sensitive fields.
+5. [Running Ventoux in production](guides/deployment.md): what a deployment is made of, what it
+   must lock down, and how `ventoux doctor` checks it.
+6. [Audit](guides/audit.md): the case export, kept apart from Temporal's history, and the key
+   service.
 
 ## You want to know why
 
@@ -50,8 +54,10 @@ Ventoux is built layer by layer, as a teaching project.
 - [Curriculum](CURRICULUM.md): the layers, in order, each with what to learn, what to build and
   its check-yourself questions.
 - [Layer notes](layers/): the design note of each layer (`00-repository.md` to
-  `15-authoring.md`), and of the fixes, spikes and checkpoints between them. Each ends with its
+  `20-deployment.md`), and of the fixes, spikes and checkpoints between them. Each ends with its
   promises and the tests that keep them.
+- [Releasing Ventoux](guides/releasing-ventoux.md): the maintainer's procedure for releasing the
+  `ventoux` package.
 - [Learning log](LEARNING.md): the check-yourself questions, answered and discussed.
 - [README draft](README-draft.md): what the project's README will grow into. Its roadmap is
   current; its examples still come from the TypeScript prototype.
@@ -60,4 +66,5 @@ Ventoux is built layer by layer, as a teaching project.
 
 - [`examples/`](../examples/): the definitions the docs and tests use, such as the quickstart's
   refund and the case data guide's claim.
-- [`schema/`](../schema/): the definition format, as JSON Schema.
+- [`src/ventoux/schema/`](../src/ventoux/schema/): the definition format, as JSON Schema, shipped
+  in the package (`ventoux schema` writes it out).

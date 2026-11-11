@@ -22,11 +22,13 @@ team already operates, self-hosted or Temporal Cloud:
 
 ## Status
 
-In development, not released. Ventoux is built in Python, one layer at a time. Layers 0 to 15 are
-built: the engine in memory and on Temporal, people and approvals, case data, rules, releases, the
-semantic diff, the Python builder and AI authoring. Layers 16 to 21, the rest of v1.0, come next
-(see [`docs/CURRICULUM.md`](docs/CURRICULUM.md)). There is no published package yet, and nothing
-here is ready for production.
+In development, not released: the package builds as `0.1.0`, and has never been published.
+Ventoux is built in Python, one layer at a time. Layers 0 to 20 are built: the engine in memory and
+on Temporal, people and approvals, case data, rules, releases, the semantic diff, the Python
+builder, AI authoring, more field types, task assignment, required and repeated steps and child
+cases, the audit export with a Vault key provider, and the deployment checks (`ventoux doctor` and
+the conformance suite). Layer 21, the AgentDojo benchmark, completes v1.0 (see
+[`docs/CURRICULUM.md`](docs/CURRICULUM.md)).
 
 ## Read
 
