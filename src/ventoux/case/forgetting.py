@@ -57,9 +57,7 @@ def forget(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Forg
             raise ForgetRefused(wrong)
     if state.phase == "closed":
         raise ForgetRefused("the case is closed: nothing records it any more")
-    # The children its release pins are forgotten with it (brief, D75).
-    children = [parse_case(data) for data in state.cases.values()]
-    if family_forgetting(case, children) == "never":
+    if family_says(case, state) == "never":
         raise ForgetRefused(
             f"{case_id} keeps its records (forgetting: never): it can't be forgotten"
         )
@@ -84,6 +82,7 @@ def forget(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Forg
     )
     who = f"proposed by {event.proposed_by} as {proposer}, approved by {event.approved_by} as {approver}"
     state.deciding.append(Decision("forgotten", reason=who))
+    state.forget_taken = True  # its request reads this from the report it returns (brief, D32)
     if state.phase == "closing":
         return  # already closing, with its own reason: it closes, then the key goes
     begin_closing(state, "the case is being forgotten", "forgotten", None)
@@ -99,6 +98,13 @@ def family_forgetting(case: CaseDefinition, children: Iterable[CaseDefinition]) 
     its records keeps the family's (brief, D75)."""
     said = [case.forgetting, *(child.forgetting for child in children)]
     return max(said, key=STRICTNESS.index)
+
+
+def family_says(case: CaseDefinition, state: CaseState) -> str:
+    """What the case's family says of forgetting, as the case holds it now: its own definition
+    and the children its release pins, which are forgotten with it (brief, D75)."""
+    children = [parse_case(data) for data in state.cases.values()]
+    return family_forgetting(case, children)
 
 
 def forgetting_role(catalog: Catalog, roles: frozenset[str]) -> str:
