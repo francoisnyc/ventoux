@@ -1523,6 +1523,9 @@ is kept.*
   case is closed`) before the workflow returns. So an event sent too late has the outcomes above
   and no third: until now the client's send could succeed and the case record nothing. A line of
   history and no command, so replay decides the same.
+- **Amended 2026-11-11, by D92** (the text above stands; this adds to it): every message a case
+  can't read is refused and recorded, whoever sent it and however: none is dropped without a
+  line, and none stops the case.
 
 ### D42. Rules that update the case file: a value comes from everything its rule read
 
@@ -3443,6 +3446,9 @@ D19 and D22, whose text is kept, and to "Out of scope for v1.0", amended below.*
   given only its own kind of call by Temporal's authorization.
 - **What is left for after v1.0:** the API and the reference inbox (an HTTP service, people's
   sign-in, roles from an identity provider, an inbox drawing task forms from field types).
+- **Amended 2026-11-11, by D92** (the text above stands; this narrows what is trusted): the
+  caller is trusted for who acted and their roles, never for the engine's own checks, which hold
+  for a message sent past the client functions too.
 
 ### D80. The conformance suite: validation results as data, the catalog generated, every change recorded
 
@@ -3840,6 +3846,37 @@ decision H; findings 2.1, 2.2, 2.3). Adds to D27, D51, D53, D76 and D77, whose t
 - **Set aside:** keeping what the code knew in the case's state alone (the state is itself
   rebuilt by replay, so the fact must be in the history); and recording the two counts for each
   case (more machinery for two numbers nobody should change).
+
+### D92. The engine's own checks hold for a message sent past the client functions
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision I; findings 1c.8, 1c.9, 1c.11, 1c.14). Adds to D17, D41, D51, D54, D74 and D79, whose
+text is kept.*
+
+- **The rule.** The trusted caller is trusted for what no code can check: who a person is and
+  the roles they hold (D79). The engine's own integrity is never the caller's to keep: that a
+  case doesn't stop, skips none of its checks and records every refusal holds whichever
+  function sent the message, Temporal's own client included, which Temporal doesn't prevent.
+- **Every signal a case can't read is refused and recorded** (1c.8, 1c.9), saying what was wrong
+  and never a value: a wrong shape, a missing part, a number that isn't finite (`NaN`,
+  `Infinity`). Ten malformed signals of 56 were dropped with no line and no record, and a number
+  that isn't finite failed the case's workflow task for good. None is dropped silently, and
+  none stops the case (fail closed, D41 as amended).
+- **A start that says it continues a run is believed only if Temporal says so** (1c.11). A raw
+  start with `carried` set skipped the registry, the opening and the release check, so a draft
+  ran in production on a state its caller wrote. The state carried across continue-as-new (D27)
+  is read only where the run itself continued one, which Temporal records on the run and no
+  client can set; otherwise the start is an opening, checked as every opening is (D51, D54),
+  and what it claimed to carry is refused, saying so.
+- **A case with no parent refuses `close_by_parent`** (1c.14), recorded as refused. It closed
+  on one, with any reason and nobody named.
+- **What stays the caller's,** said in the deployment guide, since no code of Ventoux's can check
+  it: who acted and with what roles (D79); and a `close_by_parent` sent to a real child by
+  someone other than its parent, since Temporal doesn't say who sent a signal.
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3; no
+  recorded history holds such a message.
+- **Set aside:** leaving the four inside the caller's boundary, listed by `ventoux doctor` as
+  unchecked (each fix is small and reads a fact the workflow already has).
 
 ## Concepts
 
