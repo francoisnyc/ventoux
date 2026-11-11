@@ -3680,6 +3680,10 @@ decision B; finding 1b.6). Adds to D17, D26, D40 and D74, whose text is kept.*
 - **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
 - **Set aside:** letting a child's failed runs go and flagging both cases (the review's option
   (ii)): a flag is read by someone or not, and it would skip what D17 forbids skipping.
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a parent's own close, and a parent's rule's stop, still
+  cancel a child's failed run with no person. The review's probes for 1b.6 still show it, run again
+  that day. The fix adds its own dated line here when it lands.
 
 ### D86. Steering reaches a repeated step's runs and a person's missing work, and never opens a child
 
@@ -3714,6 +3718,10 @@ decision C; findings 1a.1, 1a.2, 1a.5). Adds to D43, D48, D73 and D74, whose tex
 - **Set aside:** carrying steering into a child case and back (a later decision may loosen the
   limit, with its own fixpoint across the step); and warning about a person's absent work while
   allowing it (a warning is read or not, and the case would still close with nobody in it).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a repeated step and a case step keep nothing of what
+  steered them, and a person's absent work closes a case. The review's probes for 1a.1, 1a.2 and
+  1a.5 still show it, run again that day. The fix adds its own dated line here when it lands.
 
 ### D87. "Someone else" crosses a plan step and a case step; a required milestone warns
 
@@ -3747,6 +3755,11 @@ decision D; findings 1b.1, 1b.7, 1b.8). Adds to D11, D28, D39 and D74, whose tex
 - **Set aside:** excluding whoever reached a required milestone (it would exclude everyone who
   moved a case forward, and D39 left it as one decision covering moments too); and explaining
   the difference in the guide alone (nothing would tell an author which they wrote).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, the answerer inside a plan, and whoever a step's `when`
+  read, still approve; `ventoux check` has no warning for a required milestone (1b.7). The review's
+  probes for 1b.1 and 1b.8 still show it, run again that day. The fix adds its own dated line here
+  when it lands.
 
 ### D88. A value hidden by `visible_to` stays hidden across a child, a report and a plan's record
 
@@ -3778,6 +3791,10 @@ decision E; findings 1b.5, 1c.4). Adds to D30, D42, D74 and D77, whose text is k
 - **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3.
 - **Known limit, kept:** what a plan's activities give after reading a hidden input is as visible
   as their step's outputs are, as in one case (D42, as amended by D48).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a hidden value is still read in a child, back through a
+  report, and in a plan step's audit record. The review's probes for 1b.5 and 1c.4 still show it,
+  run again that day. The fix adds its own dated line here when it lands.
 
 ### D89. A form value follows its field; under a name that is no field, it is never kept
 
@@ -3805,6 +3822,11 @@ decision F; finding 1c.7). Adds to D31, D32 and D76, whose text is kept.*
 - **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
 - **Set aside:** keeping such a value sealed as if sensitive (nobody may ever need it, and it is
   one more sealed thing to account for).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a value under a name that is no field is still kept in
+  clear, and after forgetting; the reading of D32 with D76 is what `main` does already. The review's
+  probes for 1c.7 still show it, run again that day. The fix adds its own dated line here when it
+  lands.
 
 ### D90. A step that notifies needs a person's approval on every path
 
@@ -3836,6 +3858,10 @@ decision G; finding 1b.9). Adds to D6, D11, D34, D56 and D73, whose text is kept
 - **Set aside:** rewording the non-negotiable as a convention the engine doesn't check (it would
   stop being one); and an approval "with no `when`" as a rule of its own (the rule for high risk
   already proves an approval on every path, at the check and at the start).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a `notify` contract still runs with no approval, and
+  nothing says so. The review's probes for 1b.9 still show it, run again that day. The fix adds its
+  own dated line here when it lands.
 
 ### D91. What the code knew is read from the history, never from the code replaying it
 
@@ -3869,6 +3895,11 @@ decision H; findings 2.1, 2.2, 2.3). Adds to D27, D51, D53, D76 and D77, whose t
 - **Set aside:** keeping what the code knew in the case's state alone (the state is itself
   rebuilt by replay, so the fact must be in the history); and recording the two counts for each
   case (more machinery for two numbers nobody should change).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a refused migration is still taken on replay, a forget
+  request's records follow the code's constant, and nothing refuses a changed class setting. The
+  review's probes for 2.1, 2.2 and 2.3 still show it, run again that day. The fix adds its own dated
+  line here when it lands.
 
 ### D92. The engine's own checks hold for a message sent past the client functions
 
@@ -3900,6 +3931,11 @@ text is kept.*
   recorded history holds such a message.
 - **Set aside:** leaving the four inside the caller's boundary, listed by `ventoux doctor` as
   unchecked (each fix is small and reads a fact the workflow already has).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, signals are still dropped without a line or stop the
+  case, a forged continuation is believed, and a case with no parent closes on `close_by_parent`.
+  The review's probes for 1c.8, 1c.9, 1c.11 and 1c.14 still show it, run again that day. The fix
+  adds its own dated line here when it lands.
 
 ### D93. A name a document teaches is supported, or it isn't taught
 
@@ -3935,6 +3971,10 @@ decision J; findings 5.3, 6b.1). Adds to D79 and D82, whose text is kept.*
 - **Each listed name is a promise,** as before (D82): one that disappears fails a test, and
   removing one is a decision. The list grows by about thirty names.
 - **No behaviour changes,** so no engine version is in question.
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, the thirteen names are still outside `public.json`, and
+  the test still reads import lines only. The review's probes for 5.3 and 6b.1 still show it, run
+  again that day. The fix adds its own dated line here when it lands.
 
 ## Concepts
 
