@@ -835,6 +835,9 @@ be erased on request), has size limits, and a second copy of business records go
   the case's release (its name, number, digest and plans) and its engine version.
 - **Amended 2026-11-07, by D76** (the text above stands; this adds to it): what crosses includes
   the case's audit records not yet exported, in order, and the number its next record takes.
+- **Amended 2026-11-11, by D91** (the text above stands; this adds to it): the count a run
+  switches at (`events_per_run`) is the engine's; a production worker refuses a class that
+  changes it.
 
 ### D28. A plan step runs as a child workflow of its case
 
@@ -2080,6 +2083,10 @@ D27, D28 and D50, whose text is kept.*
 - **Amended 2026-11-07, by D76** (the text above stands; this adds to it): version 3 makes audit
   records. A case opened at 3 records the marker `ventoux-engine-3` and exports; a case opened
   before decides and replays as it did, and exports nothing, saying so.
+- **Amended 2026-11-11, by D91** (the text above stands; this adds to it): which engine versions
+  the deciding code knew is read from the history wherever it decides, a migration's proposal
+  and a forget request included; and the two counts that decide where a run switches or holds
+  are the engine's, never a deployment's.
 
 ### D52. Change requests: proposed, approved by someone else, checked again, applied
 
@@ -2193,6 +2200,8 @@ D5, D44, D51 and D52, whose text is kept.*
   case also asks its registry, as the approval would apply the migration, that the target was
   activated there and isn't retired; the cohort of a release is its open cases, as the registry
   lists them.
+- **Amended 2026-11-11, by D91** (the text above stands; this adds to it): a migration refused
+  for an engine version the code didn't know stays refused when newer code replays it.
 
 ### D54. Activation: worker manifests, the environment registry, and the release a case checks
 
@@ -3356,6 +3365,8 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
 - **Amended 2026-11-11, by D88** (the text above stands; this adds to it): a value given to a
   plan step is recorded with who may see it, from the case fields it came from, and `read_audit`
   filters on that, whatever name the plan gives it.
+- **Amended 2026-11-11, by D91** (the text above stands; this adds to it): a forget request's
+  records carry the engine version it learned at its start, never the code's constant.
 
 ### D78. The production key provider: Vault's transit engine, a mark that outlives the key
 
@@ -3796,6 +3807,39 @@ decision G; finding 1b.9). Adds to D6, D11, D34, D56 and D73, whose text is kept
 - **Set aside:** rewording the non-negotiable as a convention the engine doesn't check (it would
   stop being one); and an approval "with no `when`" as a rule of its own (the rule for high risk
   already proves an approval on every path, at the check and at the start).
+
+### D91. What the code knew is read from the history, never from the code replaying it
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision H; findings 2.1, 2.2, 2.3). Adds to D27, D51, D53, D76 and D77, whose text is kept.*
+
+- **The rule.** A case is rebuilt by replaying its history through the code now deployed. So
+  nothing a case decides or records may hang on a constant of that code alone: the same history
+  would then decide otherwise after an upgrade, sometimes with no replay error at all.
+- **A refused migration stays refused** (2.1). A migration to an engine version the worker
+  didn't know was refused and recorded so, from the code's own list; replayed by a worker that
+  knew the version, the same proposal was accepted, and the case moved release and engine,
+  withdrew an approval and asked for an export. Whether the deciding worker knows engine N is
+  now asked through the history, by the patch marker D51 asks at the opening
+  (`ventoux-engine-N`), at the proposal: written when a worker that knows N first decides it,
+  absent from a history an earlier worker recorded, which so refuses again on replay. The fix
+  keeps a recorded history of that scenario, refused by an older worker and replayed by a newer
+  one, as its fixture.
+- **A forget request knows its engine version as a case does** (2.2). It learns it once, at its
+  start, from the patch markers (D51), keeps it as data, and stamps its audit records from it,
+  never from the module's `ENGINE`: a request open across an upgrade rebuilds the records it
+  first made.
+- **`events_per_run` and `audit_bound` are the engine's, never a deployment's** (2.3). They
+  decide where a recorded run switches or holds (D27, D77), so changing either for cases that
+  run is a change that decides a recorded path differently: a new engine version (D51). The
+  deployment guide says so. In a production environment a case worker refuses to start with a
+  case workflow class that changes either, naming the setting (fail closed, D81's pattern);
+  elsewhere a test's class may lower them, as before.
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3; no
+  recorded history in the repository takes the path the first changes.
+- **Set aside:** keeping what the code knew in the case's state alone (the state is itself
+  rebuilt by replay, so the fact must be in the history); and recording the two counts for each
+  case (more machinery for two numbers nobody should change).
 
 ## Concepts
 
