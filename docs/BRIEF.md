@@ -3335,6 +3335,16 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   written, and forgetting it then destroys the key; while a case holds, each act sent to it waits
   as a signal in its run's history; a plan whose workflow itself fails returns no report, so its
   events stay in its own history.
+- **Amended 2026-11-11, by the forget stream fix** (`docs/layers/fix-forget-stream.md`; the text
+  above stands, this adds to it): every request to forget one case writes to the one stream
+  `<case ID>/forget`, and each numbers its records on from the last the store holds of it, which
+  its writer asks once, beside the request, before its first write: so a store that is down
+  still keeps no answer waiting. Until this fix each request numbered from 1, so a second
+  request's records were refused as other content under a number already used: the request that
+  forgot a case after an earlier one was rejected left no record, and never ended. The asking is
+  behind the patch marker `ventoux-forget-numbers`, so a request recorded before replays as it
+  was. Two requests for one case never run together (they are one workflow ID), so no two ask at
+  once.
 
 ### D78. The production key provider: Vault's transit engine, a mark that outlives the key
 

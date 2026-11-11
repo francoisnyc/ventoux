@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from temporalio.client import Client
+from test_audit_export import DownAudit
 from test_sensitive import FILE, claim
-from test_temporal_forget import QUEUE, on_temporal
+from test_temporal_forget import QUEUE, on_temporal, reported
 
 from ventoux.temporal.cases import start_case
 from ventoux.temporal.converter import keys_of
@@ -62,3 +63,28 @@ def test_a_second_request_to_forget_is_recorded_after_the_first(tmp_path: Path) 
         (5, "key destroyed", None),
         (6, "forget proposed", "pia"),
     ]
+
+
+def test_a_store_that_is_down_keeps_no_answer_waiting(tmp_path: Path) -> None:
+    # The request asks the store where its stream stands beside its work, never before it: with
+    # the store down it is proposed, approved and carried out all the same, and its records are
+    # written, numbered after the first request's, once the store is back (brief, D77).
+    store = DownAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> tuple[ForgetReport, ForgetReport]:
+        await start_case(client, DevelopmentCases, claim(), as_json(FILE), "claim-1", QUEUE)
+        await asked(client, "claim-1", "pia", "reject", "olu")
+        store.down = True
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-1", "quinn", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "rosa", ["privacy"])
+        # Decided, the store still down: the key is gone, and only the writing is left.
+        decided = await reported(request, lambda now: now.status == "forgotten")
+        store.down = False
+        return decided, await asyncio.wait_for(request.result(), timeout=15)
+
+    decided, ended = on_temporal(scenario, audit=store)
+    assert decided.history[-1] == "the key of claim-1 was destroyed"
+    assert ended.status == "forgotten"
+    assert [number for number, _, _ in acts(store, "claim-1/forget")] == [1, 2, 3, 4, 5]
