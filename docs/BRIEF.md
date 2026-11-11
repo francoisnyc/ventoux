@@ -789,6 +789,8 @@ be erased on request), has size limits, and a second copy of business records go
     replay: Temporal refuses it, and the case waits until the code is fixed (D17).
 - **Amended 2026-10-23, by D52** (the text above stands; this adds to it): an operating role may
   also propose or approve skipping a failed run, a change request; never the same person both.
+- **Amended 2026-11-11, by D85** (the text above stands; this adds to it): a failed run inside a
+  child case holds its parent's close by `closes_when` too, as the parent's own would.
 
 ### D27. A case continues as new, keeping its keys (design question 18)
 
@@ -3176,6 +3178,11 @@ child asking as it opens. Until then a case step on Temporal fails, needing atte
 - **A child its case doesn't hold fails the step** (fail closed): the step's start never guesses a
   definition, and waits for a person (D17).
 - **No new engine version (D51):** no definition readable before has a case step.
+- **Amended 2026-11-11, by D85** (the text above stands; this narrows it): a close or a rule's stop
+  reaches a child as it reaches a run in one case. While the child holds a failed run, the
+  parent's own close (`closes_when`) is held and a rule's stop of the step is recorded and does
+  nothing else; a person's close of the parent still closes the child, saying which failed run it
+  let go.
 
 ### D75. Child cases on Temporal: a child workflow abandoned to itself, a doorbell, a report read
 
@@ -3575,6 +3582,31 @@ the exception D68 made for one shape.*
   exception stops for every fix not yet merged, and each takes a new engine version.
 - **Set aside: engine version 4 for these fixes** (the review's option (i)). Its old branches would
   keep, for cases that don't exist, the paths the review shows break promises.
+
+### D85. A child's failed run holds its parent's close, as the parent's own would
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision B; finding 1b.6). Adds to D17, D26, D40 and D74, whose text is kept.*
+
+- **Nothing is skipped automatically across a case step either** (D17). A parent closing by
+  `closes_when`, or a parent's rule stopping the step, closed the child through D40's one place
+  and so cancelled a failed run inside it, with no person and no trace. A failed run in a child
+  is now treated as one in the parent.
+- **The parent's own close waits:** while a child it opened holds a failed run, reaching every
+  `closes_when` milestone doesn't close the parent, as D26 holds it for the parent's own failed
+  run. It closes once the child's operators retry the run to completion, or close the child, and
+  the child has ended.
+- **A rule's stop of the step is recorded and does nothing else** while the child holds a failed
+  run, as D40 says of a stop that reaches a failed run. The step stays as it is; the child's
+  operators act: "a child needing attention is the child's" (D74).
+- **A person's close of the parent still closes the child,** with a declared reason, as a person
+  may close a case holding a failed run (D26): a close by a person never waits for a person
+  (D74, D48). The child's close line then names each failed run it let go: `closed by its parent:
+  duplicate, by ana; pay#1 had failed and was not retried`. The child's operators may not see
+  the parent (D74), so the child's own record says that a person, never the engine, let it go.
+- **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
+- **Set aside:** letting a child's failed runs go and flagging both cases (the review's option
+  (ii)): a flag is read by someone or not, and it would skip what D17 forbids skipping.
 
 ## Concepts
 
