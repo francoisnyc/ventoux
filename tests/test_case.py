@@ -1556,8 +1556,9 @@ def test_closes_when_closes_the_case_once_its_milestones_are_reached() -> None:
 
 
 def test_closes_when_waits_for_every_one_of_its_milestones() -> None:
-    # `closes_when` names two milestones. With `paid` alone reached the case stays open, its
-    # survey still asked; it closes once `surveyed` is reached too (brief, D10).
+    # `closes_when` names two milestones. With `paid` alone reached the case stays open, and
+    # its survey, which requires `paid`, is asked only then: so nothing new is held back as if
+    # the case were closing. It closes once `surveyed` is reached too (brief, D10, D34).
     definition = refund(closes_when=["paid", "surveyed"])
     definition["milestones"] = {
         "paid": {"display": {"title": "Refund paid"}},
@@ -1568,6 +1569,7 @@ def test_closes_when_waits_for_every_one_of_its_milestones() -> None:
         "kind": "task",
         "display": {"title": "Ask the customer for feedback"},
         "roles": ["support"],
+        "requires": ["paid"],
         "outcomes": {"sent": {"display": {"title": "Survey sent"}, "reaches": ["surveyed"]}},
     }
     paid = run_case(definition, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
