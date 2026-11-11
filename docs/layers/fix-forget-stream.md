@@ -56,6 +56,30 @@ by D77: "nothing is dropped, nothing decided unrecorded".
 `propose_forget`, `answer_forget`, each request's result within a bound, the key provider's
 state, and the store read back.
 
+## The worker now reads the store (from the tutor's review of #104)
+
+Before this fix a worker only appended to the audit store; `read` was `read_audit`'s alone. Now
+every request to forget reads its stream once, the first request included. So:
+
+- **The worker's credential must be allowed to read.** The deployment guide ("The audit store")
+  and the audit guide say so.
+- **A read the store refuses is retried as an outage is, on purpose.** The worker can't tell a
+  credential that may not read from a store that is away, and neither may lose a record. The
+  request carries on beside its writer: with a store that never lets the worker read, the case
+  closes, the key is destroyed, the request's report says `forgotten`, and its workflow runs on
+  with its records unwritten until the store answers; then they are written, in order. Nothing
+  is dropped, but nothing is in the store until then. The second test's store now refuses reads
+  as well as appends while it is down, so this is what it tests.
+- **Left open, for the maintainer:** whether a request should be refused before anyone answers
+  when its stream can't be read, as it is when the key service can't answer (D78), so that no
+  key goes while nothing can be recorded. That would put the store in the request's way at the
+  proposal, against D77's "never in its way", so it is a decision, not this fix. And `ventoux
+  doctor` could ask the store one read as the worker would, so a write-only credential is seen
+  before a request meets it: a rule of its own, in the guide's list.
+- **The patch marker** keeps an old branch for requests recorded before the fix. If it is decided
+  that no old branch is owed before the first release (proposed in #103), the marker is more than
+  is owed; it costs one command per request and is harmless.
+
 ## Found, not fixed
 
 If the store refuses one of a request's records for another reason (a store that keeps other
@@ -70,7 +94,7 @@ wider than this fix; a store that is only down is retried and recovers, as the s
 |---|---|
 | A rejected request, then one that forgets the case, then one refused after it: each ends, and the store holds their records as one stream, 1 to 6, the proposal, the approval and the key destroyed among them | `tests/test_temporal_forget_stream.py::test_a_second_request_to_forget_is_recorded_after_the_first` |
 | A first request numbers from 1 | the same test's first two records, and every earlier test of a request's stream |
-| With the store down the request is still carried out, and its records are written, numbered on, once the store is back | `tests/test_temporal_forget_stream.py::test_a_store_that_is_down_keeps_no_answer_waiting` |
+| With the store down, for reads as for appends, the request is still carried out, and its records are written, numbered on, once the store is back; a refused read is retried as an outage is | `tests/test_temporal_forget_stream.py::test_a_store_that_is_down_keeps_no_answer_waiting` |
 | A request recorded before the fix replays | `tests/test_audit_export.py::test_histories_recorded_at_19b_replay` |
 
 Seen failing: the first with the fix absent (the second request never ends, and the test's bound

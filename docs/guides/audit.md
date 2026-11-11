@@ -210,7 +210,10 @@ export (`claim-7/forget`: who proposed it, each answer and who gave it, refused 
 asked to close, the key destroyed), so the act of forgetting is in the trail too. Its records hold
 no sensitive value; its last is written once the key is gone. Every request for one case writes
 to that one stream, each numbering its records on from the last the store holds: a request
-rejected in March and the one that forgets the case in June read as one record, in order. After that, the case's export
+rejected in March and the one that forgets the case in June read as one record, in order. So the
+worker reads that stream, the one read it makes of your store: its credential must be allowed to
+(the deployment guide, "The audit store"). A read the store refuses is retried as a store that
+is down is; the request's records wait, and are written once the read is answered. After that, the case's export
 still says:
 
 - every decision, who made it, in which role, under which rule and release, and when;

@@ -172,7 +172,13 @@ Yours, behind two methods, `append` and `read` (the audit guide). In production 
 - keep what it is given for as long as your audit policy says, beyond Temporal's retention;
 - refuse a record whose stream and number it holds with other content, and one whose previous
   number it doesn't hold;
-- allow no one to delete or change a record: its rows are admin access (D19).
+- allow no one to delete or change a record: its rows are admin access (D19);
+- let each case worker **read** as well as append. A worker reads one kind of stream: a case's
+  requests to forget share `<case ID>/forget`, and each asks where it stands before it writes
+  (the audit guide, "Retention and forgetting"). A credential that may only append stalls every
+  request to forget: the read is retried as an outage is, the request carries on beside it, and
+  its records are written only once the store lets the worker read. Until then the request
+  hasn't ended, though its report may already say `forgotten`.
 
 Ventoux can check the first two by asking; the last is your store's setting, which only this
 guide can state.

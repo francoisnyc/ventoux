@@ -19,6 +19,19 @@ from ventoux.tooling.audit import FileAudit
 from ventoux.tooling.keys import KeyState
 
 
+class Unreachable(DownAudit):
+    """A store that, while down, answers nothing: neither an append nor a read. `DownAudit`
+    alone still answers a read, and a request to forget now asks one."""
+
+    refused = 0  # how many reads it refused while down
+
+    def read(self, prefix: str) -> list[dict[str, Any]]:
+        if self.down:
+            self.refused += 1
+            raise PermissionError("the audit database at db.internal refuses this worker's reads")
+        return super().read(prefix)
+
+
 async def asked(client: Client, case: str, by: str, outcome: str | None, approver: str) -> Any:
     """A request to forget `case`, proposed by `by` and, if `outcome`, answered by `approver`:
     its end, within a bound, so one that never ends fails its test."""
@@ -67,9 +80,12 @@ def test_a_second_request_to_forget_is_recorded_after_the_first(tmp_path: Path) 
 
 def test_a_store_that_is_down_keeps_no_answer_waiting(tmp_path: Path) -> None:
     # The request asks the store where its stream stands beside its work, never before it: with
-    # the store down it is proposed, approved and carried out all the same, and its records are
-    # written, numbered after the first request's, once the store is back (brief, D77).
-    store = DownAudit(tmp_path / "audit")
+    # the store down, for reads as for appends, it is proposed, approved and carried out all the
+    # same, and its records are written, numbered after the first request's, once the store is
+    # back (brief, D77). A read the store refuses is retried as an outage is, on purpose: the
+    # worker can't tell a credential that may not read from a store that is away, and neither
+    # may lose a record. Until the store answers, the request has not ended.
+    store = Unreachable(tmp_path / "audit")
 
     async def scenario(client: Client) -> tuple[ForgetReport, ForgetReport]:
         await start_case(client, DevelopmentCases, claim(), as_json(FILE), "claim-1", QUEUE)
@@ -85,6 +101,7 @@ def test_a_store_that_is_down_keeps_no_answer_waiting(tmp_path: Path) -> None:
         return decided, await asyncio.wait_for(request.result(), timeout=15)
 
     decided, ended = on_temporal(scenario, audit=store)
+    assert store.refused > 0  # the worker did ask, and was refused, while the store was down
     assert decided.history[-1] == "the key of claim-1 was destroyed"
     assert ended.status == "forgotten"
     assert [number for number, _, _ in acts(store, "claim-1/forget")] == [1, 2, 3, 4, 5]
