@@ -36,9 +36,12 @@ by D77: "nothing is dropped, nothing decided unrecorded".
   record it holds of that stream, and numbers its own after it. Readers see one record of
   everything asked about forgetting the case, in order.
 - **Asked beside the request, never before it.** The asking is the writer's first step, and the
-  writer runs beside the request (D77: "beside the request, never in its way"). With the store
-  down the request is still proposed, answered and carried out; its records are written once the
-  store is back.
+  writer runs beside the request (D77: "beside the request, never in its way"). So the asking
+  keeps no answer waiting: with the store down the proposal and the approval are still taken, and
+  the case is asked to close. That is all it promises. Whether the request is then carried out
+  is the case's rule, unchanged: a case whose own records can't be written doesn't end, so its
+  key is kept until the store is back (D77). The request's records are written once the store
+  answers.
 - **A new activity, `ventoux.audit.last_number`,** registered with the export's, reading the
   store through the `read` every store already has. It counts the stream itself, never a stream
   under it.
@@ -64,21 +67,40 @@ every request to forget reads its stream once, the first request included. So:
 - **The worker's credential must be allowed to read.** The deployment guide ("The audit store")
   and the audit guide say so.
 - **A read the store refuses is retried as an outage is, on purpose.** The worker can't tell a
-  credential that may not read from a store that is away, and neither may lose a record. The
-  request carries on beside its writer: with a store that never lets the worker read, the case
-  closes, the key is destroyed, the request's report says `forgotten`, and its workflow runs on
-  with its records unwritten until the store answers; then they are written, in order. Nothing
-  is dropped, but nothing is in the store until then. The second test's store now refuses reads
-  as well as appends while it is down, so this is what it tests.
+  credential that may not read from a store that is away, and neither may lose a record. Two
+  cases, each with its test:
+  - **the store down, for reads as for appends:** the proposal and the approval are taken, the
+    key is kept while the case's own export waits (D77), and once the store is back the case
+    ends, the key goes, and the stream reads 1 to 5;
+  - **reads refused, appends taken** (a credential that may only append): the case writes its
+    records, closes and ends, the key is destroyed, the request's report says `forgotten`, and
+    its workflow runs on with its records unwritten until the worker may read; then they are
+    written, in order. Nothing is dropped, but nothing of the request is in the store until
+    then.
 - **Left open, for the maintainer:** whether a request should be refused before anyone answers
   when its stream can't be read, as it is when the key service can't answer (D78), so that no
   key goes while nothing can be recorded. That would put the store in the request's way at the
   proposal, against D77's "never in its way", so it is a decision, not this fix. And `ventoux
   doctor` could ask the store one read as the worker would, so a write-only credential is seen
   before a request meets it: a rule of its own, in the guide's list.
-- **The patch marker** keeps an old branch for requests recorded before the fix. If it is decided
-  that no old branch is owed before the first release (proposed in #103), the marker is more than
-  is owed; it costs one command per request and is harmless.
+- **The patch marker** keeps an old branch for requests recorded before the fix. It was written
+  before D84, which says a fix owes no old branch before the first release: so it is more than
+  is owed. It costs one command per request and is harmless.
+
+## What the second review found in the tests (the tutor's review of #104, round 2)
+
+The first two tests, as first written, passed for a reason they didn't state, and the second
+failed about one run in four. Each waited on an earlier request's `result()`. Asking for a
+result lets the time-skipping test server run its clock on; the case, sitting idle, then timed
+out, ten years on, and the request that "forgot" it found it `ended: timed out`. So the tests
+showed the numbering, never a live case closing as forgotten, and the note's promise that "with
+the store down the request is still carried out" was not true of a live case: its key is kept
+until the store is back.
+
+Now: no test waits on a result while a case must stay alive (a request's end is read by query,
+once its workflow no longer runs); each asserts how the case ended, `closed: forgotten`; and the
+store-down test says what is true of a live case. The same fault was traced before, in
+`fix-flaky-temporal`.
 
 ## Found, not fixed
 
@@ -92,10 +114,12 @@ wider than this fix; a store that is only down is retried and recovers, as the s
 
 | The note says | The test that fails if it weren't true |
 |---|---|
-| A rejected request, then one that forgets the case, then one refused after it: each ends, and the store holds their records as one stream, 1 to 6, the proposal, the approval and the key destroyed among them | `tests/test_temporal_forget_stream.py::test_a_second_request_to_forget_is_recorded_after_the_first` |
-| A first request numbers from 1 | the same test's first two records, and every earlier test of a request's stream |
-| With the store down, for reads as for appends, the request is still carried out, and its records are written, numbered on, once the store is back; a refused read is retried as an outage is | `tests/test_temporal_forget_stream.py::test_a_store_that_is_down_keeps_no_answer_waiting` |
+| A rejected request, then one that forgets the case, then one refused after it: each ends; the case closes as forgotten, never timed out; and the store holds their records as one stream, 1 to 6, the proposal, the approval and the key destroyed among them | `tests/test_temporal_forget_stream.py::test_a_second_request_to_forget_is_recorded_after_the_first` |
+| A first request numbers from 1 | the same test's first two records; `…::test_a_read_the_store_refuses_is_retried_as_an_outage_is`; and every earlier test of a request's stream |
+| With the store down, for reads as for appends, the proposal and the approval are taken and the case is asked to close; the key is kept until the store is back; then the case ends as forgotten, the key goes, and the stream reads 1 to 5 | `…::test_a_store_that_is_down_keeps_no_answer_waiting_and_the_key_until_it_is_back` |
+| A read the store refuses, appends taken: the case ends and the key goes, the request's records wait with nothing in the store, and are written, in order, once the worker may read | `…::test_a_read_the_store_refuses_is_retried_as_an_outage_is` |
 | A request recorded before the fix replays | `tests/test_audit_export.py::test_histories_recorded_at_19b_replay` |
 
 Seen failing: the first with the fix absent (the second request never ends, and the test's bound
-is passed); both with every request numbering from 1 again.
+is passed). Run after the rewrite: the three tests together 8 times, and the store-down test
+alone 12 times, all passing.
