@@ -615,6 +615,20 @@ def test_a_repeated_high_risk_contract_is_an_error_at_the_check() -> None:
     ]
 
 
+def test_a_repeated_high_risk_step_is_stopped_by_the_runtime_alone() -> None:
+    # Never validated: the runtime refuses on nothing the check did (brief, D34). Each item's run
+    # fails, needing attention, and no refund is scheduled (brief, D73).
+    definition = order_return()
+    definition["steps"]["draft_line"] |= {
+        "activity": "payments.refund@2",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "each.amount"}},
+    }
+    run = run_case(definition, file=FILE, answers=[], people=PEOPLE)
+    refused = "payments.refund@2 is high risk, and draft_line is repeated"
+    assert run.needs_attention == [f"draft_line.1#1: {refused}", f"draft_line.2#1: {refused}"]
+    assert not any(line.startswith("scheduled") for line in run.history)
+
+
 def test_the_check_reads_an_items_sources_as_its_lists() -> None:
     # Before any case opens: each.sku comes from what the customer typed, which a trusted-only
     # input refuses every time, so it is an error (brief, D21, D36, D73).

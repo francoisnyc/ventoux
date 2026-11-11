@@ -1555,6 +1555,37 @@ def test_closes_when_closes_the_case_once_its_milestones_are_reached() -> None:
     assert run.closed
 
 
+def test_closes_when_waits_for_every_one_of_its_milestones() -> None:
+    # `closes_when` names two milestones. With `paid` alone reached the case stays open, and
+    # its survey, which requires `paid`, is asked only then: so nothing new is held back as if
+    # the case were closing. It closes once `surveyed` is reached too (brief, D10, D34).
+    definition = refund(closes_when=["paid", "surveyed"])
+    definition["milestones"] = {
+        "paid": {"display": {"title": "Refund paid"}},
+        "surveyed": {"display": {"title": "Customer surveyed"}},
+    }
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["steps"]["survey"] = {
+        "kind": "task",
+        "display": {"title": "Ask the customer for feedback"},
+        "roles": ["support"],
+        "requires": ["paid"],
+        "outcomes": {"sent": {"display": {"title": "Survey sent"}, "reaches": ["surveyed"]}},
+    }
+    paid = run_case(definition, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
+    assert "reached paid" in paid.history
+    assert paid.status == "open"
+    assert paid.waiting_for == ["survey by support"]
+    both = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, ("survey", "sent", "ana")],
+        people=PEOPLE,
+    )
+    assert both.history[-1] == "closed: paid and surveyed reached"
+    assert both.closed
+
+
 def test_a_closing_case_is_not_closed_or_retried_again() -> None:
     with pytest.raises(CloseRefused, match="^the case is closing: it can't be closed again$"):
         run_case(
