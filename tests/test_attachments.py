@@ -725,6 +725,39 @@ def test_a_sensitive_attachments_check_is_asked_with_the_id_still_wrapped() -> N
     assert asked.value == "doc-7f3a"
 
 
+def asked_of_each_check(definition: dict[str, Any]) -> dict[str, object]:
+    """What each check is asked with when Ana accepts, giving a branch and a receipt: the value
+    in its command, by the field it checks."""
+    opened = run_case(definition, file={}, answers=[], people=ADJUSTERS, catalog=stored())
+    form = {"branch": Sensitive("BR-0142"), "receipt": Sensitive("doc-7f3a")}
+    answer = Answered("assess", "accept", "ana", frozenset({"adjuster"}), form, at=START)
+    _, commands = decide(parse_case(definition), stored(), opened.state, answer)
+    asked = {}
+    for command in commands:
+        assert isinstance(command, Schedule)
+        [value] = command.inputs.values()
+        asked[command.entry.removeprefix("assess#1.")] = value
+    return asked
+
+
+def test_a_sensitive_options_check_is_asked_with_the_value_still_wrapped() -> None:
+    # As for an attachment: an option is checked through an activity too (brief, D31, D67).
+    definition = with_branch()
+    definition["fields"]["branch"] |= {"sensitive": True, "visible_to": ["adjuster"]}
+    asked = asked_of_each_check(definition)
+    assert isinstance(asked["branch"], Sensitive)
+    assert asked["branch"].value == "BR-0142"
+    # The receipt isn't sensitive here: only a sensitive field's value is wrapped.
+    assert asked["receipt"] == "doc-7f3a"
+
+
+def test_a_check_of_a_field_that_isnt_sensitive_is_asked_in_plain_text() -> None:
+    # Every form value arrives wrapped, since the client can't tell which fields are sensitive;
+    # the case keeps wrapped only the sensitive ones, in a check's command as in its state, so
+    # the rest of the history stays readable (brief, D15, D31).
+    assert asked_of_each_check(with_branch()) == {"branch": "BR-0142", "receipt": "doc-7f3a"}
+
+
 # --- Slice 10: an answer is decided once every check is back, whichever answers first ---
 
 WRONG_RECEIPT = ("assess", "accept", "ana", {"branch": "BR-0142", "receipt": "doc-0000"})
