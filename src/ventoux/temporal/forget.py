@@ -9,6 +9,7 @@ See docs/layers/09-case-data.md (9c).
 """
 
 import asyncio
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, ClassVar
@@ -58,6 +59,10 @@ LONGEST_PAUSE = timedelta(seconds=10)  # and at most, well within ALIVE
 # A request writes its own audit stream behind this patch: one recorded before 19b replays as it
 # was, writing nothing (brief, D51) (brief, D77).
 EXPORT_PATCH = "ventoux-forget-export"
+# A case's requests share the stream `<case ID>/forget`: each numbers its records on from what
+# the store already holds, asked once, behind this patch, so a request recorded before the fix
+# replays as it was (brief, D51) (brief, D77).
+NUMBERS_PATCH = "ventoux-forget-numbers"
 # A store that is down is retried for as long as it takes, never given up on: the request's
 # records hold nothing sensitive, so its key never waits for them, but none is dropped. A store
 # that refuses them (a gap, other content) fails the request (brief, D77).
@@ -279,14 +284,20 @@ class ForgetWorkflow:
     async def write(self) -> None:
         """Write the request's records to the store as they are made, until it has ended and
         each is written."""
+        stream = workflow.info().workflow_id
+        before: int | None = None  # how many records earlier requests wrote; None: not asked yet
         while True:
             await workflow.wait_condition(lambda: bool(self.unwritten) or self.ended)
             if not self.unwritten:
                 return
+            if before is None:
+                before = await self.written_before(stream)
             sending = list(self.unwritten)
-            sent = ExportSent(
-                workflow.info().workflow_id, [record_as_data(each) for each in sending], {}, {}
-            )
+            numbered = [
+                record_as_data(dataclasses.replace(each, number=before + each.number))
+                for each in sending
+            ]
+            sent = ExportSent(stream, numbered, {}, {})
             await workflow.execute_activity(
                 "ventoux.audit.append",
                 sent,
@@ -294,6 +305,22 @@ class ForgetWorkflow:
                 retry_policy=FORGET_EXPORTS,
             )
             self.unwritten = self.unwritten[len(sending) :]
+
+    async def written_before(self, stream: str) -> int:
+        """How many records the store already holds of this stream: an earlier request's, which
+        ended before this one could start. This request's are numbered after them. Asked beside
+        the request, by its writer, so a store that is down keeps no answer waiting
+        (brief, D77)."""
+        if not workflow.patched(NUMBERS_PATCH):
+            return 0  # a request recorded before the fix numbered from 1
+        last: int = await workflow.execute_activity(
+            "ventoux.audit.last_number",
+            stream,
+            start_to_close_timeout=EXPORT_CALL,
+            retry_policy=FORGET_EXPORTS,
+            result_type=int,
+        )
+        return last
 
     async def decide(self, start: ForgetStart) -> ForgetReport:
         """Check the proposal, wait for an answer someone may give, and carry it out."""
