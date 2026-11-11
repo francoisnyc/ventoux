@@ -856,16 +856,23 @@ def answer_task(
     take_answer(case, state, run, event, role, ())
 
 
-def checked_set(case: CaseDefinition, step: TaskStep, event: Answered) -> dict[str, str]:
-    """Each option or attachment the answer's outcome sets, and the value given for it, in the
-    form's order: each waits for its system's check."""
+def checked_set(case: CaseDefinition, step: TaskStep, event: Answered) -> dict[str, object]:
+    """Each option or attachment the answer's outcome sets, and the value its check is asked
+    with, in the form's order: each waits for its system's check."""
     sets = step.outcomes[event.outcome].sets
     form = event.form or {}
     return {
-        name: str(plain(form[name]))
+        name: asked_with(case, name, str(plain(form[name])))
         for name in sets
         if checked(case.fields[name].declared) is not None
     }
+
+
+def asked_with(case: CaseDefinition, name: str, value: str) -> object:
+    """The value a check is asked with: a sensitive field's stays wrapped, so its check's input
+    crosses Temporal sealed under the case's key, as any sensitive input does, and is forgotten
+    with it (brief, D31) (brief, D68). The check's code is given the plain value."""
+    return Sensitive(value) if case.fields[name].sensitive else value
 
 
 def checked_by(case: CaseDefinition, name: str) -> tuple[Shape, str]:
