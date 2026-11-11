@@ -2392,6 +2392,8 @@ D55, whose text is kept.*
 - **Amended 2026-10-25, by D59** (the text above stands; this changes one thing): "against the
   development catalog until `ventoux check` brings the deployment's" ends: every command takes the
   deployment's catalog, named in configuration, and refuses to run with none named.
+- **Amended 2026-11-11, by D90** (the text above stands; this adds to it): the engine now checks
+  that a `notify` step never runs without a person's approval, so the sheet may say it.
 
 ### D57. Release notes in the record, and a contract's readable diff
 
@@ -3127,6 +3129,8 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
   could hold a list value.
 - **Amended 2026-11-11, by D86** (the text above stands; this adds to it): each item's run, and a
   step done at once on an empty list, carries the list's untrusted sources as what steered it.
+- **Amended 2026-11-11, by D90** (the text above stands; this adds to it): a `notify` contract
+  can't be repeated either, since its step needs an approval.
 
 ### D74. Child cases: a whole case opened from a step, pinned by its parent, reporting back
 
@@ -3761,6 +3765,37 @@ decision F; finding 1c.7). Adds to D31, D32 and D76, whose text is kept.*
 - **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
 - **Set aside:** keeping such a value sealed as if sensitive (nobody may ever need it, and it is
   one more sealed thing to account for).
+
+### D90. A step that notifies needs a person's approval on every path
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision G; finding 1b.9). Adds to D6, D11, D34, D56 and D73, whose text is kept.*
+
+- **The bug it fixes.** "Anything that talks to people drafts by default; it never sends on its
+  own" is a non-negotiable, and nothing checked it: a low-risk contract with the effect `notify`,
+  called by a case's only step, sent its message with no person involved, and validation said
+  nothing. D56 left "drafts, never sends" unsaid "until the engine checks it".
+- **A step calling a `notify` contract needs an approval on every path, whatever its risk,** as
+  a high-risk step does: `ventoux check` refuses a definition where a path reaches it without one
+  (`APPROVAL_REQUIRED`), for a case's step and a plan's state alike, and the runtime refuses the
+  start on its own, depending on nothing validation did (D34): the run fails, saying why, and
+  waits for a person (D17).
+- **That is what "drafts" means here.** The step's inputs are the draft: the approval shows the
+  approver what would go out, and is tied to those values, lapsing if they change (D11). Whoever
+  wrote what the step reads is someone else (D11, D87). So nothing reaches a person outside
+  without a person inside having approved exactly that.
+- **`notify` is "this reaches a person outside".** A contract that only prepares a draft in
+  another system, for a person to send there, has the effect `write`, as the development
+  catalog's letters do. No contract in the repository had the effect `notify` at this decision.
+- **Deliberate limits** (D48): a `notify` contract can't be repeated over a list, since a
+  repeated step carries no approval (D73); and "by default" has no way out in v1.0: a contract
+  that may send unreviewed would be a decision of its own.
+- **The sheet may now say it** (adds to D56): for a case whose steps that notify each carry
+  their approval, "never sends without a person's approval".
+- **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
+- **Set aside:** rewording the non-negotiable as a convention the engine doesn't check (it would
+  stop being one); and an approval "with no `when`" as a rule of its own (the rule for high risk
+  already proves an approval on every path, at the check and at the start).
 
 ## Concepts
 
