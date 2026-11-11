@@ -17,6 +17,17 @@ maintainer's,** never CI's, and nothing in the repository does either on its own
   the supported imports. Never the repository's tests, examples, docs or scripts, a key, a
   certificate or a recording. `scripts/check_wheel.py` checks both.
 
+## The first release, 0.1.0
+
+Until 0.1.0 is published, a fix that decides a recorded path differently stays on engine version
+3, with no old branch: nothing outside the tests runs on it (brief, D84). Tagging 0.1.0 ends that.
+From its commit on, such a change is the next engine version, with its old branch and a fixture
+that replays (brief, D51). So before tagging 0.1.0:
+
+- the November 2026 review's fixes for forgetting and sealing, and for the trust model, are merged
+  (`reviews/2026-11/FIXES.md`, fixes 2 to 11, on the branch `review-2026-11`);
+- its changelog entry says engine 3 is the first engine anyone is owed replay for.
+
 ## The steps
 
 1. **Bump the version** in `pyproject.toml` (`version = "0.2.0"`), and run `uv lock`, which

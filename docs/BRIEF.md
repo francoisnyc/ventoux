@@ -418,6 +418,8 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-24, by D55** (the text above stands; this adds to it): the semantic diff
   reads "someone else" from the definition: which tasks' answers can reach a step's inputs or
   `when`, so a release that stops a step reading a field says who may now approve it, as looser.
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): "someone else" is
+  carried across a plan step and a case step, in both directions.
 
 ### D12. A small vocabulary of sources
 
@@ -789,6 +791,8 @@ be erased on request), has size limits, and a second copy of business records go
     replay: Temporal refuses it, and the case waits until the code is fixed (D17).
 - **Amended 2026-10-23, by D52** (the text above stands; this adds to it): an operating role may
   also propose or approve skipping a failed run, a change request; never the same person both.
+- **Amended 2026-11-11, by D85** (the text above stands; this adds to it): a failed run inside a
+  child case holds its parent's close by `closes_when` too, as the parent's own would.
 
 ### D27. A case continues as new, keeping its keys (design question 18)
 
@@ -831,6 +835,9 @@ be erased on request), has size limits, and a second copy of business records go
   the case's release (its name, number, digest and plans) and its engine version.
 - **Amended 2026-11-07, by D76** (the text above stands; this adds to it): what crosses includes
   the case's audit records not yet exported, in order, and the number its next record takes.
+- **Amended 2026-11-11, by D91** (the text above stands; this adds to it): the count a run
+  switches at (`events_per_run`) is the engine's; a production worker refuses a class that
+  changes it.
 
 ### D28. A plan step runs as a child workflow of its case
 
@@ -874,6 +881,9 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-22, by D51** (the text above stands; this adds to it): a case opened on a
   release runs the plans of its release, carried in its start; the plans the deployment supplies
   serve drafts.
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): a plan step also
+  carries in whoever's answer its `when` read, and its outcome carries out whoever's answer
+  inside the plan decided it.
 
 ### D29. Outputs carry their contract's sources; workflow steps are bound children
 
@@ -1057,6 +1067,9 @@ be erased on request), has size limits, and a second copy of business records go
   refused, saying to deploy code that reads it (fail closed). A plan's run on its own, which has
   a key as a case has (D31), is refused: forgetting one is not decided yet, and is a decision
   of its own.
+- **Amended 2026-11-11, by D89** (the text above stands; this says what it covers): "every form
+  value in the answers people sent" is the answer as sent, sealed whole. A value the case file
+  then holds follows its field: it goes with forgetting only if its field is sensitive.
 
 ### D33. Fresh facts: time on events, refreshing a read, and a given approval's lapse
 
@@ -1404,6 +1417,9 @@ text is kept.*
 - **Amended 2026-10-22, by D49** (the text above stands; this narrows it): a plan's own
   transitions are no longer left open. A transition whose condition reads untrusted data stops the
   plan, and the plan step needs attention.
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): the person whose
+  answer only brought the moment, or reached a milestone a step requires, is still not excluded;
+  `ventoux check` now warns where an author may have meant otherwise.
 
 ### D40. Rules that stop steps: what a close does, to one step, through one place
 
@@ -1526,6 +1542,9 @@ is kept.*
   case is closed`) before the workflow returns. So an event sent too late has the outcomes above
   and no third: until now the client's send could succeed and the case record nothing. A line of
   history and no command, so replay decides the same.
+- **Amended 2026-11-11, by D92** (the text above stands; this adds to it): every message a case
+  can't read is refused and recorded, whoever sent it and however: none is dropped without a
+  line, and none stops the case.
 
 ### D42. Rules that update the case file: a value comes from everything its rule read
 
@@ -1590,6 +1609,9 @@ text is kept.*
 - **Amended 2026-10-22, by D48** (the text above stands; this adds to it): the known limit above is
   recorded as a deliberate limit, and is wider than milestones: `visible_to` narrows who sees a
   value, never what the case did (D30, as amended).
+- **Amended 2026-11-11, by D88** (the text above stands; this adds to it): the rule for a field
+  set from a field fewer roles may see holds at a child's opening field too, and a child reports
+  no field that narrows who sees it.
 
 ### D43. A run carries what steered it, and passes it on
 
@@ -1634,6 +1656,9 @@ Adds to D29, D38, D39, D40, D41 and D42, whose text is kept.*
 - **Cases already open** on a path the fix decides differently replay differently, and wait until
   the code is fixed (D17), as 11b's did: carried to layer 12. A later moment a run brings (11f's
   timers `since` a start) carries what steered the run too.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds to it): a repeated step's runs
+  are steered by their list's untrusted sources too; the absence of a step's run carries what kept
+  it from starting; and a case step may not be steered at all.
 
 ### D44. Timers: time passing after a moment, set on it, fired as an event at its own time
 
@@ -2080,6 +2105,10 @@ D27, D28 and D50, whose text is kept.*
 - **Amended 2026-11-07, by D76** (the text above stands; this adds to it): version 3 makes audit
   records. A case opened at 3 records the marker `ventoux-engine-3` and exports; a case opened
   before decides and replays as it did, and exports nothing, saying so.
+- **Amended 2026-11-11, by D91** (the text above stands; this adds to it): which engine versions
+  the deciding code knew is read from the history wherever it decides, a migration's proposal
+  and a forget request included; and the two counts that decide where a run switches or holds
+  are the engine's, never a deployment's.
 
 ### D52. Change requests: proposed, approved by someone else, checked again, applied
 
@@ -2193,6 +2222,8 @@ D5, D44, D51 and D52, whose text is kept.*
   case also asks its registry, as the approval would apply the migration, that the target was
   activated there and isn't retired; the cohort of a release is its open cases, as the registry
   lists them.
+- **Amended 2026-11-11, by D91** (the text above stands; this adds to it): a migration refused
+  for an engine version the code didn't know stays refused when newer code replays it.
 
 ### D54. Activation: worker manifests, the environment registry, and the release a case checks
 
@@ -2392,6 +2423,8 @@ D55, whose text is kept.*
 - **Amended 2026-10-25, by D59** (the text above stands; this changes one thing): "against the
   development catalog until `ventoux check` brings the deployment's" ends: every command takes the
   deployment's catalog, named in configuration, and refuses to run with none named.
+- **Amended 2026-11-11, by D90** (the text above stands; this adds to it): the engine now checks
+  that a `notify` step never runs without a person's approval, so the sheet may say it.
 
 ### D57. Release notes in the record, and a contract's readable diff
 
@@ -3125,6 +3158,10 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
   changes, so it would fail again; a person closes the case.
 - **No new engine version (D51):** no definition readable before holds `for_each`, and no case
   could hold a list value.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds to it): each item's run, and a
+  step done at once on an empty list, carries the list's untrusted sources as what steered it.
+- **Amended 2026-11-11, by D90** (the text above stands; this adds to it): a `notify` contract
+  can't be repeated either, since its step needs an approval.
 
 ### D74. Child cases: a whole case opened from a step, pinned by its parent, reporting back
 
@@ -3195,6 +3232,16 @@ child asking as it opens. Until then a case step on Temporal fails, needing atte
 - **A child its case doesn't hold fails the step** (fail closed): the step's start never guesses a
   definition, and waits for a person (D17).
 - **No new engine version (D51):** no definition readable before has a case step.
+- **Amended 2026-11-11, by D85** (the text above stands; this narrows it): a close or a rule's stop
+  reaches a child as it reaches a run in one case. While the child holds a failed run, the
+  parent's own close (`closes_when`) is held and a rule's stop of the step is recorded and does
+  nothing else; a person's close of the parent still closes the child, saying which failed run it
+  let go.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds a deliberate limit): a case
+  step may not be steered by untrusted data; a person decides first.
+- **Amended 2026-11-11, by D88** (the text above stands; this adds to it): a value enters a
+  child only into a field no more roles may see than its source, and a report carries no field
+  that narrows who sees it (a deliberate limit), as for sensitive values.
 
 ### D75. Child cases on Temporal: a child workflow abandoned to itself, a doorbell, a report read
 
@@ -3288,6 +3335,8 @@ D15, D27, D30, D31 and D51, whose text is kept.*
   record is never renamed by a later migration. *From the tutor's review of 19a:* until then no
   case moves to version 3 on Temporal either: a migration there is refused when proposed, saying
   that this code knows the version but doesn't run cases at it yet.
+- **Amended 2026-11-11, by D89** (the text above stands; this adds to it): a form value under a
+  name that is no field is in no record: its refusal says the name, never the value.
 
 ### D77. The audit export: written by the case, sealed, in order, and never ahead of what it wrote
 
@@ -3335,6 +3384,11 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   written, and forgetting it then destroys the key; while a case holds, each act sent to it waits
   as a signal in its run's history; a plan whose workflow itself fails returns no report, so its
   events stay in its own history.
+- **Amended 2026-11-11, by D88** (the text above stands; this adds to it): a value given to a
+  plan step is recorded with who may see it, from the case fields it came from, and `read_audit`
+  filters on that, whatever name the plan gives it.
+- **Amended 2026-11-11, by D91** (the text above stands; this adds to it): a forget request's
+  records carry the engine version it learned at its start, never the code's constant.
 - **Amended 2026-11-11, by the forget stream fix** (`docs/layers/fix-forget-stream.md`; the text
   above stands, this adds to it): every request to forget one case writes to the one stream
   `<case ID>/forget`, and each numbers its records on from the last the store holds of it, which
@@ -3421,6 +3475,9 @@ D19 and D22, whose text is kept, and to "Out of scope for v1.0", amended below.*
   given only its own kind of call by Temporal's authorization.
 - **What is left for after v1.0:** the API and the reference inbox (an HTTP service, people's
   sign-in, roles from an identity provider, an inbox drawing task forms from field types).
+- **Amended 2026-11-11, by D92** (the text above stands; this narrows what is trusted): the
+  caller is trusted for who acted and their roles, never for the engine's own checks, which hold
+  for a message sent past the client functions too.
 
 ### D80. The conformance suite: validation results as data, the catalog generated, every change recorded
 
@@ -3554,6 +3611,10 @@ whose key provider or audit store is for development, or that doesn't say, so th
 *Amended 2026-11-10, by D83* (the text above stands; this changes the bound): contracts no longer
 hash from pydantic's rendering, so pydantic is bounded below its next major (`>=2.13.5,<3`).
 
+*Amended 2026-11-11, by D93* (the text above stands; this adds to it): a name a document tells a
+team to use is supported or not taught, the list gains the names the guides and the quickstart
+already teach, and the test that guards it reads calls and the quickstart too.
+
 ### D83. A contract's promise is written by Ventoux, never by pydantic
 
 *Decided 2026-11-10, in the contract rendering fix (`docs/layers/fix-contract-rendering.md`).
@@ -3575,6 +3636,355 @@ Adds to D5, D50 and D82, whose text is kept.*
 - **Set aside: a hash method 2,** a description Ventoux designs (no titles, no class name). It
   would change what a promise covers, and migrate the lockfile, release records and manifests;
   that is a decision of its own, and method 2 stays free for it.
+
+### D84. Before the first release, a fix owes no old branch
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision A, on the branch `review-2026-11`). Adds to D51, whose text is kept; makes for every fix
+the exception D68 made for one shape.*
+
+- **Until 0.1.0 is published, a fix that decides a recorded path differently stays on engine
+  version 3:** no old branch kept behind the case's version, no new version, so no new schema
+  `$id` (D60). D51 asks for an old branch so that a case already running replays; no case outside
+  the tests was ever opened on engine 3, as the maintainer said on 2026-11-11, so no history
+  outside the repository can fail to replay.
+- **It ends at the commit 0.1.0 is tagged from.** From that commit on, D51 holds in full: a change
+  that decides a recorded path differently is the next version, its old branch kept, a fixture
+  recorded under the old version replays, and a line here. The release guide says so for the
+  first release, and 0.1.0's changelog entry says engine 3 is the first anyone is owed replay for.
+- **0.1.0 waits for the review's serious fixes:** forgetting and sealing (its fixes 2 to 7) and
+  the trust model (its fixes 8 to 11) are merged before 0.1.0 is tagged, so the first engine
+  anyone is owed replay for doesn't keep the paths they close.
+- **A recorded history a fix changes is recorded again, never deleted:** under the fixed code, in
+  the fix's own pull request, its note saying which history, which path, and why (this decision).
+  A history a fix didn't mean to change keeps replaying as it is: a fix that breaks one is wrong,
+  never re-recorded to pass.
+- **What stays:** the old branches for engine versions 1 and 2, and their histories. They cost
+  nothing new; removing them is a change of its own.
+- **Fail closed:** if a case outside the tests is ever found opened on engine 3 before 0.1.0, the
+  exception stops for every fix not yet merged, and each takes a new engine version.
+- **Set aside: engine version 4 for these fixes** (the review's option (i)). Its old branches would
+  keep, for cases that don't exist, the paths the review shows break promises.
+
+### D85. A child's failed run holds its parent's close, as the parent's own would
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision B; finding 1b.6). Adds to D17, D26, D40 and D74, whose text is kept.*
+
+- **Nothing is skipped automatically across a case step either** (D17). A parent closing by
+  `closes_when`, or a parent's rule stopping the step, closed the child through D40's one place
+  and so cancelled a failed run inside it, with no person and no trace. A failed run in a child
+  is now treated as one in the parent.
+- **The parent's own close waits:** while a child it opened holds a failed run, reaching every
+  `closes_when` milestone doesn't close the parent, as D26 holds it for the parent's own failed
+  run. It closes once the child's operators retry the run to completion, or close the child, and
+  the child has ended.
+- **A rule's stop of the step is recorded and does nothing else** while the child holds a failed
+  run, as D40 says of a stop that reaches a failed run. The step stays as it is; the child's
+  operators act: "a child needing attention is the child's" (D74).
+- **A person's close of the parent still closes the child,** with a declared reason, as a person
+  may close a case holding a failed run (D26): a close by a person never waits for a person
+  (D74, D48). The child's close line then names each failed run it let go: `closed by its parent:
+  duplicate, by ana; pay#1 had failed and was not retried`. The child's operators may not see
+  the parent (D74), so the child's own record says that a person, never the engine, let it go.
+- **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
+- **Set aside:** letting a child's failed runs go and flagging both cases (the review's option
+  (ii)): a flag is read by someone or not, and it would skip what D17 forbids skipping.
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a parent's own close, and a parent's rule's stop, still
+  cancel a child's failed run with no person. The review's probes for 1b.6 still show it, run again
+  that day. The fix adds its own dated line here when it lands.
+
+### D86. Steering reaches a repeated step's runs and a person's missing work, and never opens a child
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision C; findings 1a.1, 1a.2, 1a.5). Adds to D43, D48, D73 and D74, whose text is kept.*
+
+- **The bug it fixes.** D43 keeps what steered a run inside one case and one plan, and three
+  routes lost it: a repeated step's runs, over a list a customer typed, kept nothing, so a
+  trusted-only input took the customer's text and steps after them reached `closes_when`
+  milestones, while `ventoux check` said this could never happen; a case step kept nothing, so a
+  child opened on untrusted data took it as trusted and reported back to milestones in its
+  parent; and a person's work that untrusted data kept from existing let a rule or a requirement
+  close the case with nobody in it.
+- **A repeated step's runs are steered by their list** (adds to D73). Each item's run exists only
+  because its item is in the list, so it keeps the list's untrusted (or unrecognised) sources as
+  what steered its start, beside what D43 already keeps: its inputs' policies refuse them, what it
+  gives carries them, and it reaches nothing. A step done at once on an empty list carries them
+  too, since the list's writer made it empty. Validation grows it in the same fixpoint (D42, D43).
+- **The absence of a run carries what kept it from starting.** A step whose `when` was false, or
+  that was kept from starting, has no run because of what that condition read: a rule reading its
+  missing answer or outcome, and a step requiring it, count those sources as read, as D43 already
+  counts an activity's unset output. So a case closes only on a trusted decision or a person's
+  work, never on a person's work being made absent. `ventoux check` claims and warns as for any
+  steered read (`UNTRUSTED_TRIGGER`, `WRITER_DECIDES`).
+- **A case step may not be steered** (a deliberate limit, D48; adds to D74). Following steering
+  through a whole second case, and back through its report, is set aside for now. `ventoux check`
+  refuses a case step that every way of starting steers (`UNTRUSTED_TRIGGER`) and warns where
+  only some do (`WRITER_DECIDES`); at runtime a steered start fails the step, saying what steered
+  it and never a value, and waits for a person (D17). To open a child on what a customer said,
+  put a task before the case step: a person is where steering ends (D39, D43).
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3.
+- **Set aside:** carrying steering into a child case and back (a later decision may loosen the
+  limit, with its own fixpoint across the step); and warning about a person's absent work while
+  allowing it (a warning is read or not, and the case would still close with nobody in it).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a repeated step and a case step keep nothing of what
+  steered them, and a person's absent work closes a case. The review's probes for 1a.1, 1a.2 and
+  1a.5 still show it, run again that day. The fix adds its own dated line here when it lands.
+
+### D87. "Someone else" crosses a plan step and a case step; a required milestone warns
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision D; findings 1b.1, 1b.7, 1b.8). Adds to D11, D28, D39 and D74, whose text is kept.*
+
+- **The bug it fixes.** Who may not approve is computed from provenance (D11), and the
+  computation stopped at a step that opens a plan or a child. A person who answered a wait inside
+  a plan decided its outcome, then approved the case step whose `when` read it; and the person a
+  step's own `when` read, refused as approver of a call step, approved the same payment once it
+  was written as a plan step or a case step.
+- **A plan's outcome carries who decided it.** Where a person's answer inside the plan decided
+  its outcome, or a value it gives, that outcome or value carries `person:<answerer>` beside
+  `system:<plan>`, as a child a person closed already gives `person:<closer>, case:repair` (D74).
+  So that person approves nothing it decides (D11). A plan no person's answer decided gives
+  `system:<plan>` alone, as before.
+- **Whoever a step's `when` read is carried in.** A plan step and a case step carry, with the
+  opener and the proposer (D28, D74), every person whose answer the step's own `when` read, or
+  the `when` of the rule that started it (D39): each is excluded from every approval inside the
+  plan or the child the step opens, the inbox saying why as for any exclusion. They cross
+  continue-as-new with what the step already carries.
+- **A required milestone still excludes no one, and now warns.** D39 stands: a person whose
+  answer only brought a moment, or reached a milestone a step `requires`, is not excluded: a
+  milestone says that something happened, a `when` reads what was decided. But two definitions
+  an author may take for the same differ here, so `ventoux check` warns
+  (`REQUIRES_EXCLUDES_NO_ONE`) on a step with an approval that requires a milestone only one
+  task's answers reach: naming the step, the milestone and the task, and saying that reading the
+  task's outcome in `when` is what keeps its answerer from approving. The cases guide says the
+  same.
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3.
+- **Set aside:** excluding whoever reached a required milestone (it would exclude everyone who
+  moved a case forward, and D39 left it as one decision covering moments too); and explaining
+  the difference in the guide alone (nothing would tell an author which they wrote).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, the answerer inside a plan, and whoever a step's `when`
+  read, still approve; `ventoux check` has no warning for a required milestone (1b.7). The review's
+  probes for 1b.1 and 1b.8 still show it, run again that day. The fix adds its own dated line here
+  when it lands.
+
+### D88. A value hidden by `visible_to` stays hidden across a child, a report and a plan's record
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision E; findings 1b.5, 1c.4). Adds to D30, D42, D74 and D77, whose text is kept.*
+
+- **The bug it fixes.** A view hides more than its source, never less. In one case that holds:
+  a field set from a field fewer roles may see is refused when the definition is read (D42). At
+  three joins it didn't: a parent's hidden value given to a child's field was read by every role
+  that sees the child; a child's hidden field came back in its report to every role that sees
+  the parent's step; and a hidden value given to a plan step was written to the audit store
+  under the plan's input name, which `read_audit` showed to every role, and to none.
+- **Into a child: only into a field no more roles may see.** A child's opening field is given a
+  value only if every role that may see that field may see each case field the value comes from.
+  `ventoux check` on the parent refuses otherwise, naming both fields, as D42 does for `set` and
+  D74 for sensitive values.
+- **Out of a child: a report carries no field that narrows who sees it** (a deliberate limit,
+  D48). A child's `reports` listing one is refused when the package is read. A step output that
+  carries its own visibility is set aside.
+- **Into a plan: the record says who may see it.** Giving a hidden value to a plan step is
+  allowed. The value is recorded with who may see it: the roles common to the case fields it
+  came from. `read_audit` filters on that, as the case view does (D30, D77), whatever the plan
+  names its input.
+- **The runtime depends on nothing validation did** (D34), and fails closed at each join. A case
+  step given a value into a field more roles may see fails before the child opens, naming the
+  two fields and never the value, and waits for a person (D17). A reported field that narrows who
+  sees it is treated as absent, the history saying why: whatever reads it fails, as for a
+  reported field the child never set (D74). The plan's record needs nothing more.
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3.
+- **Known limit, kept:** what a plan's activities give after reading a hidden input is as visible
+  as their step's outputs are, as in one case (D42, as amended by D48).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a hidden value is still read in a child, back through a
+  report, and in a plan step's audit record. The review's probes for 1b.5 and 1c.4 still show it,
+  run again that day. The fix adds its own dated line here when it lands.
+
+### D89. A form value follows its field; under a name that is no field, it is never kept
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision F; finding 1c.7). Adds to D31, D32 and D76, whose text is kept.*
+
+- **Two texts, read together.** D32 says forgetting takes "every form value in the answers people
+  sent"; D76 says a form value is in the record "as the case file holds it: sensitive only if
+  its field is". Both stand, about two things. The answer as sent is sealed whole by the client,
+  which can't tell which fields are sensitive (D31), and that sealed answer goes with forgetting.
+  Once the answer is accepted, each value lands in its field and follows that field's rule:
+  sealed if the field is sensitive, in clear if not, in the state and in the audit store.
+- **So a form value in a field that isn't sensitive outlives forgetting,** and the forgetting
+  guide says so: a field that may hold personal data is declared sensitive. Treating every form
+  value as sensitive for good is set aside: every field a person fills in would be hidden in
+  views and unreadable where a sensitive value is.
+- **The bug it fixes.** An answer giving a value under a name its task doesn't set was refused,
+  rightly, and to record the refusal the value was unwrapped and kept in clear: in the history,
+  in the audit store for every role and for none, and after forgetting. A name the engine didn't
+  recognise was read as "not sensitive", a permissive default.
+- **A value under a name that is no field is never kept** (fail closed). The answer is refused as
+  before, the line saying the name and never the value (`the answer gives scratch, which accept
+  doesn't set`). The value is dropped unopened: not in the state, not in the refusal's record or
+  the export's input, not across continue-as-new. There is nothing left to forget.
+- **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
+- **Set aside:** keeping such a value sealed as if sensitive (nobody may ever need it, and it is
+  one more sealed thing to account for).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a value under a name that is no field is still kept in
+  clear, and after forgetting; the reading of D32 with D76 is what `main` does already. The review's
+  probes for 1c.7 still show it, run again that day. The fix adds its own dated line here when it
+  lands.
+
+### D90. A step that notifies needs a person's approval on every path
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision G; finding 1b.9). Adds to D6, D11, D34, D56 and D73, whose text is kept.*
+
+- **The bug it fixes.** "Anything that talks to people drafts by default; it never sends on its
+  own" is a non-negotiable, and nothing checked it: a low-risk contract with the effect `notify`,
+  called by a case's only step, sent its message with no person involved, and validation said
+  nothing. D56 left "drafts, never sends" unsaid "until the engine checks it".
+- **A step calling a `notify` contract needs an approval on every path, whatever its risk,** as
+  a high-risk step does: `ventoux check` refuses a definition where a path reaches it without one
+  (`APPROVAL_REQUIRED`), for a case's step and a plan's state alike, and the runtime refuses the
+  start on its own, depending on nothing validation did (D34): the run fails, saying why, and
+  waits for a person (D17).
+- **That is what "drafts" means here.** The step's inputs are the draft: the approval shows the
+  approver what would go out, and is tied to those values, lapsing if they change (D11). Whoever
+  wrote what the step reads is someone else (D11, D87). So nothing reaches a person outside
+  without a person inside having approved exactly that.
+- **`notify` is "this reaches a person outside".** A contract that only prepares a draft in
+  another system, for a person to send there, has the effect `write`, as the development
+  catalog's letters do. No contract in the repository had the effect `notify` at this decision.
+- **Deliberate limits** (D48): a `notify` contract can't be repeated over a list, since a
+  repeated step carries no approval (D73); and "by default" has no way out in v1.0: a contract
+  that may send unreviewed would be a decision of its own.
+- **The sheet may now say it** (adds to D56): for a case whose steps that notify each carry
+  their approval, "never sends without a person's approval".
+- **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
+- **Set aside:** rewording the non-negotiable as a convention the engine doesn't check (it would
+  stop being one); and an approval "with no `when`" as a rule of its own (the rule for high risk
+  already proves an approval on every path, at the check and at the start).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a `notify` contract still runs with no approval, and
+  nothing says so. The review's probes for 1b.9 still show it, run again that day. The fix adds its
+  own dated line here when it lands.
+
+### D91. What the code knew is read from the history, never from the code replaying it
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision H; findings 2.1, 2.2, 2.3). Adds to D27, D51, D53, D76 and D77, whose text is kept.*
+
+- **The rule.** A case is rebuilt by replaying its history through the code now deployed. So
+  nothing a case decides or records may hang on a constant of that code alone: the same history
+  would then decide otherwise after an upgrade, sometimes with no replay error at all.
+- **A refused migration stays refused** (2.1). A migration to an engine version the worker
+  didn't know was refused and recorded so, from the code's own list; replayed by a worker that
+  knew the version, the same proposal was accepted, and the case moved release and engine,
+  withdrew an approval and asked for an export. Whether the deciding worker knows engine N is
+  now asked through the history, by the patch marker D51 asks at the opening
+  (`ventoux-engine-N`), at the proposal: written when a worker that knows N first decides it,
+  absent from a history an earlier worker recorded, which so refuses again on replay. The fix
+  keeps a recorded history of that scenario, refused by an older worker and replayed by a newer
+  one, as its fixture.
+- **A forget request knows its engine version as a case does** (2.2). It learns it once, at its
+  start, from the patch markers (D51), keeps it as data, and stamps its audit records from it,
+  never from the module's `ENGINE`: a request open across an upgrade rebuilds the records it
+  first made.
+- **`events_per_run` and `audit_bound` are the engine's, never a deployment's** (2.3). They
+  decide where a recorded run switches or holds (D27, D77), so changing either for cases that
+  run is a change that decides a recorded path differently: a new engine version (D51). The
+  deployment guide says so. In a production environment a case worker refuses to start with a
+  case workflow class that changes either, naming the setting (fail closed, D81's pattern);
+  elsewhere a test's class may lower them, as before.
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3; no
+  recorded history in the repository takes the path the first changes.
+- **Set aside:** keeping what the code knew in the case's state alone (the state is itself
+  rebuilt by replay, so the fact must be in the history); and recording the two counts for each
+  case (more machinery for two numbers nobody should change).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, a refused migration is still taken on replay, a forget
+  request's records follow the code's constant, and nothing refuses a changed class setting. The
+  review's probes for 2.1, 2.2 and 2.3 still show it, run again that day. The fix adds its own dated
+  line here when it lands.
+
+### D92. The engine's own checks hold for a message sent past the client functions
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision I; findings 1c.8, 1c.9, 1c.11, 1c.14). Adds to D17, D41, D51, D54, D74 and D79, whose
+text is kept.*
+
+- **The rule.** The trusted caller is trusted for what no code can check: who a person is and
+  the roles they hold (D79). The engine's own integrity is never the caller's to keep: that a
+  case doesn't stop, skips none of its checks and records every refusal holds whichever
+  function sent the message, Temporal's own client included, which Temporal doesn't prevent.
+- **Every signal a case can't read is refused and recorded** (1c.8, 1c.9), saying what was wrong
+  and never a value: a wrong shape, a missing part, a number that isn't finite (`NaN`,
+  `Infinity`). Ten malformed signals of 56 were dropped with no line and no record, and a number
+  that isn't finite failed the case's workflow task for good. None is dropped silently, and
+  none stops the case (fail closed, D41 as amended).
+- **A start that says it continues a run is believed only if Temporal says so** (1c.11). A raw
+  start with `carried` set skipped the registry, the opening and the release check, so a draft
+  ran in production on a state its caller wrote. The state carried across continue-as-new (D27)
+  is read only where the run itself continued one, which Temporal records on the run and no
+  client can set; otherwise the start is an opening, checked as every opening is (D51, D54),
+  and what it claimed to carry is refused, saying so.
+- **A case with no parent refuses `close_by_parent`** (1c.14), recorded as refused. It closed
+  on one, with any reason and nobody named.
+- **What stays the caller's,** said in the deployment guide, since no code of Ventoux's can check
+  it: who acted and with what roles (D79); and a `close_by_parent` sent to a real child by
+  someone other than its parent, since Temporal doesn't say who sent a signal.
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3; no
+  recorded history holds such a message.
+- **Set aside:** leaving the four inside the caller's boundary, listed by `ventoux doctor` as
+  unchecked (each fix is small and reads a fact the workflow already has).
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, signals are still dropped without a line or stop the
+  case, a forged continuation is believed, and a case with no parent closes on `close_by_parent`.
+  The review's probes for 1c.8, 1c.9, 1c.11 and 1c.14 still show it, run again that day. The fix
+  adds its own dated line here when it lands.
+
+### D93. A name a document teaches is supported, or it isn't taught
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision J; findings 5.3, 6b.1). Adds to D79 and D82, whose text is kept.*
+
+- **The gap it closes.** The supported imports are a committed list (`src/ventoux/public.json`,
+  D82), and the test guarding it read only `from ventoux… import …` lines in the guides and
+  examples. Thirteen names the documents tell a team to use were told in prose, in a snippet
+  with no import, or in the quickstart, and weren't on the list: `run_case`, which the guides
+  call twenty times, was "unsupported, free to change".
+- **One rule:** a name a document tells a team to use is supported, or the document stops
+  teaching it. Each name the widened test finds is added to the list, or leaves the document.
+- **Added to the list:**
+  - `ventoux.testing`: `run_case`, `CATALOG`, and the script helpers the guides teach
+    (`propose`, `retry`, `close`, `edit`, `skip`, `assign`, `claim`, `later`, `migrate`), since
+    `ventoux.testing` ships for teams' tests (D82);
+  - `ventoux.core.catalog`: `Catalog`, and the activities guide shows how one is made;
+  - `ventoux.temporal.cases`: every client function the trusted caller uses (D79's "and the
+    others"): `propose`, `claim`, `assign`, `unassign`, `give_back`, `retry`, `close`,
+    `propose_change`, `propose_migration`, `preview_migrations`, `send_event`, `view`, `shown`,
+    `approval_sheet`;
+  - `ventoux.temporal.registry`: `registry_worker`, `open_cases`;
+  - `ventoux.temporal.sandbox`: `SANDBOX`, for a deployment that builds its own worker.
+- **Not added without a reason:** `ventoux.tooling.audit.same`, an audit store's own comparison.
+  If an implementer of `AuditStore` must call it, it joins the list; otherwise the audit guide
+  stops naming it. The fix says which, and why.
+- **The test reads what teaches:** the quickstart as well as the guides, the README and the
+  examples; calls in Python blocks to a name a Ventoux module defines, not only import lines;
+  and a module path written as text (`"ventoux.testing:CATALOG"`). A name in a sentence alone
+  can't be read reliably, so where a guide names one that way it gains a snippet with its
+  import, which the test sees.
+- **Each listed name is a promise,** as before (D82): one that disappears fails a test, and
+  removing one is a decision. The list grows by about thirty names.
+- **No behaviour changes,** so no engine version is in question.
+- **Not built on 2026-11-11** (decided ahead of its fix, so the lines above say what the fix makes
+  true, not what `main` does): at `c1225d3`, the thirteen names are still outside `public.json`, and
+  the test still reads import lines only. The review's probes for 5.3 and 6b.1 still show it, run
+  again that day. The fix adds its own dated line here when it lands.
 
 ## Concepts
 
