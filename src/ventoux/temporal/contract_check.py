@@ -36,7 +36,7 @@ async def check_workflow_contract(
     keeps it. `input` must be one the contract accepts: the test checks the workflow, not you."""
     # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
     contract.input.model_validate(input)
-    run = test_run(client, contract)
+    run = await test_run(client, contract)
     try:
         # Temporal: waiting on the result lets the time-skipping test server skip to the timeout.
         output: dict[str, Any] = await client.execute_workflow(
@@ -64,14 +64,15 @@ async def check_workflow_contract(
     return problems
 
 
-def test_run(client: Client, contract: WorkflowContract) -> str:
+async def test_run(client: Client, contract: WorkflowContract) -> str:
     """A new workflow ID for one run of the test, never a case's."""
     run = f"contract-test-{contract.reference}-{uuid.uuid4()}"
     codec = client.data_converter.payload_codec
     if isinstance(codec, SensitiveCodec):
         # A client sealing with Ventoux's codec seals the run's failures too: the run needs its
-        # key, as every run Ventoux starts has one; and no `/` in its ID (brief, D31).
-        codec.keys.create(run)
+        # key, as every run Ventoux starts has one; and no `/` in its ID (brief, D31). Made off
+        # the event loop, as every call to a key service (brief, D78).
+        await asyncio.to_thread(codec.keys.create, run)
     return run
 
 
@@ -120,7 +121,7 @@ async def cancellation_problems(
 ) -> list[str]:
     """Every part of a cancellable contract's promise its workflow breaks, read from the history
     of a second run, asked to cancel once it has started (brief, D40)."""
-    run = test_run(client, contract)
+    run = await test_run(client, contract)
     # Temporal: `start_workflow` starts the run and returns its handle at once, without waiting.
     handle = await client.start_workflow(
         binding.workflow,

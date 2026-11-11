@@ -72,9 +72,10 @@ def decimal(value: Decimal) -> str:
 
 
 def package(case: Case) -> dict[str, str]:
-    """`case`'s package, as its files will be, by path (brief, D50): `case.json`, and each plan
-    its plan steps name, under `plans/`, in the order of their references. A plan named by no step
-    is never written: a package refuses a plan nobody names."""
+    """`case`'s package, as its files will be, by path (brief, D50): `case.json`, each plan its
+    plan steps name, under `plans/`, in the order of their references, and each child its case
+    steps open, under `cases/` (brief, D74). A plan named by no step is never written: a package
+    refuses a plan nobody names."""
     files = {"case.json": written(case)}
     names: dict[str, str] = {}
     for reference in sorted(case.plans):
@@ -87,4 +88,8 @@ def package(case: Case) -> dict[str, str]:
             )
         names[plan.name] = reference
         files[f"plans/{plan.name}.json"] = written(plan)
+    # Each child it pins, as a package of its own under `cases/<reference>/` (brief, D74).
+    for reference in sorted(case.cases):
+        for path, text in package(case.cases[reference]).items():
+            files[f"cases/{reference}/{path}"] = text
     return files

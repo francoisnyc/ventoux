@@ -10,7 +10,6 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
@@ -27,6 +26,7 @@ from test_interpreter import (
     recording,
 )
 from test_validate import guide_review_with
+from worker_threads import worker_threads
 
 from ventoux.core.catalog import NotInCatalog
 from ventoux.core.interpreter import Outcome
@@ -60,7 +60,7 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             plan_worker(
                 environment.client, QUEUE, DevelopmentPlans, activities, activity_executor=threads
             ),
@@ -199,7 +199,7 @@ def test_a_client_without_exact_numbers_is_refused() -> None:
     # would read it back as a number: exact numbers are checked where a client is used, never
     # assumed (brief, D20).
     async def go() -> None:
-        async with time_skipping() as environment, activity_threads() as threads:
+        async with time_skipping() as environment, worker_threads() as threads:
             with pytest.raises(ValueError, match="exact numbers"):
                 plan_worker(
                     environment.client, QUEUE, DevelopmentPlans, FAKES, activity_executor=threads
@@ -265,7 +265,7 @@ def test_an_implementation_the_catalog_does_not_hold_is_refused() -> None:
     async def go() -> None:
         async with (
             time_skipping(development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
         ):
             with pytest.raises(NotInCatalog, match="payments.refnd@2"):
                 plan_worker(

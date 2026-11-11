@@ -93,7 +93,7 @@ def test_what_steered_a_run_reads_back_as_it_was() -> None:
     state.proposed_by_rules["letter"] = asked
     state.rule_starts.append(asked)
     state.moments.append(Moment("started goodbye", "goodbye#1"))
-    assert state_from_data(state_as_data(state)) == state
+    assert state_from_data(state_as_data(state), {}) == state
 
 
 def test_a_state_carried_from_before_the_fix_reads_as_steered_by_nothing() -> None:
@@ -105,7 +105,7 @@ def test_a_state_carried_from_before_the_fix_reads_as_steered_by_nothing() -> No
     data = state_as_data(state)
     del data["firings"][0]["steered"]
     del data["proposed_by_rules"]["letter"]["steered"]
-    assert state_from_data(data) == state
+    assert state_from_data(data, {}) == state
 
 
 # --- Histories recorded under main, before the fix (brief, D17) ---

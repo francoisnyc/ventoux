@@ -21,7 +21,14 @@ from ventoux.case.changes import (
     merged,
     shown,
 )
-from ventoux.case.definition import Approval, CallStep, CaseDefinition, CloseReason, TaskStep
+from ventoux.case.definition import (
+    Approval,
+    Assign,
+    CallStep,
+    CaseDefinition,
+    CloseReason,
+    TaskStep,
+)
 from ventoux.case.freshness import as_said, seconds_in
 from ventoux.case.sequence import requirements
 from ventoux.case.writers import could_come_from
@@ -91,6 +98,23 @@ def approved_by(approval: object) -> str:
     if not isinstance(approval, Approval):
         return "approved by nobody"
     return f"approved by {' or '.join(approval.roles)}"
+
+
+def assign_change(leaf: Leaf) -> Change:
+    """A rule added: stricter, since only its pick then answers a held entry (brief, D69); removed:
+    looser; another person asked: a doubt, read as looser (brief, D55) (brief, D71)."""
+    old, new = rule_of(leaf.before), rule_of(leaf.after)
+    if old is None and new is not None:
+        return Change(leaf.path, "stricter", f"added: {new.aloud()}", "assignment")
+    if old is not None and new is None:
+        return Change(leaf.path, "looser", f"removed: {old.aloud()}", "assignment")
+    assert old is not None and new is not None  # a leaf is where the two versions differ
+    return Change(leaf.path, "not proven", f"{old.aloud()} -> {new.aloud()}")
+
+
+def rule_of(value: object) -> Assign | None:
+    """The rule a version has at a leaf; None if it has none there."""
+    return value if isinstance(value, Assign) else None
 
 
 def count_change(leaf: Leaf) -> Change:
@@ -440,6 +464,20 @@ def switch_change(leaf: Leaf, name: str) -> Change:
     if leaf.after is True:
         return Change(leaf.path, "looser", f"{said} ({SWITCHES[name]})", name)
     return Change(leaf.path, "stricter", said, name)
+
+
+def required_change(leaf: Leaf) -> Change:
+    """`required`, either way: not proven. Turned on, the case takes what the other version
+    refuses (a proposal of the owed step after it would have closed), so neither way is a proof
+    for every case; as `closes_when` and `stays_open`, it is said, and a person judges it
+    (brief, D55) (brief, D72)."""
+    said = f"{shown(leaf.before)} -> {shown(leaf.after)}"
+    why = (
+        "the case owes it before it closes by itself"
+        if leaf.after is True
+        else "the case may close without it"
+    )
+    return Change(leaf.path, "not proven", f"{said} ({why})")
 
 
 # --- Closing and forgetting ----------------------------------------------------------------------

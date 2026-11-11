@@ -1,0 +1,1373 @@
+{
+  "engine": 3,
+  "entries": [
+    {
+      "name": "a condition reads a field the case doesn't declare",
+      "kind": "package",
+      "case": "cases/a-condition-reads-an-undeclared-field.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.when",
+            "code": "EXPRESSION_INVALID",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "APPROVAL_ELSEWHERE: only a read needing no approval is fetched again (test_case_validation)",
+      "kind": "package",
+      "case": "cases/approval-elsewhere.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.check_order",
+            "code": "OUTCOME_UNREAD",
+            "severity": "warning"
+          },
+          {
+            "path": "steps.check_order.approval.when",
+            "code": "APPROVAL_ELSEWHERE",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "APPROVAL_REQUIRED: a high risk step has an approval (test_case_validation)",
+      "kind": "package",
+      "case": "cases/approval-required.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay",
+            "code": "APPROVAL_REQUIRED",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "APPROVAL_REUSED: a loop back to a high risk activity is refused then repaired (test_authoring)",
+      "kind": "plan",
+      "plan": "plans/approval-reused.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.pay",
+            "code": "APPROVAL_REUSED",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "APPROVAL_ROLE: the approval checks hold for every approver (test_approvals)",
+      "kind": "package",
+      "case": "cases/approval-role.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.approval.roles",
+            "code": "APPROVAL_ROLE",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "APPROVAL_TARGET: an approval approves the activity its approve leads to (test_people)",
+      "kind": "plan",
+      "plan": "plans/approval-target.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.approve_refund.on.approve",
+            "code": "APPROVAL_TARGET",
+            "severity": "error"
+          },
+          {
+            "path": "states.paid",
+            "code": "UNREACHABLE_STATE",
+            "severity": "error"
+          },
+          {
+            "path": "states.pay",
+            "code": "UNREACHABLE_STATE",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "APPROVER_CANT_SEE: the approval checks hold for every approver (test_approvals)",
+      "kind": "package",
+      "case": "cases/approver-cant-see.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.approval.roles",
+            "code": "APPROVER_CANT_SEE",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ASSIGNS_EXCLUDED: an approval asked of someone it always excludes is refused (test_assignment_rules)",
+      "kind": "package",
+      "case": "cases/assigns-excluded.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.approval.assign",
+            "code": "ASSIGNS_EXCLUDED",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ASSIGNS_MAY_BE_EXCLUDED: a pick the approval may exclude is a warning (test_assignment_rules)",
+      "kind": "package",
+      "case": "cases/assigns-may-be-excluded.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.approval.assign",
+            "code": "ASSIGNS_MAY_BE_EXCLUDED",
+            "severity": "warning"
+          },
+          {
+            "path": "steps.pay.approval.when",
+            "code": "MAY_BE_UNSET",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ASSIGNS_SEVERAL: an approval needing several people has no rule (test_assignment_rules)",
+      "kind": "package",
+      "case": "cases/assigns-several.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.approval.assign",
+            "code": "ASSIGNS_SEVERAL",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ATTACHMENT_NOT_GIVEN_BY_A_PERSON: an event carrying an attachment is refused (test_attachments)",
+      "kind": "package",
+      "case": "cases/attachment-not-given-by-a-person.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "events.uploaded.payload.file",
+            "code": "ATTACHMENT_NOT_GIVEN_BY_A_PERSON",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CHECKED_IN_A_LIST: a checked field in a list is refused (test_attachments)",
+      "kind": "package",
+      "case": "cases/checked-in-a-list.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "fields.seen",
+            "code": "CHECKED_IN_A_LIST",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CHECKED_IN_A_PLAN: the guides messages are what validate says (test_validate)",
+      "kind": "plan",
+      "plan": "plans/checked-in-a-plan.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "fields.chosen",
+            "code": "CHECKED_IN_A_PLAN",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CLOSES_AT_OPENING: a case that closes at opening is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/closes-at-opening.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps",
+            "code": "CLOSES_AT_OPENING",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CLOSE_UNREACHABLE: the deadlocked claim is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/close-unreachable.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "closes_when",
+            "code": "CLOSE_UNREACHABLE",
+            "severity": "warning"
+          },
+          {
+            "path": "steps.assess.requires",
+            "code": "DEADLOCK",
+            "severity": "error"
+          },
+          {
+            "path": "steps.call_customer.requires",
+            "code": "NEVER_RUNS",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ENGINE_INPUT: the engine fills the key (test_case_validation)",
+      "kind": "package",
+      "case": "cases/engine-input.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.inputs.idempotency_key",
+            "code": "ENGINE_INPUT",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EXPRESSION_INVALID: a misspelt outcome is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/expression-invalid.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.when",
+            "code": "EXPRESSION_INVALID",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "INPUT_POLICY: a draft that doesnt pass is refused and never rendered (test_approve)",
+      "kind": "package",
+      "case": "cases/input-policy.json",
+      "plans": [
+        "plans/input-policy-refund-order.json"
+      ],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.settle.inputs.note",
+            "code": "INPUT_POLICY",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "INPUT_TYPE: an input is given the type it takes (test_case_validation)",
+      "kind": "package",
+      "case": "cases/input-type.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.inputs.amount",
+            "code": "INPUT_TYPE",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KEPT_FROM_STARTING: a step untrusted data may keep from starting is warned about (test_kept_from_starting)",
+      "kind": "package",
+      "case": "cases/kept-from-starting.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.check.when",
+            "code": "KEPT_FROM_STARTING",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LOOPS_UNTIL_CLOSED: a loop of one rule says it starts (test_rules)",
+      "kind": "package",
+      "case": "cases/loops-until-closed.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.send_back.then.start",
+            "code": "LOOPS_UNTIL_CLOSED",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MAY_ASSIGN_NOBODY: a task the step doesnt require may find nobody (test_assignment_rules)",
+      "kind": "package",
+      "case": "cases/may-assign-nobody.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.review.assign",
+            "code": "MAY_ASSIGN_NOBODY",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MISSING_EVENT: every outcome an activity declares is handled (test_validate)",
+      "kind": "plan",
+      "plan": "plans/missing-event.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.pay.on",
+            "code": "MISSING_EVENT",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MISSING_INPUT: an input the contract does not take is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/missing-input.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.inputs",
+            "code": "MISSING_INPUT",
+            "severity": "error"
+          },
+          {
+            "path": "steps.pay.inputs.amout",
+            "code": "UNKNOWN_INPUT",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NEVER_CLOSES: a case nobody can close is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/never-closes.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "close_reasons",
+            "code": "NEVER_CLOSES",
+            "severity": "error"
+          },
+          {
+            "path": "closes_when",
+            "code": "CLOSE_UNREACHABLE",
+            "severity": "warning"
+          },
+          {
+            "path": "steps.assess.requires",
+            "code": "DEADLOCK",
+            "severity": "error"
+          },
+          {
+            "path": "steps.call_customer.requires",
+            "code": "NEVER_RUNS",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NEVER_FIRES: a step only such a start starts never runs (test_check_proofs)",
+      "kind": "package",
+      "case": "cases/never-fires.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.say_goodbye.on",
+            "code": "NEVER_FIRES",
+            "severity": "error"
+          },
+          {
+            "path": "steps.goodbye",
+            "code": "NEVER_RUNS",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NEVER_REFRESHED: a max age nothing can fetch again is a warning (test_case_validation)",
+      "kind": "package",
+      "case": "cases/never-refreshed.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.max_age.approved_amount",
+            "code": "NEVER_REFRESHED",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NEVER_RUNS: a step requiring what nothing reaches never runs (test_case_validation)",
+      "kind": "package",
+      "case": "cases/never-runs.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.approve.requires",
+            "code": "NEVER_RUNS",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NEVER_STARTS: a start on the moment a rule always closes never starts (test_check_proofs)",
+      "kind": "package",
+      "case": "cases/never-starts.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.say_goodbye.then.start",
+            "code": "NEVER_STARTS",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NOT_A_STORE: an attachment in a system that is not a store is refused (test_attachments)",
+      "kind": "package",
+      "case": "cases/not-a-store.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "fields.receipt",
+            "code": "NOT_A_STORE",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NO_PATH_TO_FINAL: from every state the plan can end (test_validate)",
+      "kind": "plan",
+      "plan": "plans/no-path-to-final.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.retry_payment",
+            "code": "NO_PATH_TO_FINAL",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NO_SOURCES: a plan field given only literals has no sources (test_case_validation)",
+      "kind": "package",
+      "case": "cases/no-sources.json",
+      "plans": [
+        "plans/no-sources-refund-order.json"
+      ],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.settle.inputs.amount",
+            "code": "NO_SOURCES",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OPTION_NOT_GIVEN_BY_A_PERSON: an event carrying an option is refused (test_options)",
+      "kind": "package",
+      "case": "cases/option-not-given-by-a-person.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "events.moved.payload.to",
+            "code": "OPTION_NOT_GIVEN_BY_A_PERSON",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OPENER_DECIDES: who opens the case decides only a warning (test_case_validation)",
+      "kind": "package",
+      "case": "cases/opener-decides.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.record.inputs.amount",
+            "code": "OPENER_DECIDES",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OUTCOME_UNREAD: every example is a package the check accepts (test_builder_guide)",
+      "kind": "package",
+      "case": "cases/outcome-unread.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay",
+            "code": "OUTCOME_UNREAD",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "REFERENCE: a reference goes only where its system is expected (test_case_validation)",
+      "kind": "package",
+      "case": "cases/reference.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.write.inputs.customer",
+            "code": "REFERENCE",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "REQUIRED_MAY_STRAND: a required step a rule may stop and that cant run again is warned (test_required)",
+      "kind": "package",
+      "case": "cases/required-may-strand.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.confirm",
+            "code": "REQUIRED_MAY_STRAND",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RESERVED_OUTCOME: no outcome is named timeout (test_validate)",
+      "kind": "plan",
+      "plan": "plans/reserved-outcome.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.confirm.wait.outcomes",
+            "code": "RESERVED_OUTCOME",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SENSITIVE_TO_CHILD: a sensitive value enters a child only into a sensitive field (test_child_cases)",
+      "kind": "package",
+      "case": "cases/sensitive-to-child.json",
+      "plans": [],
+      "cases": {
+        "repair@3": {
+          "case": "cases/sensitive-to-child-repair.json",
+          "plans": []
+        }
+      },
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay_garage",
+            "code": "OUTCOME_UNREAD",
+            "severity": "warning"
+          },
+          {
+            "path": "steps.repair.inputs.owner",
+            "code": "SENSITIVE_TO_CHILD",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SENSITIVE_TO_WORKFLOW: a sensitive field given to a workflow step is written and refused by the check (test_builder_decides_nothing)",
+      "kind": "package",
+      "case": "cases/sensitive-to-workflow.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.kyc.inputs.customer_id",
+            "code": "SENSITIVE_TO_WORKFLOW",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SET_AFTER: a rule may let a writer run first so set after becomes a warning (test_rules)",
+      "kind": "package",
+      "case": "cases/set-after.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.notify.inputs.template",
+            "code": "SET_AFTER",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TIMER_ON_FIRST_START: a timer on a first start warns (test_patterns)",
+      "kind": "package",
+      "case": "cases/timer-on-first-start.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.chase_review.on",
+            "code": "TIMER_ON_FIRST_START",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNCHECKED_OPTION: an option of a system with no check is refused (test_options)",
+      "kind": "package",
+      "case": "cases/unchecked-option.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "fields.branch",
+            "code": "UNCHECKED_OPTION",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNKNOWN_ACTIVITY: every activity is in the catalog (test_validate)",
+      "kind": "plan",
+      "plan": "plans/unknown-activity.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.pay.activity",
+            "code": "UNKNOWN_ACTIVITY",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNKNOWN_CONTRACT: a contract nobody registered is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/unknown-contract.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.activity",
+            "code": "UNKNOWN_CONTRACT",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNKNOWN_EVENT: sets names an outcome the wait offers and a declared field (test_people)",
+      "kind": "plan",
+      "plan": "plans/unknown-event.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.review.wait.sets.accept",
+            "code": "UNKNOWN_FIELD",
+            "severity": "error"
+          },
+          {
+            "path": "states.review.wait.sets.acept",
+            "code": "UNKNOWN_EVENT",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNKNOWN_ROLE: a case nobody can close is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/unknown-role.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "close_reasons.duplicate.roles",
+            "code": "UNKNOWN_ROLE",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNKNOWN_SOURCE: a label nobody registered is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/unknown-source.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "fields.amount.source",
+            "code": "UNKNOWN_SOURCE",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNKNOWN_SYSTEM: a system nobody registered is refused (test_case_validation)",
+      "kind": "package",
+      "case": "cases/unknown-system.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "fields.order_id",
+            "code": "UNKNOWN_SYSTEM",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNKNOWN_TARGET: a transition to no state is written and refused by the check (test_builder_decides_nothing)",
+      "kind": "plan",
+      "plan": "plans/unknown-target.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.ask.on.done[0]",
+            "code": "UNKNOWN_TARGET",
+            "severity": "error"
+          },
+          {
+            "path": "states.ask.on.done[0].when",
+            "code": "UNTRUSTED_TRANSITION",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNREACHABLE_MILESTONE: a milestone nothing reaches is a warning (test_case_validation)",
+      "kind": "package",
+      "case": "cases/unreachable-milestone.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "milestones.reviewed",
+            "code": "UNREACHABLE_MILESTONE",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNTRUSTED_TRANSITION: a plan path chosen by untrusted data is written and refused by the check (test_builder_decides_nothing)",
+      "kind": "plan",
+      "plan": "plans/untrusted-transition.json",
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "states.ask.on.done[0].when",
+            "code": "UNTRUSTED_TRANSITION",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UNTRUSTED_TRIGGER: a transition reading untrusted data is refused then repaired (test_authoring)",
+      "kind": "package",
+      "case": "cases/untrusted-trigger.json",
+      "plans": [
+        "plans/untrusted-trigger-refund-order.json"
+      ],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.settle.inputs.note",
+            "code": "UNTRUSTED_TRIGGER",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WRITER_DECIDES: warnings are said as ventoux check says them (test_approve)",
+      "kind": "package",
+      "case": "cases/writer-decides.json",
+      "plans": [
+        "plans/writer-decides-refund-order.json"
+      ],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.settle.inputs.remark",
+            "code": "WRITER_DECIDES",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WRONG_KIND: a step and its contract are the same kind (test_case_validation)",
+      "kind": "package",
+      "case": "cases/wrong-kind.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "steps.pay.workflow",
+            "code": "WRONG_KIND",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/checks/closed-before-it-acts.json",
+      "kind": "package",
+      "case": "examples/checks/closed-before-it-acts.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.say_goodbye.on",
+            "code": "NEVER_FIRES",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/checks/timer-on-a-first-start.json",
+      "kind": "package",
+      "case": "examples/checks/timer-on-a-first-start.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.chase_review.on",
+            "code": "TIMER_ON_FIRST_START",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/claim/claim.json",
+      "kind": "package",
+      "case": "examples/claim/claim.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/packages/refund/case.json",
+      "kind": "package",
+      "case": "examples/packages/refund/case.json",
+      "plans": [
+        "examples/packages/refund/plans/refund-order.json"
+      ],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/quickstart/packages/refund/case.json",
+      "kind": "package",
+      "case": "examples/quickstart/packages/refund/case.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/refund/refund-chased.json",
+      "kind": "package",
+      "case": "examples/refund/refund-chased.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/refund/refund-four-eyes.json",
+      "kind": "package",
+      "case": "examples/refund/refund-four-eyes.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/refund/refund-reminded.json",
+      "kind": "package",
+      "case": "examples/refund/refund-reminded.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/refund/refund.json",
+      "kind": "package",
+      "case": "examples/refund/refund.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/a-start-is-a-proposal.json",
+      "kind": "package",
+      "case": "examples/witnesses/a-start-is-a-proposal.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "milestones.large",
+            "code": "UNREACHABLE_MILESTONE",
+            "severity": "warning"
+          },
+          {
+            "path": "steps.pay.when",
+            "code": "MAY_BE_UNSET",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/actions-in-the-engines-order.json",
+      "kind": "package",
+      "case": "examples/witnesses/actions-in-the-engines-order.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "milestones.checked",
+            "code": "UNREACHABLE_MILESTONE",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/condition-read-when-it-fires.json",
+      "kind": "package",
+      "case": "examples/witnesses/condition-read-when-it-fires.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.chase_review.when",
+            "code": "MAY_BE_UNSET",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/every-rule.json",
+      "kind": "package",
+      "case": "examples/witnesses/every-rule.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.flag_large.when",
+            "code": "SET_AFTER",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/listening.json",
+      "kind": "package",
+      "case": "examples/witnesses/listening.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/only-while-the-case-decides.json",
+      "kind": "package",
+      "case": "examples/witnesses/only-while-the-case-decides.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.flag_large.on",
+            "code": "NEVER_FIRES",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/reaching-closes-the-case.json",
+      "kind": "package",
+      "case": "examples/witnesses/reaching-closes-the-case.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/set-value-carries-what-it-read.json",
+      "kind": "package",
+      "case": "examples/witnesses/set-value-carries-what-it-read.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/start-checked-against-inputs.json",
+      "kind": "package",
+      "case": "examples/witnesses/start-checked-against-inputs.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "closes_when",
+            "code": "CLOSE_UNREACHABLE",
+            "severity": "warning"
+          },
+          {
+            "path": "rules.close_it.then.start",
+            "code": "INPUT_POLICY",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/timer-holds-the-case.json",
+      "kind": "package",
+      "case": "examples/witnesses/timer-holds-the-case.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/timer-on-a-run.json",
+      "kind": "package",
+      "case": "examples/witnesses/timer-on-a-run.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/timer-on-an-instant.json",
+      "kind": "package",
+      "case": "examples/witnesses/timer-on-an-instant.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": []
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/timers-condition-read-when-it-fires.json",
+      "kind": "package",
+      "case": "examples/witnesses/timers-condition-read-when-it-fires.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.chase_review.when",
+            "code": "MAY_BE_UNSET",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/untrusted-data-decides-nothing.json",
+      "kind": "package",
+      "case": "examples/witnesses/untrusted-data-decides-nothing.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "rules.close_it.on",
+            "code": "UNTRUSTED_TRIGGER",
+            "severity": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the committed examples/witnesses/what-a-stop-does.json",
+      "kind": "package",
+      "case": "examples/witnesses/what-a-stop-does.json",
+      "plans": [],
+      "cases": {},
+      "catalog": "development",
+      "expected": {
+        "issues": [
+          {
+            "path": "milestones.large",
+            "code": "UNREACHABLE_MILESTONE",
+            "severity": "warning"
+          }
+        ]
+      }
+    }
+  ],
+  "refused_first": [
+    {
+      "code": "NESTED_CASE",
+      "why": "a child case with a case step of its own is refused when its parent's package is put together, since its own child can't be given: a child opens no case (brief, D74). Kept in validation as a backstop (fail closed).",
+      "case": "cases/nested-case.json",
+      "plans": [],
+      "cases": {
+        "repair@3": {
+          "case": "cases/nested-case-repair.json",
+          "plans": []
+        }
+      }
+    },
+    {
+      "code": "UNKNOWN_CASE",
+      "why": "a case step's child not given is refused when the package is put together, before validation runs (brief, D74). Kept in validation as a backstop (fail closed).",
+      "case": "cases/unknown-case.json",
+      "plans": [],
+      "cases": {}
+    },
+    {
+      "code": "UNKNOWN_PLAN",
+      "why": "a plan step's plan not given is refused when the package is put together, before validation runs (brief, D50). Kept in validation as a backstop (fail closed).",
+      "case": "examples/packages/refund/case.json",
+      "plans": [],
+      "cases": {}
+    }
+  ]
+}

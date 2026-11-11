@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
@@ -27,6 +26,7 @@ from temporalio.converter import (
 )
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
+from worker_threads import worker_threads
 
 from ventoux.case.visibility import CaseView
 from ventoux.temporal.activities import plan_activities
@@ -52,6 +52,7 @@ from ventoux.testing import START
 with workflow.unsafe.imports_passed_through():
     from test_sensitive import FILE, OPENING, claim
 
+    from ventoux.case import engine as engine_module
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.runtime import CaseRefused, decide
     from ventoux.case.state import CaseState, Opened
@@ -61,6 +62,7 @@ with workflow.unsafe.imports_passed_through():
         FAKES,
         DevelopmentPlans,
         as_json,
+        development_audit,
         development_converter,
         run_case,
     )
@@ -301,7 +303,7 @@ def on_temporal[T](
         activities = {**FAKES, "orders.lookup@1": quoting}
         async with (
             time_skipping(converter or development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -309,6 +311,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 activities,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
@@ -387,8 +390,16 @@ def test_no_sensitive_value_in_plain_text_in_history(caplog: pytest.LogCaptureFi
         assert any(line.startswith("refused ana's answer accept") for line in ended.history)
         # The activity's code got the plain value, in the case and in its plan.
         assert LOOKED_UP == [NATIONAL_ID, NATIONAL_ID]
+        # It continued as new, carrying both IDs. The report can come from the run that has just
+        # asked to switch, before the next one exists (seen in CI, when the switch's task was
+        # retried): wait, a bounded number of times, for the next run, then hold it to it.
         runs = await every_run(client, "claim-7")
-        assert len(runs) > 1  # it continued as new, carrying both IDs
+        for _ in range(100):
+            if len(runs) > 1:
+                break
+            await asyncio.sleep(0.05)  # real time, for the server to start the next run
+            runs = await every_run(client, "claim-7")
+        assert len(runs) > 1
         return runs + await every_run(client, "claim-7/check_id#1")
 
     for history in on_temporal(scenario):
@@ -428,7 +439,7 @@ def test_a_client_without_the_codec_is_refused() -> None:
     )
 
     async def go() -> None:
-        async with time_skipping(exact_only) as environment, activity_threads() as threads:
+        async with time_skipping(exact_only) as environment, worker_threads() as threads:
             refused = (
                 "^this client doesn't encrypt sensitive values: connect it with data_converter"
             )
@@ -440,6 +451,7 @@ def test_a_client_without_the_codec_is_refused() -> None:
                     DevelopmentPlans,
                     FAKES,
                     activity_executor=threads,
+                    audit=development_audit(),
                 )
             with pytest.raises(ValueError, match=refused):
                 await start_case(environment.client, SensitiveCases, claim(), FILE, "c-1", QUEUE)
@@ -495,15 +507,18 @@ def test_replay_needs_the_key() -> None:
     replay(history, converter)
 
 
-def test_a_history_from_before_9b_replays() -> None:
+def test_a_history_from_before_9b_replays(monkeypatch: pytest.MonkeyPatch) -> None:
     # A case recorded with no codec at all, as before 9b: its payloads have no parts, so the
-    # codec passes them as they are, asking for no key (brief, D31).
+    # codec passes them as they are, asking for no key (brief, D31). It opens as code before 9b
+    # did, at engine 1, so it schedules no export (brief, D77). Python's `monkeypatch`: each run
+    # of the workflow reads `OPENING` from `ventoux.case.engine`, which the sandbox passes through.
+    monkeypatch.setattr(engine_module, "OPENING", (1,))
     before_9b = dataclasses.replace(
         DataConverter.default, payload_converter_class=ExactPayloadConverter
     )
 
     async def go() -> WorkflowHistory:
-        async with time_skipping(before_9b) as environment, activity_threads() as threads:
+        async with time_skipping(before_9b) as environment, worker_threads() as threads:
             client = environment.client
             async with Worker(
                 client,
@@ -524,6 +539,7 @@ def test_a_history_from_before_9b_replays() -> None:
                 return await case.fetch_history()
 
     history = asyncio.run(go())
+    monkeypatch.undo()  # replayed by today's code
     replay(history, development_converter())
 
 
@@ -638,7 +654,7 @@ def test_the_workers_log_keeps_only_an_exceptions_type(caplog: pytest.LogCapture
     async def go() -> None:
         async with (
             time_skipping(development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
         ):
             case_worker(
                 environment.client,
@@ -647,6 +663,7 @@ def test_the_workers_log_keeps_only_an_exceptions_type(caplog: pytest.LogCapture
                 DevelopmentPlans,
                 FAKES,
                 activity_executor=threads,
+                audit=development_audit(),
             )
 
     asyncio.run(go())

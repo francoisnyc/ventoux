@@ -10,12 +10,18 @@ from collections.abc import Callable, Sequence
 
 # The version this code opens new cases at. Version 1 is the engine as merged at `b734098`: every
 # path decided before then is version 1's, with no older branch kept (brief, D51). Version 2, from
-# layer 12c: the case refuses its opener's approval of forgetting it (brief, D52).
-ENGINE = 2
+# layer 12c: the case refuses its opener's approval of forgetting it (brief, D52). Version 3, from
+# layer 19a: the case makes audit records (brief, D76); new cases open at it once the export that
+# writes them is built (layer 19b).
+ENGINE = 3
 
 # Every version this code can still decide as, newest first. A version leaves this list only once
 # no open case decides as it, as Temporal's patches are deprecated, then removed.
-KNOWN = (2, 1)
+KNOWN = (3, 2, 1)
+
+# The versions a new case may open at, newest first: none newer than `ENGINE`. So a version whose
+# driver isn't built yet is decided in memory, but never opened on Temporal.
+OPENING = tuple(version for version in KNOWN if version <= ENGINE)
 
 
 class EngineUnknown(Exception):

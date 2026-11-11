@@ -721,3 +721,20 @@ def test_the_approval_checks_hold_for_every_approver() -> None:
     with pytest.raises(AnswerRefused, match="^lee can't see fraud_score, which pay reads"):
         paid(["support-lead"])
     assert paid(["support-lead", "fraud"]).reached("pay")
+
+
+def test_a_role_the_approval_doesnt_list_never_approves_for_it() -> None:
+    # The approval lists `adjuster` alone, which may approve no risk. Kim also holds
+    # `support-lead`, which may approve high risk and isn't listed: it doesn't count, so Kim's
+    # answer is refused on the listed role (brief, D23). Never validated: the runtime checks on
+    # nothing validation did (brief, D34).
+    refund = refund_with(approval=REFUND["steps"]["pay"]["approval"] | {"roles": ["adjuster"]})
+    review = ("review", "approve", "ana", {"approved_amount": 250})
+    refused = "adjuster may approve no risk, and payments.refund@2 is high risk"
+    with pytest.raises(AnswerRefused, match=f"^{refused}$"):
+        run_case(
+            refund,
+            file={"order_id": "ord-1", "amount": 250},
+            answers=[review, ("pay", "approve", "kim")],
+            people={**PEOPLE, "kim": ["adjuster", "support-lead"]},
+        )

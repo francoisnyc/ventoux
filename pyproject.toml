@@ -1,13 +1,16 @@
 [project]
 name = "ventoux"
-version = "0.0.0"
+version = "0.1.0"  # the package's own, written here once (brief, D82)
 description = "Case management and human-in-the-loop workflows for Temporal."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]  # carried in the wheel, as the licence asks (brief, D82)
 requires-python = ">=3.12"
 dependencies = [
     "cryptography>=50.0.2",
-    "pydantic>=2.13.5",
+    # Below the next major only: contracts no longer hash from pydantic's JSON Schema, which
+    # changes between minor versions, but from Ventoux's own (brief, D83).
+    "pydantic>=2.13.5,<3",
     "temporalio>=1.34.0",
 ]
 
@@ -50,10 +53,11 @@ ban-relative-imports = "all"
 [tool.mypy]
 strict = true
 # The builder files the guide and the packages are written in, type-checked as a team's would be.
-files = ["src", "tests", "examples/builder", "examples/cases"]
+files = ["src", "tests", "examples/builder", "examples/cases", "scripts"]
 plugins = ["pydantic.mypy"]
-# The quickstart's project, so its tests import `cases.refund` as the quickstart writes it.
-mypy_path = "examples/quickstart"
+# The quickstart's project, so its tests import `cases.refund` as the quickstart writes it; and
+# the tests' helpers, which `scripts/` reaches by path (scripts/clock_held.py).
+mypy_path = "examples/quickstart:tests"
 
 # `jsonschema` (tests only) ships no type stubs; its two calls are wrapped in typed helpers.
 [[tool.mypy.overrides]]

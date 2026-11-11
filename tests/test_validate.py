@@ -315,7 +315,7 @@ def test_a_condition_is_checked_inside_too() -> None:
         Issue(
             "states.check_order.on.done[0].when",
             "EXPRESSION_INVALID",
-            ">[1]: `>` compares numbers, and this is a string",
+            ">[1]: `>` compares two numbers or two dates, and this is a string",
         )
     ]
 
@@ -487,7 +487,16 @@ GUIDE_EXAMPLES: dict[str, Any] = {
     "UNKNOWN_SOURCE": lambda: with_source("amount", "untrusted:lml"),
     "INPUT_POLICY": lambda: guide_injection(),
     "UNTRUSTED_TRANSITION": lambda: guide_branching_on_a_note(),
+    "CHECKED_IN_A_PLAN": lambda: guide_choosing_a_branch(),
 }
+
+
+def guide_choosing_a_branch() -> dict[str, Any]:
+    """The guide's plan with `chosen`, an option of branches, which nothing in a plan checks
+    (brief, D67)."""
+    plan = guide_plan()
+    plan["fields"]["chosen"] = {"type": "option", "system": "branches"}
+    return plan
 
 
 def guide_branching_on_a_note() -> dict[str, Any]:

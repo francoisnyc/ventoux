@@ -8,7 +8,9 @@ is admitted again. Nobody approves values they didn't see (brief, D25).
 """
 
 from ventoux.case.admission import StepStopped, holds, latest_run, requirements_met
+from ventoux.case.audit import Decision
 from ventoux.case.definition import CallStep, CaseDefinition
+from ventoux.case.recording import facts
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, GivenApproval, OpenApproval
 from ventoux.case.writers import read_sources, untrusted_of
@@ -58,6 +60,10 @@ def ask(state: CaseState, name: str, step: CallStep, why: str | None = None) -> 
     people = f", from {count} people" if count > 1 else ""
     asked_why = f": {why}" if why is not None else ""
     state.history.append(f"asked {entry}: approval of {name} by {roles}{people}{asked_why}")
+    # Admission let the step run once a person approves it, on what its condition read.
+    rule = f"steps.{name}.approval.when" if step.approval.when else f"steps.{name}.approval"
+    read = facts(state, [step.approval.when])
+    state.deciding.append(Decision("admitted", step=name, entry=entry, rule=rule, read=read))
 
 
 def waiting_line(approval: OpenApproval, roles: str) -> str:
@@ -145,6 +151,10 @@ def withdraw(state: CaseState, approval: OpenApproval, reason: str) -> None:
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
     state.withdrawn[approval.entry] = reason
+    # Its holder is kept for the step's next entry, which keeps them if they may answer it
+    # (brief, D69).
+    if (holder := state.holders.pop(approval.entry, None)) is not None:
+        state.kept[approval.step] = holder
     state.history.append(f"withdrew {approval.entry}: {reason}{with_given(approval)}")
 
 

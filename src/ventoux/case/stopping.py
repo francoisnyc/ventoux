@@ -5,13 +5,22 @@ a running activity finishes, since a side effect can't be cut off halfway (brief
 run is never stopped (brief, D17) (brief, D26). See docs/layers/11-rules.md (11c).
 """
 
-from ventoux.case.admission import latest_run, requirements_met
+from ventoux.case.admission import latest_of_item, latest_run, requirements_met
 from ventoux.case.approvals import with_given
 from ventoux.case.closing import close_held
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
+from ventoux.case.definition import CallStep, CaseDefinition, CaseStep, PlanStep, WorkflowStep
 from ventoux.case.freshness import stale_facts
+from ventoux.case.recording import decided_stop
 from ventoux.case.sequence import requirements
-from ventoux.case.state import CLOSING, CancelWorkflow, CaseState, Command, StepRun, StopPlan
+from ventoux.case.state import (
+    CLOSING,
+    CancelWorkflow,
+    CaseState,
+    CloseCase,
+    Command,
+    StepRun,
+    StopPlan,
+)
 from ventoux.core.catalog import Catalog
 
 
@@ -29,6 +38,10 @@ def stop_step(
     the history writes when there is nothing to stop; `at` is the time of the event being
     decided, against which facts' ages are measured. The step may start again later
     (brief, D40)."""
+    if name in state.items:
+        # A repeated step: every item's run going on is stopped (brief, D40) (brief, D73).
+        stop_items(case, catalog, state, name, by, said, commands)
+        return
     latest = latest_run(state, name)
     if latest is not None and latest.status in ("failed", "retrying"):
         # Nothing is skipped automatically: an operator retries it, or closes the case
@@ -47,8 +60,41 @@ def stop_step(
         latest.status = "cancelled"
         del state.waiting[latest.entry]
         state.history.append(f"cancelled {latest.entry}: stopped by {by}")
+        decided_stop(state, name, latest.entry, by, None, f"stopped by {by}")
         return
     if not stop_coming_run(case, state, name, by, at):
+        state.history.append(f"{said}: {name} not stopped: no run of {name} is going on")
+
+
+def stop_items(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    by: str,
+    said: str,
+    commands: list[Command],
+) -> None:
+    """Stop each item's run of the repeated step `name` that is going on: an open task cancelled,
+    a running activity asked to stop; a failed run never (brief, D17) (brief, D40)."""
+    going_on = False
+    for number in state.items[name].values():
+        latest = latest_of_item(state, name, number)
+        if latest is None or latest.status not in ("open", "running", "failed", "retrying"):
+            continue
+        going_on = True
+        if latest.status in ("failed", "retrying"):
+            state.history.append(
+                f"{said}: {latest.entry} not stopped: a failed run is never stopped"
+            )
+        elif latest.status == "running":
+            stop_running(case, catalog, state, latest, by, said, commands)
+        else:
+            latest.status = "cancelled"
+            del state.waiting[latest.entry]
+            state.history.append(f"cancelled {latest.entry}: stopped by {by}")
+            decided_stop(state, name, latest.entry, by, None, f"stopped by {by}")
+    if not going_on:
         state.history.append(f"{said}: {name} not stopped: no run of {name} is going on")
 
 
@@ -64,6 +110,7 @@ def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str, 
         del state.waiting[approval.entry]
         state.withdrawn[approval.entry] = why  # an answer to it is refused, saying why
         state.history.append(f"cancelled {approval.entry}: {why}{with_given(approval)}")
+        decided_stop(state, name, approval.entry, by, None, why)
     given = state.given.pop(name, None)  # approved, and waiting for its fact: it lapses
     proposed = name in state.waiting_to_start
     if proposed:
@@ -76,6 +123,7 @@ def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str, 
     state.proposers.pop(name, None)
     state.proposed_by_rules.pop(name, None)
     state.history.append(f"{entry} cancelled: {why}")
+    decided_stop(state, name, entry, by, None, why)
     return True
 
 
@@ -95,6 +143,7 @@ def stop_running(
         return
     run.stop_requested = by
     state.history.append(f"{run.entry}: stop requested by {by}")
+    decided_stop(state, run.step, run.entry, by, None, f"stop requested by {by}")
     ask_to_stop(case, catalog, run, f"stopped by {by}", commands)
 
 
@@ -105,7 +154,9 @@ def stop_children(
     asked already (brief, D10) (brief, D28) (brief, D40)."""
     for run in state.runs:
         if run.status == "running" and not run.stop_requested:
-            ask_to_stop(case, catalog, run, CLOSING, commands)
+            # A child case is told why its parent closes, as a person's close says it.
+            closing = isinstance(case.steps[run.step], CaseStep)
+            ask_to_stop(case, catalog, run, state.closed_because if closing else CLOSING, commands)
 
 
 def ask_to_stop(
@@ -122,6 +173,10 @@ def ask_to_stop(
         commands.append(StopPlan(run.entry, reason))
     elif isinstance(step, WorkflowStep) and catalog.workflow(step.workflow).cancellable:
         commands.append(CancelWorkflow(run.entry, reason))
+    elif isinstance(step, CaseStep):
+        # A child case closes, saying why: its tasks are cancelled, its activities finish, and
+        # its parent waits for it to end, never for a person (brief, D48) (brief, D74).
+        commands.append(CloseCase(run.entry, reason))
 
 
 def waits_for_its_fact(case: CaseDefinition, state: CaseState, name: str, at: int) -> bool:

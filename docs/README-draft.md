@@ -367,8 +367,8 @@ production UI.
 A ticked item is built. An open one says what is built of it so far, if anything.
 
 - [ ] The engine in Python (Temporal Python SDK, Pydantic), with the definition format published as
-      JSON Schema and a conformance suite any implementation must pass. Built: the engine and the
-      published schema (`ventoux schema`). Left: the conformance suite.
+      JSON Schema and a conformance suite any implementation must pass. Built: the engine, the
+      published schema (`ventoux schema`) and the conformance suite (`ventoux conformance`).
 - [x] A typed Python builder that produces plans and Cases, so definitions are written as code and
       checked as data
 - [x] Existing Temporal workflows as case steps, each with a declared contract (inputs, outputs
@@ -398,7 +398,8 @@ A ticked item is built. An open one says what is built of it so far, if anything
 
 Beyond v1.0, tracked as issues: stages, advanced joins (such as an inclusive join, waiting for
 every branch that started), timers anchored to a date on the case, absolute and recurring timers,
-suspend and reactivate, declared compensation (sagas), inbound event adapters, signed approvals (the
+suspend and reactivate, the Ventoux API and a reference inbox (in v1.0 the trusted caller is your
+own service), declared compensation (sagas), inbound event adapters, signed approvals (the
 production default for high-risk steps), plans drafted by a model for a single case at runtime,
 tamper-evident history, capture of model inputs and outputs, revising drafts in conversation, and
 tool search during authoring.

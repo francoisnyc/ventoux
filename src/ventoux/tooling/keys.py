@@ -31,10 +31,21 @@ class KeyRefused(Exception):
     """A key the provider won't make or use: why."""
 
 
+class KeyUnavailable(Exception):
+    """A key the provider can't give now: the key service unreachable, timing out, refusing
+    Ventoux's token, or answering something it can't read. Never final: what meets it is retried
+    until the service answers, and it is never read as a key destroyed or never made (brief, D17)
+    (brief, D78)."""
+
+
 class KeyProvider(Protocol):
     """Makes a case's key once, seals and opens with it, and destroys it when the case is
     forgotten (brief, D15). `part` names where the data sits in its payload (`sensitive/0`), so
     sealed data moved to another place fails to open."""
+
+    # Whether it is for development and tests only: a case worker's manifest says so, and a
+    # production environment refuses one that is (brief, D81).
+    development: bool
 
     def create(self, case: str) -> None: ...
 
@@ -49,6 +60,8 @@ class KeyProvider(Protocol):
 
 class FileKeys:
     """Development only: a 256-bit key per case, kept in a JSON file, sealing with AES-256-GCM."""
+
+    development = True  # keys in a file: never a production environment's (brief, D81)
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)

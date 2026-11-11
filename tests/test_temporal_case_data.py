@@ -11,11 +11,11 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
+from worker_threads import worker_threads
 
 from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, report, shown, start_case, view
 from ventoux.temporal.worker import case_worker
@@ -23,6 +23,7 @@ from ventoux.testing import (
     FAKES,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
     load_definition,
     run_case,
@@ -65,7 +66,7 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -73,6 +74,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 FAKES,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=20)

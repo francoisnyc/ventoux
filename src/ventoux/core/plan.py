@@ -28,11 +28,14 @@ from pydantic_core import CoreSchema, core_schema
 
 from ventoux.core.contract import REFERENCE
 from ventoux.core.expressions import (
+    AttachmentType,
     BooleanType,
+    DateType,
     Expression,
     ExpressionInvalid,
     ListType,
     NumberType,
+    OptionType,
     OutcomeType,
     ReferenceType,
     StringType,
@@ -187,7 +190,15 @@ Duration = Annotated[
 PlanExpression = Annotated[Expression, BeforeValidator(expression)]
 Source = Annotated[str, AfterValidator(declared_source)]
 DeclaredType = Annotated[
-    NumberType | StringType | BooleanType | OutcomeType | ReferenceType | ListType,
+    NumberType
+    | StringType
+    | BooleanType
+    | OutcomeType
+    | ReferenceType
+    | OptionType
+    | AttachmentType
+    | DateType
+    | ListType,
     Field(discriminator="type"),
 ]
 
@@ -368,20 +379,33 @@ def set_by(plan: Plan) -> dict[str, str]:
 class PlanInvalid(Exception):
     """A plan that can't be accepted: one line per problem, each starting with its path."""
 
+    def __init__(self, problems: list[tuple[str, str]]) -> None:
+        super().__init__("\n".join(line(path, said) for path, said in problems))
+        # Where each problem is, as its line says it: what the conformance suite compares, since
+        # reading gives no code and wording is never compared (brief, D80). "" is the root.
+        self.paths = tuple(path for path, _ in problems)
+
+
+def line(path: str, said: str) -> str:
+    """A problem as the plan's author reads it: `states.pay.activity: required`, or what is wrong
+    alone at the root."""
+    return f"{path}: {said}" if path else said
+
 
 def parse_plan(data: object) -> Plan:
     """The plan stored as `data`, or `PlanInvalid` listing every problem with its path."""
     try:
         return Plan.model_validate(data)
     except ValidationError as error:
-        raise PlanInvalid("\n".join(problem(e) for e in error.errors())) from None
+        raise PlanInvalid([problem(e) for e in error.errors()]) from None
 
 
 FIELD_TYPES = "number, string, boolean, outcome, reference or list"
 
 
-def problem(error: Any) -> str:
-    """One of Pydantic's errors as a line for the plan's author: `states.pay.activity: …`."""
+def problem(error: Any) -> tuple[str, str]:
+    """One of Pydantic's errors for the plan's author: its path and what is wrong,
+    `("states.pay.activity", "required")`."""
     # Pydantic's own markers (the tag of the kind it picked, `[key]` for a key) aren't in the plan.
     loc = [str(part) for part in error["loc"]]
     # A source is written on its field, so its problem is shown there: `fields.amount.source`.
@@ -396,4 +420,4 @@ def problem(error: Any) -> str:
         message = f"a field's type is one of {FIELD_TYPES}, and this one is {error['ctx']['tag']}"
     else:
         message = str(error["msg"]).removeprefix("Value error, ")
-    return f"{path}: {message}" if path else message
+    return path, message

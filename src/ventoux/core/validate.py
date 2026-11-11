@@ -11,6 +11,7 @@ from typing import Literal
 
 from ventoux.core.approval import Unapprovable, approved, risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.checks import checked
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import (
     BooleanType,
@@ -38,6 +39,75 @@ from ventoux.core.roles import may_approve
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
 
+# Every code validation can give, one per rule. Listed, so the conformance suite can say that each
+# has an entry expecting it (brief, D80); a new rule's code is added here, with an entry.
+ISSUE_CODES = frozenset(
+    {
+        "APPROVAL_ELSEWHERE",
+        "ATTACHMENT_NOT_GIVEN_BY_A_PERSON",
+        "APPROVAL_REQUIRED",
+        "APPROVAL_REUSED",
+        "APPROVAL_ROLE",
+        "APPROVAL_TARGET",
+        "APPROVER_CANT_SEE",
+        "ASSIGNS_EXCLUDED",
+        "ASSIGNS_MAY_BE_EXCLUDED",
+        "ASSIGNS_SEVERAL",
+        "CHECKED_IN_A_LIST",
+        "CHECKED_IN_A_PLAN",
+        "CLOSES_AT_OPENING",
+        "CLOSE_UNREACHABLE",
+        "DEADLOCK",
+        "ENGINE_INPUT",
+        "EXPRESSION_INVALID",
+        "INPUT_POLICY",
+        "INPUT_TYPE",
+        "KEPT_FROM_STARTING",
+        "LOOPS_UNTIL_CLOSED",
+        "MAY_ASSIGN_NOBODY",
+        "MAY_BE_UNSET",
+        "MISSING_EVENT",
+        "MISSING_INPUT",
+        "NESTED_CASE",
+        "NEVER_CLOSES",
+        "NEVER_FIRES",
+        "NEVER_REFRESHED",
+        "NEVER_RUNS",
+        "NEVER_STARTS",
+        "NOT_A_STORE",
+        "NO_PATH_TO_FINAL",
+        "NO_SOURCES",
+        "OPENER_DECIDES",
+        "OPTION_NOT_GIVEN_BY_A_PERSON",
+        "OUTCOME_UNREAD",
+        "REFERENCE",
+        "REQUIRED_MAY_STRAND",
+        "RESERVED_OUTCOME",
+        "SENSITIVE_TO_CHILD",
+        "SENSITIVE_TO_WORKFLOW",
+        "SET_AFTER",
+        "TIMER_ON_FIRST_START",
+        "UNCHECKED_OPTION",
+        "UNKNOWN_ACTIVITY",
+        "UNKNOWN_CASE",
+        "UNKNOWN_CONTRACT",
+        "UNKNOWN_EVENT",
+        "UNKNOWN_FIELD",
+        "UNKNOWN_INPUT",
+        "UNKNOWN_PLAN",
+        "UNKNOWN_ROLE",
+        "UNKNOWN_SOURCE",
+        "UNKNOWN_SYSTEM",
+        "UNKNOWN_TARGET",
+        "UNREACHABLE_MILESTONE",
+        "UNREACHABLE_STATE",
+        "UNTRUSTED_TRANSITION",
+        "UNTRUSTED_TRIGGER",
+        "WRITER_DECIDES",
+        "WRONG_KIND",
+    }
+)
+
 
 @dataclass(frozen=True)
 class Issue:
@@ -52,13 +122,41 @@ class Issue:
     # (brief, D34).
     severity: Literal["error", "warning"] = "error"
 
+    def __post_init__(self) -> None:
+        # Fail closed: a code nobody listed is refused when the issue is made, so a new rule can't
+        # give one the conformance suite doesn't know (brief, D80).
+        if self.code not in ISSUE_CODES:
+            raise ValueError(
+                f"{self.code} is not a listed issue code: add it to ISSUE_CODES in "
+                "ventoux/core/validate.py, with a conformance entry that expects it"
+            )
+
+
+def checked_field_issues(plan: Plan) -> list[Issue]:
+    """A plan's field that is an option or an attachment: a wait's answer sets a plan's fields,
+    and nothing in a plan asks a system, so the type would claim a vouch nobody gave. A plan
+    takes a reference, which a case's checked field fits (brief, D67) (brief, D68)."""
+    issues: list[Issue] = []
+    for name, declared in plan.fields.items():
+        if (found := checked(declared)) is not None:
+            shape, system = found
+            issues.append(
+                Issue(
+                    f"fields.{name}",
+                    "CHECKED_IN_A_PLAN",
+                    f"{name} is {shape.of} {system}, and nothing in a plan checks one: make it a "
+                    f"reference to {system}, which a case's {shape.type} fits",
+                )
+            )
+    return issues
+
 
 def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
     """Every problem in `plan`, a parsed plan, read against the activities in `catalog`."""
     # Fail closed: anything but a parsed plan is refused, never read as a plan with no problems.
     if not isinstance(plan, Plan):
         raise TypeError(f"validate takes a parsed plan (see parse_plan), not {type(plan).__name__}")
-    issues: list[Issue] = source_issues(plan, catalog)
+    issues: list[Issue] = source_issues(plan, catalog) + checked_field_issues(plan)
     if plan.initial not in plan.states:
         issues.append(Issue("initial", "UNKNOWN_TARGET", not_a_state(plan.initial, plan)))
     for name, state in plan.states.items():

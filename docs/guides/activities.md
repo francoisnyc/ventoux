@@ -1,6 +1,6 @@
 # Activities: adding a capability to the catalog
 
-> **For the platform team.** This guide describes layers 1, 4, 8d and 9a as if they already worked;
+> **For the platform team.** This guide describes layers 1, 4, 8d, 9a, 16a and 16b as if they already worked;
 > the code that makes it true is built test-first in those layers. Case developers rarely need it: they meet
 > contracts only through the activities they call and the errors `ventoux check` gives them.
 
@@ -83,10 +83,18 @@ What each part is for:
 - **`name` and `version`.** Together they are the reference definitions use, `name@version`. The
   version is a whole number: there are no minor versions, because every change is a new contract.
 - **`input` and `output`.** Pydantic models. Their JSON Schema is what the catalog publishes and what
-  the contract's hash covers. An input field may carry an **input policy**: see below. A case
+  the contract's hash covers, written by Ventoux itself, never by pydantic, so upgrading pydantic
+  never changes a hash. An input field may carry an **input policy**: see below. A case
   gives an input exactly what it holds, never converted: so an input is a `Decimal`, a `str`, a
   `bool` or a `Literal` of texts (`Literal["low", "high"]`), each possibly optional, and an output a
-  `Decimal`, a `str` or a `bool`. The catalog refuses any other type, such as a `float`.
+  `Decimal`, a `str`, a `bool` or a `date`. The catalog refuses any other type, such as a `float`.
+  A field is its type, its marks (a policy, a reference, a source) and, if it is optional, `= None`:
+  a description, a title, an alias, examples, a constraint such as `Field(gt=0)`, any other
+  default, any other setting on a field (`frozen`, `exclude`, …), or a `model_config` on the
+  model is refused, since Ventoux couldn't write it exactly. So is a `RootModel` (its value is its
+  root alone, never an object holding it), and a model, or a base of it, that writes its own schema
+  (`__get_pydantic_json_schema__`, `__get_pydantic_core_schema__`): a contract's model is a
+  `BaseModel` with named fields.
 - **`risk`** (`low`, `medium`, `high`): how bad a mistake would be. High-risk steps need an approval
   on every path.
 - **`effect`** (`read`, `compute`, `write`, `notify`): what the activity does to the world. `read`
@@ -380,9 +388,10 @@ writes them.
 | `source("untrusted:fax")`, a label nobody registered | `kyc.check@1`: output `analyst_notes` is `untrusted:fax`, and `fax` is not a registered label. Register it first, or use one of: customer, document, email, llm, web. |
 | `source("system:kcy")`, a system nobody registered | `kyc.check@1`: output `status` is `system:kcy`, and `kcy` is not a registered system. Register it first, or use one of: kyc. |
 | An output field named `outcome` | `kyc.check@1`: an output can't be named `outcome`: `<step>.outcome` is the step's outcome. Rename the field. |
-| An output field `score: float` | `kyc.check@1`: output `score` is `float`, which the case file can't hold exactly. An output is a decimal (Decimal), a text (str) or true or false (bool): numbers are exact decimals, never binary floats (brief, D20). |
+| An output field `score: float` | `kyc.check@1`: output `score` is `float`, which the case file can't hold exactly. An output is a decimal (Decimal), a text (str), true or false (bool) or a day (date): numbers are exact decimals, never binary floats (brief, D20). |
 | An input field `amount: float` | `payments.refund@2`: input `amount` is `float`, which no value of a case is. An input is a decimal (Decimal), a text (str), true or false (bool) or one of some texts (a Literal of str), each possibly optional: numbers are exact decimals, never binary floats (brief, D20). |
-| `reference("sail")`, a system nobody registered | `letters.draft@3`: input `customer` is a reference to `sail`, which is not a registered system. Register it first, or use one of: crm, documents, kyc, orders, policies, portal. |
+| An input field `amount: Annotated[Decimal, Field(gt=0)]` | `payments.refund@2`: input amount (RefundAboveZero) has a constraint or mark Ventoux doesn't know: a contract's field is its type, its marks (a policy, a reference, a source) and, if it is optional, `= None`. Remove it (brief, D83). |
+| `reference("sail")`, a system nobody registered | `letters.draft@3`: input `customer` is a reference to `sail`, which is not a registered system. Register it first, or use one of: branches, crm, documents, kyc, orders, policies, portal. |
 | `reference("crm")` on a field that isn't a `str` | `letters.draft@3`: input `customer` is a reference, so it is a text (str), and this one is `Decimal`. |
 | `catalog.register_system("CRM")` | `'CRM'` is not a system name: a system is lowercase, such as `crm` or `claims-archive`. |
 | `resolvers.register("sail", …)`, a system nobody registered | `sail` is not a registered system: register it in the catalog first. |
@@ -458,3 +467,155 @@ contracts were written before output sources existed. `orders.lookup@1` stays re
 
 `payments.refund@1` and `letters.draft@1`, without policies, were retired when `@2` added them:
 a version without the policy, left in the catalog, would let a definition step around it.
+
+## Dates in an output: the business's day, never the machine's
+
+An output may be a date (`incident_date: date`, layer 16a). A case reads it as a day on the
+calendar, with no time zone (brief, D66). Ventoux never turns a moment into a day, so when your
+system only has a moment, **your activity chooses the day, and names the time zone it means**:
+
+```python
+from zoneinfo import ZoneInfo
+
+# The business's day, the same on every worker.
+incident_date = reported_at.astimezone(ZoneInfo("America/New_York")).date()
+```
+
+Never the machine's zone. Workers may run in different datacenters, and the same moment is a
+different day in each of them:
+
+```python
+incident_date = reported_at.astimezone().date()  # wrong: the worker's local zone
+incident_date = date.today()                     # wrong: the worker's local day
+```
+
+A report at 23:30 in New York on 31 October:
+
+| Worker | Its local zone | The day it would return |
+|---|---|---|
+| in Virginia | America/New_York | 31 October |
+| in Frankfurt | Europe/Berlin | 1 November |
+
+The case's history records whichever day the activity returned, so a replay stays right. But two
+identical cases would get different days, depending on which worker ran the activity. Ventoux
+can't see that from outside, so the rule is yours: say the zone in the code, and in the contract's
+description ("the day of the report, in New York time"). An output annotated `datetime`, a moment,
+is refused when the contract is registered.
+
+## An option's check: a system says which values it holds
+
+A case's `option` field (case-data guide, "Options") holds a value a system's list must hold. You
+say how to ask that system, once, with a read-only activity whose contract has this shape: one
+input, the value, and one output, whether the system holds it.
+
+```python
+from typing import Annotated
+
+from pydantic import BaseModel
+
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.output_sources import source
+from ventoux.core.references import reference
+
+
+class BranchAsked(BaseModel):
+    option: Annotated[str, reference("branches")]  # the value a person gave
+
+
+class BranchHeld(BaseModel):
+    held: Annotated[bool, source("system:branches")]  # whether the branches system holds it
+
+
+holds = ActivityContract(
+    name="branches.holds",
+    version=1,
+    risk="low",
+    effect="read",
+    input=BranchAsked,
+    output=BranchHeld,
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,  # a read: asking twice changes nothing
+    outcomes=[],
+    display=Display(
+        title="Check a branch",
+        description="Whether the branches system holds a branch, open, now.",
+    ),
+)
+catalog.register(holds)
+catalog.register_option_check("branches", "branches.holds@1")
+```
+
+The catalog refuses an option check that isn't `effect: read`, that takes or gives anything but
+that one value and that one truth value, or that names a system nobody registered. A case
+definition never names the check: it names the system, and the catalog says how to ask it.
+
+Your activity answers for the system as it is now. It is asked once, when the person answers, and
+its answer is kept in the case's history, so a replay reads that answer and never asks again.
+
+## A document store: where attachments are kept
+
+A case's `attachment` field (case-data guide, "Attachments") holds the ID a document store gave a
+file, never the file. You register the store as a system, and say two things about it: how a case
+asks whether the store issued an ID, and how a person opens a file.
+
+**Whether it issued an ID** is a read-only activity with the shape of an option's check (above):
+one input, the ID, and one output, whether the store issued it.
+
+```python
+from typing import Annotated
+
+from pydantic import BaseModel
+
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.output_sources import source
+from ventoux.core.references import reference
+
+
+class DocumentAsked(BaseModel):
+    attachment: Annotated[str, reference("documents")]  # the ID a person gave
+
+
+class DocumentIssued(BaseModel):
+    issued: Annotated[bool, source("system:documents")]  # whether the store issued it
+
+
+issued = ActivityContract(
+    name="documents.issued",
+    version=1,
+    risk="low",
+    effect="read",
+    input=DocumentAsked,
+    output=DocumentIssued,
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,  # a read: asking twice changes nothing
+    outcomes=[],
+    display=Display(
+        title="Check a document",
+        description="Whether the documents store issued an ID, for a file it holds.",
+    ),
+)
+catalog.register(issued)
+catalog.register_document_store("documents", "documents.issued@1")
+```
+
+The catalog refuses a store's check that isn't `effect: read`, that takes or gives anything but
+that one ID and that one truth value, or that names a system nobody registered, and a second
+check for one store. A case definition names the store, never the check.
+
+**Opening a file** is a resolver (see "Systems and resolvers"): it asks your store for the file
+on behalf of the person looking, so your store's own permissions decide, and nothing it returns
+enters the case or its history.
+
+```python
+def documents_file(reference: str, viewer: Viewer) -> dict[str, object]:
+    # Your store's client, asked as the person looking: a link to the file, if they may open it.
+    return {"link": store.signed_link(reference, on_behalf_of=viewer.person)}
+
+
+resolvers.register("documents", documents_file)
+```
+
+Your store answers for itself: it keeps the file, its permissions and its erasure. Ventoux keeps
+the ID, the person who attached it, and the store's word that it issued it.

@@ -183,6 +183,9 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 - Activities stay polyglot: Python or Java workers, connected through Temporal task queues.
 - Browser front ends (an inbox, business views) stay separate, in TypeScript, and use the JSON Schema
   and an API.
+- **Amended 2026-11-08, by D80** (the text above stands; this narrows it for v1.0): the
+  conformance suite holds definitions with their expected validation results; run histories come
+  after v1.0.
 
 ### D5. Versions and releases
 
@@ -381,6 +384,9 @@ be erased on request), has size limits, and a second copy of business records go
   comes later.
 - The validator warns about cases that can never close (a step that can always be restarted, a
   timer that re-arms itself) and about `closes_when` milestones that can't be reached.
+- **Amended 2026-11-04, by D72** (the text above stands; this adds to it): a required step is
+  owed until its latest run is done, so nothing is left to do only once every required step is
+  done; `closes_when` waits for an owed step, and a person's close never does.
 
 ### D11. Approval defaults
 
@@ -483,6 +489,9 @@ be erased on request), has size limits, and a second copy of business records go
   same case key (or omits them), so destroying the key makes the warehouse copy unreadable too.
   Reports that need such a value decrypt it through the key provider while the key exists.
 - The audit trail keeps every decision, who made it, the rule and the release; only the values go.
+- **Amended 2026-11-08, by D77** (the text above stands; this chooses): the export carries each
+  sensitive value as ciphertext under the case's key, never omits it; a failure's message is left
+  out, its type kept (D76).
 
 ### D16. References are typed; resolvers show what they point to
 
@@ -533,6 +542,10 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-23, by D52** (the text above stands; this adds to it): the skip is built as a
   change request an operator proposes and another operator approves; the run ends `skipped`,
   neither done nor failed.
+- **Amended 2026-11-08, by D77** (the text above stands; this adds to it): an audit export that
+  can't be written is retried a bounded number of times, then the case needs attention, and an
+  operator retries the export; a case whose unwritten records reach their bound holds, deciding
+  nothing new until they are written. Nothing is dropped, nothing decided unrecorded.
 
 ### D18. Facts know when they were obtained; steps can require fresh ones
 
@@ -563,6 +576,10 @@ be erased on request), has size limits, and a second copy of business records go
   elsewhere). The signature binds the approver, the case, the step, the digest of the inputs (D11)
   and an expiry, so it can't be forged by someone with signal access, or replayed on another case,
   step or amount. Verifying it is a pure calculation, safe inside the workflow.
+- **Amended 2026-11-08, by D79** (the text above stands; this makes it exact): in v1.0 the trusted
+  caller is the integrator's own service, not a Ventoux API; and "only the API's service identity
+  can write" means: people read only, the caller writes on behalf of people, workers write only
+  their own tasks and manifests, named operators do the rest.
 
 ### D20. Expressions are structured JSON with a fixed list of operators (supersedes D3)
 
@@ -691,6 +708,8 @@ be erased on request), has size limits, and a second copy of business records go
 - **It is the part of pending work (D10) that waits on people.** Running steps, set timers and
   failed steps are pending work too, and keep the case open; they are reported as they arrive
   (failures and closing in layer 8, timers in layer 11), never folded into `waiting_for`.
+- **Amended 2026-11-04, by D72** (the text above stands; this adds to it): `waiting_for` also
+  lists each required step owed and not running, after the open entries, with who can start it.
 
 ### D25. An open approval follows the case file
 
@@ -810,6 +829,8 @@ be erased on request), has size limits, and a second copy of business records go
   waits for it.
 - **Amended 2026-10-22, by D51** (the text above stands; this adds to it): what crosses includes
   the case's release (its name, number, digest and plans) and its engine version.
+- **Amended 2026-11-07, by D76** (the text above stands; this adds to it): what crosses includes
+  the case's audit records not yet exported, in order, and the number its next record takes.
 
 ### D28. A plan step runs as a child workflow of its case
 
@@ -1013,6 +1034,29 @@ be erased on request), has size limits, and a second copy of business records go
   case opened before keeps this decision's rule; the request refuses the opener's approval
   whatever the case's version, asking the case's start who opened it when someone approves, and
   refuses anyone if that can't be told.
+- **Amended 2026-11-08, by D77** (the text above stands; this adds to it): close, export, then
+  destroy. The case writes every record, sealed, before it ends, so all are sealed before the key
+  goes; with the store down the case stays closing and the request waits, saying why. The request
+  writes its own stream to the export, before the key is destroyed.
+- **Amended 2026-11-11, by the forget fix** (`docs/layers/fix-forget-on-the-cases-word.md`; the
+  text above stands, this makes it exact): closed is the case's own word, never Temporal's. A
+  case that has closed runs on until its records are written (D77), so the request no longer
+  takes "its workflow runs" for "it is open". Before it destroys the key it reads the report the
+  case returned as it ended: what its family's definitions say of forgetting then, and whether
+  the case took the request. A case that took it is forgotten; one that didn't was closed
+  already, and is forgotten unless its definition, as it ended, keeps its records (`while_open`
+  or `never`), in which case the request ends refused and the key stays, the last record of
+  its stream (D77) saying why, as an act of its own, `key kept`. So a migration to a
+  release that keeps its records, made after the proposal, is honoured too. A case that returned
+  no report (terminated, failed) is forgotten as before.
+- **Amended 2026-11-11, by the same fix** (this adds to "twice, or a case that never existed, is
+  refused before anyone approves"): a start that doesn't read as a case's is said before anyone
+  answers, never waited on. A case refused as it opened, for a definition that doesn't read,
+  never opened and keeps no records: it can be forgotten, so the sealed values in its start go
+  with its key. A case that opened and whose definition the worker's code can no longer read is
+  refused, saying to deploy code that reads it (fail closed). A plan's run on its own, which has
+  a key as a case has (D31), is refused: forgetting one is not decided yet, and is a decision
+  of its own.
 
 ### D33. Fresh facts: time on events, refreshing a read, and a given approval's lapse
 
@@ -2033,6 +2077,9 @@ D27, D28 and D50, whose text is kept.*
 - **Amended 2026-10-25, by D60** (the text above stands; this adds to it): the parser refuses four
   lax readings it accepted before, with no new engine version; D60's dated line says which, why,
   and what a record, a case or a run holding one does.
+- **Amended 2026-11-07, by D76** (the text above stands; this adds to it): version 3 makes audit
+  records. A case opened at 3 records the marker `ventoux-engine-3` and exports; a case opened
+  before decides and replays as it did, and exports nothing, saying so.
 
 ### D52. Change requests: proposed, approved by someone else, checked again, applied
 
@@ -2085,6 +2132,8 @@ D17, D25, D26 and D32, whose text is kept.*
 - **Amended 2026-10-23, by D53** (the text above stands; this adds to it): a migration is a
   third kind, `migrate`, proposed and approved by roles registered to migrate; a pending edit
   follows its field's new name across one.
+- **Amended 2026-11-04, by D72** (the text above stands; this narrows it): a skip of a required
+  step's failed run is refused; it is retried, or the case is closed with a reason.
 
 ### D53. Migrations: one more change request, by names, refused never terminated, previewed
 
@@ -2189,6 +2238,9 @@ D29, D51 and D53, whose text is kept.*
   attention.
 - **No new engine version:** `decide` decides nothing differently; the registry's calls are in the
   driver, on new paths, behind the patch `ventoux-registry`.
+- **Amended 2026-11-09, by D81** (the text above stands; this adds to it): a case worker's
+  manifest says its key provider and audit store, by name and whether each is for development;
+  in a production environment one naming a development provider, or none, is refused.
 
 ### D55. The semantic diff: changes by effect, a verdict only where proven, every doubt read as looser
 
@@ -2705,6 +2757,815 @@ text is kept.*
   can't prevent. Set aside: making `ventoux.testing` import the builder lazily, which would move
   the development catalog's cases out of the module that serves them and fix only that module.
 
+### D66. A date is a day the case was given; no expression reads today
+
+*Decided 2026-11-01, in layer 16a (`docs/layers/16-field-types.md`, choices 1 to 10). Adds to D9,
+D20, D55, D56, D58 and D60, whose text is kept.*
+
+- **A `date` is a day on the calendar, not a moment:** no time and no time zone, so comparing two
+  dates gives the same answer everywhere and on every replay. Written as text, exactly
+  `YYYY-MM-DD`, a real day, years 0001 to 9999 (`"2026-10-31"`); `"2026-02-30"`, `"2026-1-5"`,
+  `"20261031"`, a week date and a moment (`"2026-10-31T23:30:00Z"`) are refused. In an expression
+  a date literal is `{"date": "2026-10-31"}`, rendered `date("2026-10-31")`; a bare text shaped
+  like a date stays a text.
+- **What it adds to D20's operators:** the `date` literal; `<`, `<=`, `>` and `>=` between two
+  dates as well as two numbers; `string` of a date, giving `YYYY-MM-DD`. `==`, `!=`, `if`, `in`
+  and `exists` take dates as any type. No date arithmetic: a day count or a date plus days would
+  be an operator of its own, decided with a use.
+- **No expression reads today.** No operator reads the calendar, as none reads the clock: `today`
+  has no shape, so it can't be written, by a person or by a model under the JSON Schema. "Within
+  30 days" compares two dates the case holds, or is a timer (D44).
+- **A date comes from a source, never from the engine:** the opener, a person's answer, an
+  activity's output (an output annotated `datetime.date`), an event's payload, or a field declared
+  untrusted, each with that source's provenance. No field is filled with today's date, the
+  opening day included.
+- **Ventoux never turns a moment into a day.** Which day a moment falls on depends on a time zone,
+  so whoever gives the date chooses the day it means: a person, or an activity whose contract says
+  it returns a date.
+- **The engine's time is zone-free, so workers may run anywhere.** The engine keeps time only as
+  seconds since the epoch, from the history (`workflow.now()`), never the machine's local time or
+  zone, and a date compares the same on every machine; a test runs the date tests under two
+  process time zones and gets the same results. An activity that turns a moment into a day names
+  the time zone it means and never reads the machine's: two workers in different zones would
+  otherwise give the same moment different days (activities guide, "Dates in an output").
+- **Inside the engine a date is a `datetime.date`, never a `datetime`** (a subclass in Python, so
+  refused explicitly wherever a date is taken). On a payload it is `YYYY-MM-DD` text, read back
+  into a date by its field's declared type where a value enters a case: the opening, an answer,
+  an event, an activity's output, and a continue-as-new. An output's date is read by this rule
+  before its contract's model reads the rest, never by Pydantic's lax reading, which would pick a
+  day for a timestamp or a moment: an output date that isn't a day fails its step, and nothing it
+  gave lands. This is the one reading a form does (D9): a text that isn't a
+  date is refused, never guessed from its shape. At runtime a date field holding anything but a
+  date is an error, never `false`.
+- **The clock behind `date` stays shut.** `date.today()` is on the class itself, so a pure layer
+  (`core`, `case`) may import exactly `from datetime import date`, not renamed, and nothing else
+  from `datetime`; the boundary test refuses the names that read a clock or the machine's zone
+  (`today`, `now`, `utcnow`, `fromtimestamp`, `astimezone`), as attributes and through `getattr`
+  with the name written out. A moment is refused by its exact type (`type(value) is date`), so the
+  engine never imports `datetime` to refuse one. Set aside: Ventoux's own day type with no clock
+  at all, which would put a Ventoux type in every contract and a conversion at every edge.
+- **Shown as `YYYY-MM-DD`** in the rendering, the plain forms, the case map and the diff, the same
+  in every language; a locale's format is the inbox's, later. The JSON Schema gives the shape
+  only (D60), `YYYY-MM-DD` as a pattern; the calendar check is the engine's. The builder writes `Field.date()` and a
+  `datetime.date` literal, and refuses a `datetime`.
+- **Left out:** times, moments and durations as field types, date arithmetic, timers anchored to a
+  date field, a locale's format.
+
+### D67. An option: one of a system's list, checked through an activity when a person gives it
+
+*Decided 2026-11-02, in layer 16b (`docs/layers/16-field-types.md`, choices 13 to 24). Adds to
+D9, D16, D18, D19 and D30, whose text is kept.*
+
+- **An option is a field type of its own,** `{"type": "option", "system": "branches"}`: a value a
+  system's list must hold, checked when it is given; a reference (D16) is never checked. An option
+  of a system fits where a contract wants a reference to that system, never the other way.
+- **One check per system, named by the catalog, never by a definition.** The platform team
+  registers a read-only activity taking exactly the value (a reference to the system) and giving
+  exactly `held`, a boolean whose source is the system, and names it with
+  `register_option_check(system, contract)`. The catalog refuses a check that isn't `effect:
+  read`, has another shape, names an unregistered system, or is a second check for one system;
+  validation refuses an option of a system with no check.
+- **An answer setting an option is held while it is checked.** Its form is checked as any form is
+  (D9); then one check runs per option field, and nothing the answer sets lands, nor its outcome,
+  until every check has answered; the task's entry stays open, being checked. All held: the
+  answer is taken, its history line saying which check vouched. One not held: the answer is
+  refused, the refusal recorded, naming the field and the system, never the value (D30); the task
+  stays open. A check that fails after its retries, or gives what its contract doesn't describe,
+  takes nothing: the answer is not taken, saying why, and the task stays open, never read as held
+  (fail closed), and the case doesn't need attention, since answering again fixes it. A second
+  answer to an entry being checked is refused; a close waits for the checks, as for any running
+  activity (D10). Not in the client: the trusted caller vouches for identity, never for facts
+  (D19).
+- **Its sources are the person and the system:** `{person:ana, system:branches}`. Only the person
+  counts as one whose answer feeds a step (D25).
+- **Only a person gives an option, in a task's answer.** An option field the opening, an event or
+  a rule would set is refused (the opening when it is given, the event and the rule by
+  validation), and so is an edit of one (D52), when it is proposed: none of them is checked by
+  the system. An activity's output is never one: a contract declares a reference, never an
+  option.
+- **Checked once, when given:** a fact with the time it was obtained (D18); a step needing it
+  still held uses `max_age`, and a stale option, given by a person, makes the case need attention
+  (D18).
+- **Read like a reference:** `==` and `!=` with a value of the same system, `exists`, `string`;
+  never a literal, since only the system says which values exist.
+- **Replay:** the check is an activity, its answer recorded, never asked again; the held answer
+  crosses continue-as-new in the state. No new engine version: no definition readable before
+  holds an option.
+- **Left out:** options at the opening, on events or from rules; an option of several values;
+  listing a system's options for a picker, which is the inbox's, through the resolver (D16).
+- **Amended 2026-11-03, by D68** (the text above stands; this adds to it): a held answer never
+  crosses continue-as-new, as "Replay" said: a case continues as new only when nothing runs, and
+  a check is running work, so an answer is held only inside the run that asked. And a plan never
+  holds an option: a wait's answer sets a plan's fields, and nothing in a plan checks one, so
+  validation refuses an option among a plan's fields (`CHECKED_IN_A_PLAN`); a plan takes a
+  reference, which a case's option fits.
+- **Amended 2026-11-11, by the sensitive check fix** (the text above stands; this adds to it): a
+  sensitive option's check is asked with the value still wrapped, as D68's amendment of the same
+  day says for an attachment.
+
+### D68. An attachment: the ID a document store issued, checked when a person gives it
+
+*Decided 2026-11-02, in layer 16c (`docs/layers/16-field-types.md`, choices 27 to 40). Adds to
+D16, D30, D52 and D67, whose text is kept.*
+
+- **An attachment is a field type of its own,** `{"type": "attachment", "store": "documents"}`:
+  the ID a document store issued for a file, never the file. A file can't be in the case: the
+  history is kept for ever, replayed and read by anyone with namespace access (D16), can't be
+  forgotten, and has a size limit. An attachment fits where a contract wants a reference to its
+  store, never the other way, and never compares with an option.
+- **A store is a registered system with a check,** named by the catalog, never by a definition:
+  `register_document_store(system, contract)`, a read-only activity taking exactly `attachment`
+  (a reference to the store) and giving exactly `issued`, a boolean whose source is the store.
+  The catalog refuses a check that isn't `effect: read`, has another shape, or is a second check
+  for one store. Validation refuses an attachment naming no registered store: a system nobody
+  registered, or one that isn't a store (fail closed: nothing could check the ID or open the file).
+- **Checked when given, as D67 checks an option:** the answer is held, the store's check
+  scheduled, and the answer taken once every check has vouched, its history line saying which;
+  refused, and the refusal recorded, naming the field and the store, never the value (D30), if
+  the store didn't issue it; not taken, saying why, if the check fails or answers anything but
+  `true` or `false`. Its sources are the person and the store. Only a person attaches a file, in
+  a task's answer: the opening, an event, a rule and an edit (D52) are refused.
+- **Never the bytes, as far as the case can see:** an ID longer than 200 characters is refused
+  before it is checked, never quoted. An answer reaches a case on Temporal as a signal, recorded
+  before the engine reads it, so a client that pastes a file into an answer puts it in the
+  signal's payload; the inbox, which uploads, keeps bytes off the wire.
+- **Opened through a resolver (D16):** on the viewer's behalf, so the store's permissions decide;
+  a hidden attachment has nothing to open; nothing the store returns enters the case.
+- **Its contents are their author's words:** the engine never reads a file; an activity that does
+  marks what it read as any output is marked (D29).
+- **Forgetting reaches the ID, not the file:** a `sensitive` attachment's ID is sealed and
+  forgotten with the case's key (D31); the store erases the file under its own rules.
+- **A plan never holds an attachment, nor an option:** a wait's answer sets a plan's fields, and
+  nothing in a plan checks one, so validation refuses either among a plan's fields
+  (`CHECKED_IN_A_PLAN`). A plan takes a reference to the store, which a case's attachment fits.
+- **Replay (correcting D67's last point):** a held answer never crosses continue-as-new; a case
+  continues as new only when nothing runs, and a check is running work (layer 16b, found while
+  writing the seams).
+- **No new engine version: `engine-2` stays.** No definition readable before holds an
+  attachment. One shape decides differently from 16b's code: an answer with two or more checked
+  fields, one check refusing before another is back, now refused once every check is back. That
+  shape exists only in code merged on 2026-11-02 and never released (0.0.0), so no history
+  outside the tests holds it. After the first release, a change of this kind takes a new engine
+  version (D60).
+- **Left out:** uploading, which is the inbox's; several files in one field, and an attachment in
+  a list's fields (refused); events carrying attachments; a file's name, media type or size in
+  the case; scanning; asking the store to erase on forgetting.
+- **Amended 2026-11-11, by the sensitive check fix** (`docs/layers/fix-sensitive-check.md`; the
+  text above stands, this adds to it): the store's check, and an option's (D67), is asked with a
+  sensitive field's value still wrapped, so it crosses Temporal sealed under the case's key as
+  any sensitive input does (D31), and the check's code is given the plain value. Until this fix
+  the check was asked in plain text, written into the case's history as the activity's input,
+  where destroying the key didn't reach it. No new engine version (D51): the case decides
+  nothing differently, and a history recorded before replays as it was. A history already
+  recorded keeps what it held in plain text: nothing reaches it.
+
+### D69. Claiming a task: the holder is asked, never allowed; only the holder answers
+
+*Decided 2026-11-03, in layer 17a (`docs/layers/17-assignment.md`, choices A to 6). Adds to D9,
+D10, D22, D24, D25, D27, D47, D51 and D53, whose text is kept.*
+
+- **Who may answer and who is asked are two things.** A task's roles, and for an approval its
+  exclusions (D11, D25, D47) and its sight (D30), say who may answer an entry: a check, on every
+  answer. Its **holder**, one person or nobody, says who is asked. An open entry nobody holds is
+  in its roles' **queue**.
+- **An assignment narrows, never widens.** Being asked grants nothing: every check an answer
+  passes, it still passes. And while someone holds an entry, only they may answer it; anyone
+  else's answer is refused, saying who holds it and how to free it. So two people never work the
+  same entry, as policies are made stricter downstream, never looser.
+- **Claiming and giving back are messages from the trusted caller,** with the person and their
+  roles (D19, D22), recorded in history like an answer, so replay sees them and the engine never
+  looks anyone up. A claim is checked as an answer to the entry would be, as far as the engine can
+  tell then: the person is written as an identifier, the entry is open, nobody holds it, they have
+  one of its roles; for an approval, their role may approve the risk, they see what the step reads,
+  and no exclusion applies. Only the holder gives an entry back, to its queue. Each refusal is
+  recorded and names no value (D30).
+- **Not held:** an approval whose `count` is above 1 (D47), since one entry needs several people;
+  a claim of one is refused, saying so, and it stays in its queue. A plan's waits (D28), which are
+  not entries of the case. A change request (D52), approved by someone else, whoever they are.
+  Anything that can't be answered (a wait for an event, an entry not open) refuses a claim in the
+  words an answer to it is refused with.
+- **The holder follows the entry.** Answered, stopped (D40) or cancelled by a close (D10), the
+  entry ends and its assignment with it. Withdrawn and asked again (D25), the new entry keeps the
+  holder, saying so, if they could still answer it, and goes to its queue, saying why, if not. A
+  new run of a task is new work and starts in its queue. The opening, an event, an edit (D52) and
+  a rule set no holder (until D71). Holders are part of the case's state, so they cross
+  continue-as-new (D27) with their entries; a state from before has none. A migration (D53) keeps
+  each holder who could answer their entry on the new release, and sends the others' entries back
+  to their queue, saying why; a withdrawn approval's holder follows its step's new name.
+- **The engine can't see a role lost.** It learns roles when a person acts (D22). A holder who lost
+  the role is refused at their answer, as anyone is, and the entry stays theirs: a refusal changes
+  nothing. Someone who assigns (D70) moves it.
+- **What it shows:** history lines for each claim and give-back, and for a holder kept or sent
+  back to the queue on a new entry; `assignees`, each held entry and its holder, in the run and the
+  report. `waiting_for` is unchanged: what the case waits for, the same to everyone, naming nobody
+  (D24, D47).
+- **No new engine version (D51):** a history recorded before holds no claim, so it decides as it
+  did.
+
+### D70. Assigning a task: an assigner moves work, never answers it, and never chooses their own judge
+
+*Decided 2026-11-03, in layer 17b (`docs/layers/17-assignment.md`, choices 7, 8 and 13 to 20). Adds
+to D11, D22, D26, D52 and D69, whose text is kept.*
+
+- **Assigning is a role the platform team registers,** `register_role(..., assigns=True)`, like
+  operating and editing (D26, D52), so no case names its assigners. A role the catalog doesn't
+  mark as assigning may not assign, whoever states it (fail closed).
+- **Three acts, each a message from the trusted caller** (D19), with the assigner's roles and,
+  for an assignment, the assignee's, as the Ventoux API states them (D22); both recorded. None
+  carries a value, so an assignment changes whose list an entry is on, never what its step does.
+  **Assign** gives an entry nobody holds to someone; the same act **reassigns** a held entry,
+  without its holder; **unassign** returns a held entry to its queue, without its holder. So an
+  entry whose holder never acts can always be freed.
+- **The assigner moves work and needs nothing else on the entry:** not the task's role, not sight
+  of what its step reads.
+- **The assignee is checked as a claim is** (D69), with the roles stated for them: someone who
+  couldn't answer the entry is refused, in the words their answer would be. They become its
+  holder, with those roles. Assigning to yourself is allowed and checked the same way.
+- **Nobody chooses their own judge.** Whoever may not approve a step may not assign, reassign or
+  unassign its approval: an assigner is judged by the exclusions an approver is (D11, D25, D39,
+  D47, D52), never by the approval's role, risk or sight. Handing your own decision to a chosen
+  approver, or taking it from one about to reject, is the influence "someone else" prevents. A
+  task is no one's judgement of a decision, so this applies to approvals only.
+- **Refused too,** each recorded and naming no value (D30): an assignment to the entry's holder,
+  which changes nothing; an unassign of an entry nobody holds; anything D69 says can't be held; a
+  misspelled identifier, the assigner's or the assignee's (D22).
+- **What it shows:** `lee assigned review#1 to sam as support-lead`, adding `, from ana` when
+  someone held it; `lee returned review#1 to its queue as support-lead, from ana`. Who assigned a
+  holder is in the history, not the state.
+- **No new engine version (D51):** a history recorded before holds no assignment.
+
+### D71. Assignment rules: the definition asks someone the case already knows, when each entry opens
+
+*Decided 2026-11-04, in layer 17c (`docs/layers/17-assignment.md`, choices 9 to 12 and 21 to 26).
+Adds to D9, D11, D22, D37, D47, D55, D60, D69 and D70, whose text is kept.*
+
+- **`assign` on a task step, or inside an approval,** names who is asked when each entry opens,
+  on the case as it is then: `{"to": "opener"}`, the person who opened the case, or `{"to":
+  "answered", "step": "review"}`, whoever gave that task's latest answer, as `outcome` reads the
+  latest (D9). Nothing else: no identifier is typed into a definition, and no field picks
+  anyone, so everyone a rule can pick was named by the trusted caller (D19, D22), and untrusted
+  data never routes work. A field holding a person is a deliberate limit.
+- **The pick is judged as a claim is** (D69), with the roles that person stated when they acted
+  (with the opening, or with their answer; the opening now carries the opener's roles, as the
+  trusted caller states them, D22), and becomes the holder with them: `follow_up#1
+  assigned to ana by its rule`. A rule never stops a case: one that finds nobody, or someone who
+  couldn't answer, leaves the entry in its queue, saying why. The case keeps who gave each
+  task's latest answer, and the opener's roles, for this; a state from before has neither, so its
+  rules find nobody (fail closed). A migration renames the answerer with its task (D53), so a
+  rule naming the task's new name still finds them.
+- **A person's choice outranks the definition's default:** on an approval asked again (D25), a
+  holder kept from the old entry stays, and the rule picks only when nobody is kept.
+- **Validation refuses only what holds in every case (D37).** `ASSIGNS_EXCLUDED`: an approval's
+  rule picking the opener, who approves nothing (D11), or whoever answered a task that excludes
+  them from it in every run (D55's `excluded_every_time`). `ASSIGNS_SEVERAL`: a rule on an
+  approval needing several people (D47). A rule malformed, or naming a step that isn't a task, is
+  refused when read. Warned: `ASSIGNS_MAY_BE_EXCLUDED`, a pick the approval may exclude;
+  `MAY_ASSIGN_NOBODY`, a task the step doesn't require, so perhaps not yet answered. On a task, a
+  role mismatch is a staffing fact (D22), found when the entry opens, never refused.
+- **The diff judges it:** a held entry is answered only by its holder (D69), so an added rule
+  narrows who may answer, stricter; removed, looser; changed, a doubt, so looser (D55). The case
+  map and the rules sheet read it aloud. The builder writes `Assign.answered(review)` and
+  `Assign.opener()`; the JSON Schema publishes the shape (D60).
+- **No new engine version (D51):** no definition readable before holds `assign`. The key is
+  behaviour, so the digest covers it (D50).
+
+### D72. Required steps: work the case owes, which only its doing or a person's close ends
+
+*Decided 2026-11-04, in layer 18a (`docs/layers/18-lifecycle.md`, choices A to C and 1 to 12;
+choice 12 on 2026-11-05, from the tutor's review).
+Adds to D10, D17, D24, D26, D34, D37, D40, D50, D51, D52 and D55, whose text is kept.*
+
+- **`"required": true` on a step of any kind** says the case owes it: it may not close by itself
+  until the step's latest run is done. Pending work (D10) is what has started and not ended; a
+  required step is owed even before it starts. So **nothing left to do** means no pending work,
+  and every required step's latest run done. Left out of the digest when false, so every existing
+  release keeps its digest (D50).
+- **Done is done with any outcome,** as `requires` reads it: a declined refund, a task answered
+  `reject`, a plan's `failed`. A business failure is an outcome someone handles (D17), not work
+  left undone. A stricter "done well" is a `closes_when` milestone.
+- **Owed in every case, so no `when`:** a required step with a condition is refused when read. A
+  step owed only sometimes is started by a rule, or proposed, and isn't required.
+- **A run that ended without being done leaves the step owed:** stopped by a rule (D40), or its
+  approval rejected. An automatic step starts itself at most once, so another run comes from a
+  proposal or a rule.
+- **Its obligation ends only by doing it, or by a person's close.** A failed run needs attention
+  (D17): retried, or the case closed with a reason. A skip of a required step's failed run (D52)
+  is refused, saying so: a skip goes on as if the run weren't needed, and a required step is one
+  that is. A person's close, with a declared reason, is never held, nor a close by forgetting
+  (D32); its last line names what was owed (`closed: duplicate, by ana; confirm not done`).
+- **`closes_when` waits for it,** as for a failed run (D26): with every milestone reached and a
+  required step owed, nothing new starts but the owed step, and the case closes once it is done.
+  "Close early" and "not before this" meet, and the stricter wins.
+- **A case that owes says so** (D24): `waiting_for` lists each owed step not running, after the
+  open entries, with who can start it: `confirm, required, proposed by support`; `confirm,
+  required, started by a rule`; `confirm, required, after review`, the last only once nothing
+  else is pending.
+- **An owed step that can no longer start needs attention,** naming why, and only a person's close
+  ends it: nothing can start it again (it can't start itself, nobody may propose it, and no rule
+  in the definition starts it, proven from the definition, never guessed); a step it requires
+  ended without completing and can't run again, by the same test; or, while every `closes_when`
+  milestone is reached, a requirement is unmet with nothing on its way to meet it. It is listed in
+  `needs_attention`, not `waiting_for`, as a failed run is: `confirm: required, and it can't
+  start: confirm requires pay, which hasn't completed: close the case with a reason`. Nothing
+  starts that nobody asked for.
+- **`ventoux check` proves each can be done** (D34, D37). Errors, holding for every case: a required
+  step nothing can ever start, which is `NEVER_RUNS`, as for any step that can never run (the reach
+  fixpoint; one cause, one issue), and `required` with `when`. A warning, since the rule may never
+  fire: a required step a rule may stop, or whose approval may reject, that could then never run
+  again (`REQUIRED_MAY_STRAND`).
+- **The diff reads it as not proven, either way** (D55): turned on, the case takes what the other
+  version refuses (a proposal of the owed step after it would have closed), so neither way is a
+  proof for every case, as for `closes_when` and `stays_open`; the change is said, and a person
+  judges it. The case map's closing line names it; the builder takes `required=True`; the JSON
+  Schema follows (D60).
+- **Owed is worked out, never stored,** from the definition and the step's runs: it crosses
+  continue-as-new (D27) and follows a migration's renames (D53) with the runs, and a migration's
+  target decides what is required.
+- **No new engine version (D51):** no definition readable before holds `required`.
+
+### D73. Repeated steps: a run per item of a list, named by a number the engine gives
+
+*Decided 2026-11-05, in layer 18b (`docs/layers/18-lifecycle.md`, choices 13 to 20 and 30 to 34).
+Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is kept.*
+
+- **A list value is checked where it is given,** and given only at the opening for now: a JSON
+  array of at most 100 records, each with exactly the list's declared fields, each of its exact
+  type (numbers exact, D20). Anything else is refused, naming the type, never the value (D30). An
+  event never carries a list and a rule never sets one (D41, D42, D48, unchanged). Every value of
+  an item carries the list field's sources (D12).
+- **`"for_each": {"over": <list field>, "key": <text field of its items>}`** on a task or an
+  activity step runs it once per item. Not a plan, workflow or wait step: a deliberate limit.
+- **Each run is named by a number the engine gives each key the first time it sees it**
+  (`draft_line.1#1`), matched by the key, never by position or value: reordering the list never
+  gives one item's side effect another's idempotency key (D17), and no name quotes a value (D30). A
+  removed key's number is never given again. The key must be a non-sensitive text field, present
+  and distinct in every item; otherwise the step fails, needing attention. The numbers are state:
+  they cross continue-as-new (D27) and follow a migration's rename of the step (D53).
+- **A run reads its item as `each.<field>`;** `each` is a reserved name, and read nowhere but in a
+  repeated step.
+- **From outside,** `requires` is met once every item's latest run is done, at once for an empty
+  list, the history saying so; a repeated step's `outcome` and outputs are refused at validation.
+  A required repeated step owes a done run for every item (D72).
+- **It starts by itself,** a run for each item that has none: not proposed, not repeatable, and
+  started by no rule, since a proposal or a start names a step, never an item. A rule may stop it,
+  stopping every open run (D40); an operator retries a failed run by its entry (D26).
+- **Deliberate limits** (D48): no approval on a repeated step, so a high-risk contract can't be
+  repeated, and `ventoux check` says so; an edit never changes a list a step repeats over (D52),
+  saying so; at most 100 items. And, each assuming one run per step, refused on a repeated step
+  when read: a milestone it or its task's outcome reaches, a field its answer sets, a fact it
+  needs fresh, an assignment rule. A list is given only at the opening: never by a person's form,
+  and never sensitive. Each door is a decision of its own.
+- **A repeated run is its own:** its outcome and outputs are never written under its step's name,
+  which each run would overwrite. Its `when` is read for each run, with its item; on an untrusted
+  list it may keep an item's run from starting, never silently (D48): `ventoux check` warns
+  (`KEPT_FROM_STARTING`), and the close names each item kept, by number, never value.
+- **A migration never renumbers a repeated step's items:** a target that repeats a step with
+  numbers over another list, by another key, or not at all, is refused (D53).
+- **A step whose items share a key fails, needing attention, and isn't retried:** the list never
+  changes, so it would fail again; a person closes the case.
+- **No new engine version (D51):** no definition readable before holds `for_each`, and no case
+  could hold a list value.
+
+### D74. Child cases: a whole case opened from a step, pinned by its parent, reporting back
+
+*Decided 2026-11-07, in layer 18c (`docs/layers/18-lifecycle.md`, choices 21 to 23, 25 to 27, 29
+and 36 to 41). Adds to D10, D24, D25, D28, D29, D40, D48, D50, D51, D52 and D53, whose text is
+kept. Temporal's part (choices 24, 28 and continue-as-new) is 18d's, decided as D75, and so are
+the environment registry's checks of a child's release below: activating the parent, and the
+child asking as it opens. Until then a case step on Temporal fails, needing attention.*
+
+- **A case step opens a child case:** `{"kind": "case", "case": "repair@3", "inputs": {...}}`,
+  named with its release, as a plan is. It takes what a plan step takes, and, like one, no
+  `approval` (the child's steps carry theirs). No `for_each` (a deliberate limit, D48): one child
+  per run. A repeatable case step proposed again opens another child, `repair#2`.
+- **The parent's release pins the child's** (D51, D54): the release is in the parent's package,
+  so a new child process reaches the parent only by a release of the parent, which the diff shows.
+  Activating the parent checks the child's release is active in the environment with the same
+  digest; the child asks its registry as it opens, as any case does.
+- **The package holds the child as a package** (adds to D50): `cases/repair@3/`, with its own
+  `case.json` and `plans/`, read as the parent's is, and covered by the parent's digest. A child
+  named twice, a child nobody names, or a child folder that isn't a package is refused.
+- **The child is given an opening,** its fields read from the parent's case file, each with its
+  sources (D28). It is opened by the parent case, never a person, and the parent's exclusions
+  cross: the parent's opener and the step's proposer approve nothing in the child (D25). Each input
+  is checked at validation as any opening is: a field of the child, not set by its forms or rules,
+  of its type. And the check reads the child's input policies with the sources the parent gives
+  its opening, saying a refusal at the parent's input before any case opens, as for a plan's
+  fields (D36). *Changed in the tutor's review of #88, before D74 was merged.*
+- **A sensitive value enters a child only into a sensitive field, and a report carries no
+  sensitive field, for now** (deliberate limits, D48): a view hides more than its source, never
+  less.
+- **The child's end report lands as the step's outputs** (adds to D29): `repair.outcome`, which is
+  `done` or the close reason a person used, type-checked against the child's reasons; and each field
+  the child's `reports` lists (non-sensitive, not a list) that is set at its close, as
+  `repair.<field>`. Each keeps its sources in the child, plus `case:repair`. A child never writes
+  into its parent's case file. A reported field the child never set is absent: whatever reads it
+  fails, as reading any missing field does, and `ventoux check` warns (`MAY_BE_UNSET`). The
+  milestones the child reached are said in the history, never read by the parent (a deliberate
+  limit, D48).
+- **While it runs, the child is pending work** (adds to D24): the parent's `waiting_for` has one
+  line for it (`repair#1: case repair, open`), after the parent's own open entries; the child's
+  own entries are the child's, since those who see the parent may not see the child (D22, D30).
+- **A child needing attention is the child's,** retried by its operators; the parent waits. A
+  failure to open it (a release not active, an opening refused) is the parent's step failing,
+  retried there under the same entry; a retry never opens a second child once one has opened.
+- **The parent's routes reach a child only through its step.** A close, or a rule stopping the
+  step, closes the child through D40's one place, saying why (`closed by its parent: duplicate, by
+  ana`), and the parent closes once the child has ended; a close never waits for a person (D48). A
+  migration's target must open the same release from the step, renamed or not, or the migration
+  waits for the child to end, refused until then (`migrate after it finishes`, D53), and the record
+  of each run's child follows a rename. An edit never reaches a child (D52). Events and rules
+  reach the parent only.
+- **One level only** (a deliberate limit, D48): a child's definition has no case step of its own,
+  refused when the parent is validated. That bounds what one close must reach, and no case opens
+  itself.
+- **`case:<child>` is a trusted origin** (adds to D12; decided 2026-11-07, while building 18c):
+  it records the route a value took, and the value's own sources decide its trust, so
+  `person:lee, case:repair` is trusted and `untrusted:customer, case:repair` is not. `only_from`
+  still refuses it: a value from a child comes from no system it names. The child's reviewed
+  release declares its close reasons, so a child that closed by itself gives `done` with
+  `case:repair` alone, as a plan's outcome carries `system:refund-order@1`. But which reason was
+  chosen is a person's act, as a task's outcome is: a child closed by a person gives its outcome
+  `person:<closer>, case:repair`, its ending carrying who closed it, and the closer approves
+  nothing that outcome decides (D11). *Changed in the tutor's review of #88, before D74 was
+  merged.*
+- **The parent holds its pinned children as stored data, by reference,** given when it opens, as a
+  case's start holds its plans: the engine reads each child's outcomes and reported fields from
+  them, so `repair.cost` is type-checked at runtime as at validation.
+- **A child its case doesn't hold fails the step** (fail closed): the step's start never guesses a
+  definition, and waits for a person (D17).
+- **No new engine version (D51):** no definition readable before has a case step.
+
+### D75. Child cases on Temporal: a child workflow abandoned to itself, a doorbell, a report read
+
+*Decided 2026-11-07, in layer 18d (`docs/layers/18-lifecycle.md`, choices 42 to 49). Adds to D5,
+D15, D17, D27, D29, D31, D32, D40, D48, D51, D54 and D74, whose text is kept.*
+
+- **A child is its own workflow, `<parent ID>/<entry>`** (`claim-7/repair#1`), under its
+  parent's key: the codec takes a case's key from its workflow ID's first part, so sensitive
+  inputs cross sealed, never opened (D31).
+- **Forgetting is the family's** (D32): forgetting the parent destroys the one key, so it forgets
+  its children with the same act; a child is never forgotten alone, the request refused naming
+  its parent. The stricter `forgetting` of the parent and its pinned children applies to all,
+  worked out from the parent's release.
+- **Started with `ABANDON`, closed by its parent** (D40): Temporal's default parent close policy
+  terminates a child when its parent's run continues as new, as the development server shows and
+  the time-skipping test server doesn't, so the policy is tested from the parent's history. The
+  parent closes a child itself, through D40's one place, with the close signal and its reason,
+  and only once the child's start is recorded. It sends a child nothing else.
+- **The end signal is a doorbell, never a report.** As its last act, the child signals its
+  parent's workflow ID, never a run ID, with only its entry. A signal says nothing of who sent
+  it, so the parent then reads the report itself, through an activity: the child workflow's
+  result, its latest run's, as the child returned it. A doorbell for an entry that isn't an open
+  child, from a child still running, or rung twice finds nothing to read: it is recorded and
+  changes nothing.
+- **A child that ends without ringing is never waited for silently** (D17): the run that started
+  it watches its handle, beside the loop; every later run asks each open child's status as it
+  starts and on a daily durable timer. One found ended without a report (terminated, failed,
+  timed out) fails the step, needing attention. A child with no worker hasn't ended: it is any
+  case with no worker, watched by `ventoux environment check` (D54).
+- **Continue-as-new waits for no child** (adds to D27, closing D48's note): an open child is its
+  run in the state that crosses, and its doorbell and report reach whichever run is current. A
+  child's own switch is its own; its result is its latest run's. A close asked across a switch is
+  asked again, once, by the new run.
+- **The registry checks a pinned child's release** (D54): activating the parent checks each one is
+  activated in the environment, not retired, with the digest the parent's package gives it, on
+  the parent's queue, every problem said at once. The child asks as it opens for its pinned
+  release, as a migration's target is asked, never for "the active one": activating `repair 4`
+  breaks no claim pinning `repair 3`. Retiring a release that a release still active or with open
+  cases pins is refused, naming them. A child refused as it opens fails its parent's step,
+  needing attention (D74).
+- **No new engine version (D51):** a case's start never carried children before this, so no
+  recorded history ever started a child, and every one replays the same, as no release held an
+  attachment before D68.
+- *Changed while building 18d, before D75 was merged:* a doorbell's read waits up to 5 s for the
+  child that rang to end, since it ends in the workflow task after it rings; the run that started
+  a child sets the daily check too, set only while a child is open; a child's end read twice
+  lands once; a close waits only for a child the current run is still starting; any ID with a `/`
+  is refused for forgetting alone, being under the key of the case before it; and a migration
+  carries the children its target pins. Carried: a parent terminated with a child still running,
+  then forgotten, loses the key under that child (`docs/layers/18-lifecycle.md`, "Found while
+  building 18d").
+
+### D76. Audit records: one per act, the decisions it caused, the facts they read
+
+*Decided 2026-11-07, in layer 19a (`docs/layers/19-audit-keys.md`, choices 1 to 7). Adds to D8,
+D15, D27, D30, D31 and D51, whose text is kept.*
+
+- **The engine records each act it decides as data, beside its lines.** One audit record per act
+  that reaches the case (an opening, an answer, a proposal, an activity's completion or failure,
+  an event, a timer, a close, an edit, a migration, a retry, a claim): the act as it came (its
+  kind, who, their roles, the entry, the outcome, the values it gave), then each decision it
+  caused, in order, then the history lines it wrote. An answer that approves `pay` and so starts
+  it is one record: `approved`, `admitted`, `started`. A refused act is a record too, its one
+  decision `refused` with the reason, and it changes nothing else. Made in `case`, so it is
+  deterministic and the same in memory and on Temporal. History lines stay as they are, for
+  people; nothing ever parses them.
+- **A decision says what decided and on what.** Its kind (`answered`, `approved`, `rejected`,
+  `refused`, `admitted`, `started`, `completed`, `failed`, `retried`, `skipped`, `reached`, `set`,
+  `closed`, `stopped`, `edited`, `migrated`, `forgotten`), its step and entry, the rule as the
+  path in the definition that decided (`steps.pay.when`, `steps.pay.approval`,
+  `rules.escalate`), and each fact it read, by name, with its sources (D12) and its value.
+- **Values are carried, sensitive ones wrapped.** Reports need values (D8); a history line still
+  quotes none (D30), and reading the export filters them by role. A sensitive value stays
+  `Sensitive` in the record, as in the state (D31), never unwrapped. A form value is in the
+  record as the case file holds it: sensitive only if its field is. A failure is recorded by its
+  type alone, its message left out (D15's "or omits"); the message stays in Temporal's failure,
+  under the case's key.
+- **Numbered in a stream, never by time or chance.** A record's ID is its stream (the workflow
+  that made it: `claim-7`, `claim-7/repair#1`, `claim-7/forget`) and a number from 1. The number
+  is in the state and crosses continue-as-new, so a record written twice carries the same ID.
+  Each record carries its release and engine version (D51), and the act's time (D33).
+- **From engine version 3** (D51). A case opened before exports nothing and says so; a migration
+  that moves a case to version 3 starts its records there, the first saying that what came
+  before was not recorded. Never a partial trail passed off as whole.
+- *Changed while building 19a, before D76 was merged:* new cases open at version 3 only once the
+  export that writes their records exists (19b): until then this code knows 3, and opens new cases
+  at 2. A decision also says what it wrote (a field, its new value and sources) and what it
+  reached or stopped. A refused act names the entry as it was asked, never a step guessed from it.
+  `admitted` is an approval asked; a start reads its condition, its approval's condition, then its
+  inputs. A failure's reason is its run's own, the message already replaced by `‹sensitive›`. A
+  record is never renamed by a later migration. *From the tutor's review of 19a:* until then no
+  case moves to version 3 on Temporal either: a migration there is refused when proposed, saying
+  that this code knows the version but doesn't run cases at it yet.
+
+### D77. The audit export: written by the case, sealed, in order, and never ahead of what it wrote
+
+*Decided 2026-11-08, in layer 19b (`docs/layers/19-audit-keys.md`, choices 8 to 13 and 22 to 30).
+Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.*
+
+- **A store is two methods,** `append(records)` and `read(prefix)`, the platform team's in
+  production; `FileAudit`, one JSON Lines file per stream, append-only, in development and tests.
+  It keeps each record once by its stream and number: the same content again is accepted, other
+  content or a number whose previous one it doesn't hold is refused. Ventoux never deletes from it.
+  A case worker without a store is refused.
+- **The case writes its own records,** through an activity the worker registers, never a contract
+  a definition could call: after each workflow task that made records, one call with all not yet
+  written, oldest first. A stream is the workflow's ID (`claim-7`, `claim-7/repair#1`,
+  `claim-7/forget`); a record's number comes from a counter in the state, never lowered, which
+  survives the records leaving the state once written and crosses continue-as-new, so no two
+  records share an ID. A plan run's events ride in the record of its step's end, from its report.
+- **Sealed, or not written** (D31). The activity seals each sensitive value with the provider,
+  under the case's key (a child's and a plan run's: its case's, D75), with a part naming its place
+  in the record: `audit/<stream>/<number>/act/values/<field>`, `…/decisions/<n>/read/<field>`. It
+  is given the definition's sensitive fields with the records, and a value of one in clear fails
+  the whole call, naming the record and the field, never the value: read from the definition,
+  never from the wrapper. Nothing is written then. A field that narrows who sees it without being
+  sensitive is written in clear, saying who may see it.
+- **When the store can't be written** (D17): the case goes on and its records wait in the state;
+  the activity's retries are bounded (10 attempts, the longest wait 5 minutes), then the case needs
+  attention, and an operator retries the export with `retry_export` (D26). The failure and the
+  retry are acts the case decides and records; the failure says the store's error by its type,
+  never what it said. The case never closes
+  with records unwritten. Past 256 KB of unwritten records, measured as the export would write
+  them, the case holds: it decides nothing new, each act waiting in its inbox, and says so.
+- **Reading it,** `read_audit(store, case, roles, keys)`, filters each value as the case view does
+  (D30): a value whose field narrows who sees it is said hidden unless the reader holds one of
+  those roles; a sealed one is opened for them at the place it is found, while the key exists, and
+  said `‹forgotten›` after. With no definition at hand, it shows any reader what every role the
+  case names may see. The store's rows are admin access (D19).
+- **Forgetting:** close, export, then destroy (D32, as amended). The forget request's own stream,
+  holding no sensitive value, is written behind the patch marker `ventoux-forget-export`, beside
+  the request, never in its way: one record per act (the proposal, each answer, the key
+  destroyed), the last written once the key is gone.
+- **Engine version 3 opens** (D51): `ENGINE` is 3, so new cases open there and a migration may move
+  a case there. Only a case at 3 or above with records unwritten schedules the export, so a case
+  at 2 replays as it was recorded.
+- **Known limits, said:** a case terminated by an admin (D19) ends with whatever it had not
+  written, and forgetting it then destroys the key; while a case holds, each act sent to it waits
+  as a signal in its run's history; a plan whose workflow itself fails returns no report, so its
+  events stay in its own history.
+
+### D78. The production key provider: Vault's transit engine, a mark that outlives the key
+
+*Decided 2026-11-08, in layer 19c (`docs/layers/19-audit-keys.md`, choices 14 to 20, answered
+2026-11-07, and 31 to 36). Adds to D15, D17, D31, D32, D62 and D77, whose text is kept.*
+
+- **Vault's transit engine,** behind `KeyProvider`: `VaultKeys(address, transit_mount,
+  marks_mount)`, each required, no default. A key per case, `aes256-gcm96`, made not exportable and
+  allowing no plaintext backup. Before each seal or open its configuration is read, and a key of
+  another type, or one that could leave Vault, is refused, never used. The part a value is sealed
+  for is sent as its associated data, so a value moved elsewhere doesn't open, as with `FileKeys`.
+- **Destroyed at once:** the mark is written, then the key's deletion allowed, then the key deleted.
+  The mark, `ventoux/forgotten/<name>` in a key-value engine (version 2), outlives the key: from it
+  on, the case reads as destroyed, `create` refuses its ID, and no seal or open uses a key of that
+  name, whatever Vault would let be made again. It is read from its metadata: any version ever
+  written means forgotten, deleted since or not; no metadata means never marked, and Ventoux's
+  policy can't delete it. A failure between the steps leaves the case destroyed, and destroying
+  again finishes. A cloud KMS, which only schedules a deletion weeks ahead, would have the case say
+  `forgetting, key deletion scheduled for …` and be forgotten only then: kept for an adapter after
+  v1.0.
+- **A case ID as a name:** lowercase letters, digits and `-` stay; every other byte of its UTF-8,
+  capitals and `_` included, is `_` and two hex digits (`refund-A-1001` is
+  `ventoux-refund-_41-1001`). Two IDs never share a name, and no name holds a character a URL path
+  would read. An empty ID, and one whose name passes 128 characters, are refused.
+- **The client is the standard library** (`urllib.request`), no new dependency. Every call has a
+  timeout (10 seconds by default). The token is read from `VAULT_TOKEN` as each call is made, never
+  kept on the object, never said in a message, a log, a `repr` or a recording (D62); an `http://`
+  address is refused unless it is `localhost` or `127.0.0.1`; neither a redirect nor a proxy the
+  environment names is followed, so the token goes nowhere but the address named. The guide gives
+  the token's policy, checked against a development Vault: `ventoux-*` keys and the marks, never
+  deleting a mark.
+- **Off the event loop:** every provider call made from async code (the codec, the forget
+  request's activities, the client opening a case or a run) goes through `asyncio.to_thread`,
+  whichever provider: a call waiting on Vault never stalls a worker.
+- **Two kinds of error, never an empty value or a guess** (D17):
+  - `KeyRefused`, final: never made; destroyed (a mark); a key that can leave Vault, or of another
+    type; a part that doesn't open; an ID that can't be a name.
+  - `KeyUnavailable`, not now: Vault unreachable, timing out, refusing the token, hanging up, or
+    answering something unreadable (a `200` on the mark's path is a mark only in the shape Ventoux
+    writes). A workflow task or an activity meeting it is retried until Vault answers.
+  - A key's state is `destroyed` or `never made` only on Vault's answer; anything else is
+    `KeyUnavailable`. `read_audit` lets it through, never saying `‹forgotten›`; the forget request
+    refuses a proposal it meets before anyone answers, and after the approval waits for Vault.
+- **The export says which service failed** (D77, made exact): the key service's errors whole, with
+  `look at the key service, then retry the export`; a final `KeyRefused` fails it at once, never
+  retried; `KeyUnavailable` is retried as a store that is down is.
+- **Tests never reach Vault:** `VaultKeys` takes a transport, and tests give it a recording of
+  Vault's answers, request by request; a request it doesn't hold is refused, saying which. One test,
+  against a development Vault, runs only where `vault` is installed.
+
+### D79. The trusted caller in v1.0: the integrator's own service, one identity that writes for people
+
+*Decided 2026-11-08, in layer 20 (`docs/layers/20-deployment.md`, questions 1 and 1b). Adds to
+D19 and D22, whose text is kept, and to "Out of scope for v1.0", amended below.*
+
+- **In v1.0 the trusted caller is the integrator's own service,** calling Ventoux's client
+  functions (`start_case`, `answer`, `close`, `propose_change` and the others in
+  `ventoux.temporal.cases`; `propose_forget` and `answer_forget`). Ventoux ships no HTTP API and no
+  inbox in v1.0; both move to "Beyond v1.0". The engine's guarantees never depended on which
+  program the caller is, only on there being one identity that writes on behalf of people, and on
+  it stating them truthfully.
+- **Where an earlier decision says "the Ventoux API" or "the API"** as the one that states who
+  acted (D19, D22, D41, D52, D70 and others), read "the trusted caller". Their text is kept, as
+  every decision's is.
+- **What the caller must do,** stated by the deployment guide, since no code of Ventoux's can
+  check it: authenticate each person; normalise their identifier as D22 writes it; take their
+  roles from its identity provider, as they are when they act; and never let a person name who
+  answered, or their roles.
+- **Who writes, made exact** (D19's "only the API's service identity can write" was too strong:
+  workers and operators write too): people read only; the caller writes on behalf of people
+  (starting cases and forget requests, signals, updates); workers write only what workers do
+  (polling, completing their own tasks, publishing their manifests); named operators create and
+  harden environments, activate, retire, terminate and reset. Each is its own identity under mTLS,
+  given only its own kind of call by Temporal's authorization.
+- **What is left for after v1.0:** the API and the reference inbox (an HTTP service, people's
+  sign-in, roles from an identity provider, an inbox drawing task forms from field types).
+
+### D80. The conformance suite: validation results as data, the catalog generated, every change recorded
+
+*Decided 2026-11-08, in layer 20a (`docs/layers/20-deployment.md`, question 4). Adds to D4, D34
+and D60, whose text is kept; D4 is amended below.*
+
+- **What it holds: validation, in v1.0.** Each entry is a definition (a case or a plan), the
+  catalog it is read against, the plans and child cases supplied, and what validation must give.
+  Run results come after v1.0, seeded by `examples/witnesses/`; a run's history is Temporal's
+  format and the engine version's, and the other implementations v1.0 needs (an inbox, a Java
+  builder) implement validation.
+- **Data, never code:** JSON files in the package (`src/ventoux/conformance/`), written out for an
+  implementer who doesn't install Python by `ventoux conformance --export DIR`. `suite.json` names
+  the engine version and lists the entries.
+- **What an entry expects:** either `{"read": "refused", "at": [paths]}`, a definition refused
+  when read, by path alone, since reading gives no code; or `{"issues": [...]}`, each a `path`, a
+  `code` and a `severity`, an empty list meaning valid. Compared as a multiset: in any order, none
+  missing, none extra. Messages are wording, never compared. Warnings are compared too.
+- **The catalog is generated from the Python catalog,** never the reverse: its contracts as
+  `ventoux promises` writes them, its roles (each with what it may approve and operate), systems,
+  labels, option checks and document stores; written by `ventoux conformance --write`, and checked
+  unchanged in CI byte for byte, as the schema is (D60). A second way to make a contract would be
+  a second set of rules.
+- **Every issue code is listed, and every one has an entry expecting it:** the codes validation
+  gives are a list in `core` (`ISSUE_CODES`), and an issue with a code not in it is refused when it
+  is made, so a new rule can't give a code the suite doesn't know. A listed code no entry expects
+  fails the check. Every definition committed in the repository is an entry too, expecting what
+  it gives: some exist to show an issue.
+- **A code the package refuses first is said, never left uncovered:** `UNKNOWN_PLAN`,
+  `UNKNOWN_CASE` and `NESTED_CASE` can't come out of the one check, since putting the package
+  together refuses a missing plan, a missing child or a nested child first, with no code; the
+  engine keeps them as backstops (fail closed). The suite lists them under `refused_first`, each
+  with a package that shows it, and the check fails if that package is put together after all.
+- **One catalog:** the development catalog (`ventoux.testing`), which gains `ledger.post@1`, an
+  amount taken only from the opener, so `OPENER_DECIDES` has an entry.
+- **Run both ways in CI:** a definition that must validate does; one that must be refused is, with
+  exactly the issues expected. A change to validation that alters a result fails CI.
+- **A result changed on purpose is recorded:** its entry's `expected` changes in the same pull
+  request, and the suite's `changes` list gains a line naming the entry, what it gave and gives
+  now, why, and the date. CI compares the suite with the base branch's and fails a changed result
+  with no line naming it. The pull request's diff alone would leave nothing for an implementer
+  reading the suite later.
+- **The record is only added to:** the head's `changes` starts with the base's lines, each
+  unchanged; one removed, rewritten or moved fails the same comparison, saying which line went or
+  changed (from the tutor review of #93, before merge).
+
+### D81. Connecting as an identity, a worker that says what it keeps with, and `ventoux doctor`
+
+*Decided 2026-11-08, in layer 20 (`docs/layers/20-deployment.md`, questions 2, 3, 6, 7 and 8);
+written 2026-11-09, before 20b is built. Adds to D19, D54, D62, D77, D78 and D79, whose text is
+kept; D54 is amended below.*
+
+- **Every command that talks to Temporal connects as an identity,** named in `pyproject.toml`:
+  `[tool.ventoux.temporal]` gives `address`, `namespace`, an optional `server_ca`, and
+  `identities`, each a `cert` and a `key` as **file paths**, never their contents. `--identity
+  NAME` chooses one (`operator` by default for the environment commands); `--address` and
+  `--namespace` still win. With no `[tool.ventoux.temporal]`, a command connects as before, to
+  `localhost:7233` without TLS: development is unchanged. mTLS only in v1.0; an identity named but
+  not configured, or a file that can't be read, is refused, saying which, never connected
+  without it.
+- **A case worker's manifest says what it keeps with:** its key provider and its audit store, each
+  by its class's name and whether it is for development, never a setting (an address, a path, a
+  token). Each provider declares which (`development`, `FileKeys` and `FileAudit` say so); one
+  that doesn't is refused when the worker starts (fail closed). **In a production environment the
+  registry refuses a case worker's manifest naming a development provider,** or naming none, so
+  the worker never polls (D54's pattern); a manifest from another language, or an earlier
+  worker, that isn't a case worker is accepted without them.
+- **`ventoux doctor ENVIRONMENT` checks a deployment,** with the rights it is given and no more:
+  configuration it reads, and the live deployment it asks. Each rule is named `area.rule`, and
+  each line says what it saw and, on a failure, what to do.
+- **Three verdicts, never two:** `passed` (seen to hold), `FAILED` (seen broken), `unchecked`
+  (couldn't be seen either way, saying why). A rule that can't run, or that meets an error it
+  doesn't expect, is unchecked with the error's kind, never passed and never dropped: every rule
+  runs, whatever the others give. Exit 0 when nothing failed, 1 when a rule failed, 2 when doctor
+  can't run at all; `unchecked` lines are said every time and fail the command only with
+  `--strict`.
+- **Doctor never changes anything, and never holds the caller's key:** every probe does no harm if
+  allowed (a signal to a workflow that can't exist; Vault's `sys/capabilities-self`, never a
+  call it asks about); it starts no workflow, writes to no registry, makes no key, appends to no
+  store. It connects as `reader`, to see a write refused, and as the configured identities only.
+- **What it checks, and what only the guide states.** Its rules are listed in the deployment
+  guide with how each is seen; the rules no client can see (only the caller writes; resets are a
+  named group's; the audit store deletes nothing; Vault's other tokens; retention) are always
+  `unchecked`, each naming the guide's section that states it, kept equal by a test.
+- **It reads the deployment's key service and audit store as it reads the catalog** (D59):
+  `[tool.ventoux] keys = "module:NAME"` and `audit = "module:NAME"`, the platform team's code,
+  imported by that name. `ventoux environment check` stays, for monitoring; doctor runs its check
+  as one rule, from the same function. Doctor never hardens.
+- **Secrets are seen present, never read out:** `VAULT_TOKEN`, `ANTHROPIC_API_KEY` (only when a
+  `model` is configured) and the identities' key files (present, readable by their owner only);
+  no output of doctor's, a failure included, holds a secret's value.
+
+*Amended 2026-11-09, in 20b2 (from the review of #95):* the registry's rule on providers is behind
+a patch, so a registry recorded before it replays as it was recorded; one running at the upgrade
+keeps the earlier rule until it continues as new, and a case worker it accepted stays accepted
+until it publishes again. Doctor fails a production registry holding a case worker's manifest
+whose key provider or audit store is for development, or that doesn't say, so that window is seen.
+
+### D82. The published package
+
+*Decided 2026-11-08, in layer 20 (`docs/layers/20-deployment.md`, question 5); written
+2026-11-10, before 20c is built. Adds to D51, D59, D60 and D80, whose text is kept.*
+
+- **The package is `ventoux`, versioned on its own:** semantic versioning, `0.y.z` until v1.0
+  (after layer 21), the first release `0.1.0`. The package's version, the engine version (D51)
+  and the schema's `$id` (D60) are three things; `ventoux version` says all three. The version is
+  written once, in `pyproject.toml`; the command reads it from the installed package's metadata.
+- **The wheel holds the code, `py.typed`, the licence, the two JSON Schemas and the conformance
+  suite,** the schemas moving from `schema/` at the root to `src/ventoux/schema/` (their `$id`
+  unchanged), since a wheel holds only the package: one place, read by `ventoux schema
+  --unchanged` in the repository and installed alike. **It never holds** tests, examples, docs,
+  scripts, a key or certificate, a key file, or a recording: a wheel that does, or that lacks a
+  file it must hold, fails CI, naming the file. `ventoux.testing` ships, for teams' tests.
+- **Extras: `anthropic` only.** Vault needs none.
+- **pydantic is bounded below its next minor version** (`>=2.13.5,<2.14`): a contract's hash is
+  made from pydantic's JSON Schema of its models, which 2.14 writes otherwise for a decimal
+  field, so under another minor version contracts would hash differently and the lock and the
+  registry refuse their workers (D54). Found by the package's fresh install in 20c. Raising the
+  bound is a release of its own, checked against the lock; making the hash independent of
+  pydantic's rendering is a later decision.
+- **The supported imports are a committed list,** `src/ventoux/public.json`: the names the guides
+  tell teams to import, the builder's `__all__`, and the protocols a deployment implements.
+  Everything else is internal: importable, unsupported, free to change. A listed name that
+  disappears fails a test, so removing one is a decision, as a contract change is; a name a guide
+  imports that the list doesn't hold fails too.
+- **A release is built and checked, never published, by CI:** `uv build`, then the wheel installed
+  in a fresh environment runs `ventoux version`, `ventoux schema --unchanged` and `ventoux
+  conformance --unchanged` from what it installed. The procedure (bump, changelog, tag, publish)
+  is written in `docs/guides/releasing-ventoux.md`; the tag and the publish are the maintainer's.
+
+*Amended 2026-11-10, by D83* (the text above stands; this changes the bound): contracts no longer
+hash from pydantic's rendering, so pydantic is bounded below its next major (`>=2.13.5,<3`).
+
+### D83. A contract's promise is written by Ventoux, never by pydantic
+
+*Decided 2026-11-10, in the contract rendering fix (`docs/layers/fix-contract-rendering.md`).
+Adds to D5, D50 and D82, whose text is kept.*
+
+- **A contract's input and output models are written as JSON Schema by Ventoux's own writer**
+  (`core/contract_schema.py`), never by pydantic's `model_json_schema()`: so no pydantic version
+  can change a contract's hash. The promise (D57), its hash, the conformance catalog (D80) and the
+  semantic diff all read it.
+- **It writes what pydantic 2.13 wrote, for exactly the field shapes a contract may have:** a
+  text, true or false, a decimal, a day, one of some texts, each input possibly optional, and
+  Ventoux's three marks (input policies, a reference, an output's source). So **hash method 1 is
+  unchanged** and written down: the SHA-256 of the promise written canonically, its models written
+  by this writer. No hash recorded in a lockfile, a release record or a manifest changes.
+- **A model the writer can't describe exactly is refused when the contract is made,** saying which
+  field and what a field may be: a description, a title, examples, an alias, a constraint, a
+  default other than `None`, any other mark, or any `model_config`. Never written some other way,
+  never left to pydantic (fail closed). Writing more of them is a decision.
+- **Set aside: a hash method 2,** a description Ventoux designs (no titles, no class name). It
+  would change what a promise covers, and migrate the lockfile, release records and manifests;
+  that is a decision of its own, and method 2 stays free for it.
+
 ## Concepts
 
 | Term | Meaning |
@@ -2719,10 +3580,16 @@ text is kept.*
 | Rule | *When* something happens, *if* a condition holds, *then* act on the case |
 | Case file | The case's decision facts and references to records elsewhere, each with its provenance |
 | Reference | The ID of a record kept in another system, typed by that system's name |
+| Date | A day on the calendar, given to the case by a source; no time, no time zone, never today |
+| Option | One of a system's list, given by a person and checked through that system's activity when given |
+| Attachment | The ID a document store issued for a file, given by a person and checked through the store's activity when given; the file stays in the store |
 | Resolver | Shows a person what a reference points to, by asking its system on their behalf; never stored |
 | Task | A step asking people with given roles a question, answered with an outcome |
 | Outcome | A named answer from a task, an approval or an activity (`approve`, `declined`); a task's may set case-file fields |
 | Approval | A task guarding a step: approve or reject, by an eligible person, tied to the values it saw |
+| Holder | The one person an open task or approval is asked of, by a claim or an assignment; it grants nothing, and while someone holds an entry only they answer it |
+| Queue | The open entries nobody holds, seen by everyone with one of their roles |
+| Assigner | Someone whose role assigns: they move an open entry between people, or back to its queue, without its holder; never answering it, and never moving the approval of a step they may not approve |
 | Closing | A case that will start nothing new and closes once its running activities finish |
 | Pending work | What keeps a case open: running steps, open tasks or approvals, timers, explicit waits, failed steps |
 | Needs attention | A case with a step that failed after its retries, waiting for an operator; nothing is skipped automatically |
@@ -2731,8 +3598,11 @@ text is kept.*
 | Admission | The engine's decision to allow a proposed step, re-checked when it runs |
 | Provenance tag | The sources a value was derived from |
 | Input policy | A rule on an activity input: which sources may influence it (a "sink policy" in the security literature; D21) |
+| Audit record | One act a case decided, as data: who, the decisions it caused, the rules and facts they read; numbered in its stream, never parsed from history |
+| Audit export | The append-only copy of a case's audit records, in a store the platform team keeps, with its own retention; sensitive values sealed under the case's key |
 | Change request | A proposed change to a running case, applied only after someone else approves it |
-| Package | A case definition and the plans it uses, released together |
+| Package | A case definition, the plans it uses and the child cases it pins, released together |
+| Child case | A whole case opened from a step of another, pinned by its release, reporting back as the step's outputs |
 | Release | An immutable, numbered version of a package, identified by its behaviour digest |
 | Activation | Making new cases in an environment start on a given release |
 | Worker manifest | What one worker says it serves, as it starts: each contract with its hash, its workflow types and bindings |
@@ -2782,6 +3652,11 @@ A visual editor, a polished production UI (v1.0 ships the API and a reference in
 task forms from field types; there is no form designer), broker connectors, BPMN, CMMN or
 Serverless Workflow import, multi-tenancy, code inside definitions (scripts, listeners), and the
 deferred features listed above.
+
+*Amended 2026-11-08, by D79* (the text above stands; this changes what v1.0 ships): v1.0 ships no
+API and no reference inbox; the trusted caller is the integrator's own service, calling Ventoux's
+client functions. The API and the inbox come after v1.0. "Where it runs" and the layers' diagram,
+which name them, are read the same way.
 
 ## Design questions (all decided)
 

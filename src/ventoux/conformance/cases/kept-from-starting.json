@@ -1,0 +1,41 @@
+{
+  "case": "checked",
+  "display": {
+    "title": "Checked"
+  },
+  "fields": {
+    "note": {
+      "type": "string",
+      "display": {
+        "title": "What the customer wrote"
+      },
+      "source": "untrusted:customer"
+    }
+  },
+  "steps": {
+    "check": {
+      "kind": "task",
+      "display": {
+        "title": "Check the request"
+      },
+      "roles": [
+        "support"
+      ],
+      "when": {
+        "!=": [
+          {
+            "var": "note"
+          },
+          "skip"
+        ]
+      },
+      "outcomes": {
+        "ok": {
+          "display": {
+            "title": "Checked"
+          }
+        }
+      }
+    }
+  }
+}

@@ -8,9 +8,20 @@ from collections.abc import Mapping
 from typing import Any
 
 from ventoux.case.called import called
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
+from ventoux.case.definition import (
+    ActivityStep,
+    CallStep,
+    CaseDefinition,
+    CaseInvalid,
+    CaseStep,
+    PlanStep,
+    WorkflowStep,
+    form_fields,
+    parse_case,
+    rule_fields,
+)
 from ventoux.case.plan_step import PlanNotSupplied, supplied
-from ventoux.case.types import expressions_of, set_problem, type_problem
+from ventoux.case.types import expressions_of, set_problem, step_types, type_problem
 from ventoux.core.approval import risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
@@ -67,6 +78,96 @@ def supplied_plans(
             fix = "" if step.plan in plans else ": supply it with the deployment's plans"
             issues.append(Issue(f"steps.{name}.plan", "UNKNOWN_PLAN", f"{missing}{fix}"))
     return found, issues
+
+
+def supplied_cases(
+    case: CaseDefinition, cases: Mapping[str, Any]
+) -> tuple[dict[str, CaseDefinition], list[Issue]]:
+    """The child each case step opens, by step, read from `cases`, stored data by reference; and
+    an issue for each step whose child isn't supplied (brief, D74). A case references its child,
+    never defines it: the parent's package holds it, under `cases/`."""
+    found: dict[str, CaseDefinition] = {}
+    issues: list[Issue] = []
+    for name, step in case.steps.items():
+        if not isinstance(step, CaseStep):
+            continue
+        path = f"steps.{name}.case"
+        if step.case not in cases:
+            problem = f"{step.case} isn't supplied: add it to the package's cases/"
+            issues.append(Issue(path, "UNKNOWN_CASE", problem))
+            continue
+        # Fail closed: a child that can't be read, or is another case, never runs in its place.
+        try:
+            child = parse_case(cases[step.case])
+        except CaseInvalid as invalid:
+            issues.append(Issue(path, "UNKNOWN_CASE", f"{step.case} can't be read: {invalid}"))
+            continue
+        if child.case != step.case.split("@")[0]:
+            problem = f"{step.case} is supplied as {child.case}: supply the case it names"
+            issues.append(Issue(path, "UNKNOWN_CASE", problem))
+            continue
+        # One level only: a deliberate limit, so one close reaches all it must (brief, D74).
+        nested = [own for own, inner in child.steps.items() if isinstance(inner, CaseStep)]
+        if nested:
+            problem = (
+                f"{step.case} has a case step, {', '.join(nested)}: a child case opens no case of "
+                "its own"
+            )
+            issues.append(Issue(path, "NESTED_CASE", problem))
+            continue
+        found[name] = child
+    return found, issues
+
+
+def case_input_issues(case: CaseDefinition, children: Mapping[str, CaseDefinition]) -> list[Issue]:
+    """Each case step's inputs against its child's opening: a field of the child that neither its
+    forms nor its rules set, as any opening is checked (brief, D74). A field it takes and isn't
+    given is simply not given."""
+    issues: list[Issue] = []
+    for name, child in children.items():
+        step = case.steps[name]
+        assert isinstance(step, CaseStep)  # only a case step opens a child
+        setters = {field: f"its task {task}" for field, task in form_fields(child).items()}
+        setters |= {field: f"its rule {rule}" for field, rule in rule_fields(child).items()}
+        takes = ", ".join(sorted(field for field in child.fields if field not in setters))
+        for given in step.inputs:
+            if given in setters:
+                problem = (
+                    f"{step.case} takes no input {given}: {setters[given]} sets it; its inputs "
+                    f"are {takes}"
+                )
+            elif given not in child.fields:
+                problem = f"{step.case} has no input {given}: its inputs are {takes}"
+            else:
+                continue
+            issues.append(Issue(f"steps.{name}.inputs.{given}", "UNKNOWN_INPUT", problem))
+    return issues
+
+
+def sensitive_to_child_issues(
+    case: CaseDefinition, children: Mapping[str, CaseDefinition]
+) -> list[Issue]:
+    """Each case step's input that reads a sensitive field into a field its child doesn't keep
+    sensitive: a view can hide more than its source, never less (brief, D74)."""
+    issues: list[Issue] = []
+    for name, child in children.items():
+        step = case.steps[name]
+        assert isinstance(step, CaseStep)  # only a case step opens a child
+        for given, expression in step.inputs.items():
+            opening = child.fields.get(given)
+            if opening is None or opening.sensitive:
+                continue  # an unknown input is UNKNOWN_INPUT's (one cause, one issue)
+            for read in sorted(fields_read(expression)):
+                if read in case.fields and case.fields[read].sensitive:
+                    issues.append(
+                        Issue(
+                            f"steps.{name}.inputs.{given}",
+                            "SENSITIVE_TO_CHILD",
+                            f"{read} is sensitive, and {step.case}'s {given} isn't: a child "
+                            "keeps a sensitive value sensitive",
+                        )
+                    )
+    return issues
 
 
 def contract_input_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> list[Issue]:
@@ -150,7 +251,7 @@ def expression_issues(
             read = fields_read(expression)
             if any(field.split(".")[0] in missing and "." in field for field in read):
                 continue
-            problem = type_problem(expression, types, condition)
+            problem = type_problem(expression, step_types(case, types, name), condition)
             if problem is not None:
                 issues.append(Issue(f"steps.{name}.{where}", "EXPRESSION_INVALID", problem))
     # A rule's condition too, as the runtime checks it before reading it (brief, D38).
@@ -188,11 +289,20 @@ def approval_issues(
         assert isinstance(step, CallStep)  # only a call step has a contract
         if step.approval is None:
             if contract.risk == "high":
+                # A repeated step can have no approval yet, so "add one" can't be done
+                # (brief, D48) (brief, D73).
+                repeated = isinstance(step, ActivityStep) and step.for_each is not None
+                needs = (
+                    f"{name} is repeated, so it can have no approval: repeat a low-risk step, "
+                    "or pay once"
+                    if repeated
+                    else f"{name} has no approval: add one"
+                )
                 issues.append(
                     Issue(
                         f"steps.{name}",
                         "APPROVAL_REQUIRED",
-                        f"{contract.reference} is high risk, and {name} has no approval: add one",
+                        f"{contract.reference} is high risk, and {needs}",
                     )
                 )
             continue

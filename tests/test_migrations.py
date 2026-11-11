@@ -99,13 +99,13 @@ def test_a_migration_moves_the_case() -> None:
         "pia proposed case.change#1: migrate to refund 2, to be approved by platform",
         "lee answered case.change#1 approve as platform",
         (
-            "applied case.change#1: migrated from refund 1, engine 2 to refund 2, engine 2, "
+            "applied case.change#1: migrated from refund 1, engine 3 to refund 2, engine 3, "
             "proposed by pia, approved by lee"
         ),
         "withdrew pay.approval#1: refund 2 changed pay",
         "started fraud_check#1: waiting for clear by fraud",
     ]
-    assert (moved.state.release, moved.state.engine) == ("refund 2", 2)
+    assert (moved.state.release, moved.state.engine) == ("refund 2", 3)
     # The case now decides as refund 2: the payment waits for the fraud check, then its approval.
     paid = on_refund_1(
         [
@@ -152,13 +152,13 @@ def test_a_target_is_checked() -> None:
         "refund 3 calls payments.refund@3, which this worker's catalog doesn't have"
     )
     assert refused_migration(REFUND_1) == (
-        "the case is already on refund 1, engine 2: nothing to move"
+        "the case is already on refund 1, engine 3: nothing to move"
     )
-    assert refused_migration(REFUND_2, engine=3) == (
-        "engine 3 is one this code doesn't know (it knows 2, 1)"
+    assert refused_migration(REFUND_2, engine=4) == (
+        "engine 4 is one this code doesn't know (it knows 3, 2, 1)"
     )
     assert refused_migration(REFUND_2, engine=1) == (
-        "engine 1 is older than the case's engine 2: the engine never goes back"
+        "engine 1 is older than the case's engine 3: the engine never goes back"
     )
 
 
@@ -203,7 +203,7 @@ def test_names_map_by_name() -> None:
     )
     assert moved.history[-5:] == [
         (
-            "applied case.change#1: migrated from refund 1, engine 2 to refund 3, engine 2, "
+            "applied case.change#1: migrated from refund 1, engine 3 to refund 3, engine 3, "
             "proposed by pia, approved by lee"
         ),
         "withdrew pay.approval#1: refund 3 changed pay",
@@ -922,7 +922,7 @@ def test_pending_requests_and_events_across_a_migration() -> None:
         ]
     )
     assert twice.history[-1] == (
-        "case.change#2 not applied: the case moved to refund 2, engine 2 since it was proposed: "
+        "case.change#2 not applied: the case moved to refund 2, engine 3 since it was proposed: "
         "propose it again"
     )
     # An event is decided under the release current when its turn comes: its old name refused.
@@ -1016,24 +1016,24 @@ def test_the_preview_is_the_apply_without_effect() -> None:
     reviewed = on_refund_1([REVIEWED])
     before = copy.deepcopy(reviewed.state)
     seen = preview_migration(
-        parse_case(REFUND), CATALOG, reviewed.state, migration_of(REFUND_3, RENAMES, 2), START
+        parse_case(REFUND), CATALOG, reviewed.state, migration_of(REFUND_3, RENAMES, 3), START
     )
     assert seen.refused == ()
     applied = on_refund_1(
         [REVIEWED, migrate(REFUND_3, RENAMES, "pia"), ("case.change#1", "approve", "lee")]
     )
     start = applied.history.index(
-        "applied case.change#1: migrated from refund 1, engine 2 to refund 3, engine 2, "
+        "applied case.change#1: migrated from refund 1, engine 3 to refund 3, engine 3, "
         "proposed by pia, approved by lee"
     )
     assert seen.lines == (
-        "from refund 1, engine 2 to refund 3, engine 2",
+        "from refund 1, engine 3 to refund 3, engine 3",
         *applied.history[start + 1 :],
     )
     assert reviewed.state == before
     # A refusal is previewed too, every problem at once.
     unmapped = preview_migration(
-        parse_case(REFUND), CATALOG, reviewed.state, migration_of(REFUND_3, {}, 2), START
+        parse_case(REFUND), CATALOG, reviewed.state, migration_of(REFUND_3, {}, 3), START
     )
     assert unmapped.lines == ()
     assert unmapped.refused == (

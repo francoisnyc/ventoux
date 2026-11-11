@@ -2,8 +2,8 @@
 
 > **For workflow developers.** This guide describes layer 9 as if it already worked; the code that
 > makes it true is built test-first, in four parts: references and who sees what (9a), sensitive
-> fields (9b), forgetting a person (9c) and fresh facts (9d). The "Design notes" at the end list
-> what writing it revealed.
+> fields (9b), forgetting a person (9c) and fresh facts (9d). Dates are layer 16a's, options
+> 16b's. The "Design notes" at the end list what writing it revealed.
 
 **The rule of thumb:** a case file holds the **facts your rules decide on**, and **references** to
 everything else. Customers, orders, policies and documents stay in the systems that own them.
@@ -183,6 +183,156 @@ person's answer.
                       "display": {"title": "Customer's own estimate"}}
 ```
 
+## Dates
+
+A `date` field holds a day on the calendar: when the incident happened, when the policy started.
+It is written as text, `"2026-10-31"` (`YYYY-MM-DD`), and the type makes it a date: a value that
+isn't a real day is refused where it is given, before it reaches the case file.
+
+```json
+"fields": {
+  "policy_start": {"type": "date", "display": {"title": "Policy start"}},
+  "incident_date": {"type": "date", "display": {"title": "Date of the incident"}}
+}
+```
+
+```text
+incident_date is a date, written YYYY-MM-DD, and the answer gives a string that isn't one
+```
+
+A date comes from where every value comes from, and carries its source like any other:
+
+| A date given by… | Example | Its source |
+|---|---|---|
+| the system that opened the case | the policy's start, sent with the claim | trusted, `system:opener` |
+| a person's answer to a task | the adjuster's date of the incident | trusted, the person |
+| a registered system, through an activity | a contract whose output is a date | as its contract says |
+| an event from outside | a payload field declared `date` | as the event declares |
+| a customer's message | the date the customer says it happened | **untrusted**: it can inform people, never decide |
+
+**Ventoux never makes a date up.** No field is filled with today's date, and no expression reads
+it (see the expressions guide). A date is always a fact someone gave, recorded with who gave it.
+
+**A date has no time zone, and Ventoux never converts a moment into one.** "31 October" is a day;
+"23:30 on 31 October in New York" is a moment, and it is already 1 November in Paris. Which day a
+moment falls on depends on where you stand, so that choice belongs to whoever gives the date: the
+adjuster says which day the incident happened, a contract returns the day its system means. If a
+system only has a moment, its activity turns it into the day the business means, and its contract
+says it returns a date.
+
+## Options: a value a system's list must hold
+
+Some answers must be one of a list another system keeps: the branch handling a claim, a product, a
+cost centre. The list isn't yours to write, and it changes on its own (a branch closes). An
+**option** is such a value, checked against the system's list **when a person gives it**:
+
+```json
+"fields": {
+  "branch": {"type": "option", "system": "branches", "display": {"title": "Branch handling the claim"}}
+}
+```
+
+When Ana answers with `{"branch": "BR-0142"}`, the case asks the system, through the check activity
+your platform team registered for `branches` (activities guide, "An option's check"), and only then
+takes the answer:
+
+```text
+ana answered assess#1 accept as adjuster, setting branch, checked by branches.holds@1
+```
+
+An option the system's list doesn't hold is refused, and the refusal stays in the case's history;
+the task stays open for a corrected answer. The message names the field and the system, never the
+value, which may be hidden from whoever reads the history:
+
+```text
+refused ana's answer accept: branch is not one of the options branches holds
+```
+
+**It is checked once, when it is given.** "BR-0142 was open when Ana answered" stays true after the
+branch closes; like every fact, it records when it was obtained. If a step needs the branch still
+open where it uses it, say so with `max_age` (see "Fresh facts").
+
+**Nothing is taken on trust.** If the check can't be made (the system is down, or answers
+something the contract doesn't describe), the answer is not taken, and says why; nothing guesses
+that the option is fine.
+
+**Only a person gives an option.** The opening and an event's payload come from systems, and a
+rule decides on its own; an option one of them would set is refused (the opening when it is given,
+the event and the rule by `ventoux check`), since nothing would check it. An activity's output is
+never one: its contract can declare a reference, not an option. Nor is an option edited (cases
+guide, "Changing an open case"): an edit is checked for its type, never by the system, so the
+edit is refused when it is proposed. A system that already knows the branch gives a `reference`
+to `branches`.
+
+An option reads like a reference to its system (see the expressions guide): it is compared only
+with another value of the same system, and a value written in the definition is never one, since
+only the system can say which values exist.
+
+## Attachments: a document kept in a store, never in the case
+
+Some answers come with a file: the receipt for a claim, a photo of the damage, a signed form. The
+file never goes into the case. It lives in a **document store** your platform team registers, and
+the case keeps only the ID the store gave it:
+
+```json
+"fields": {
+  "receipt": {"type": "attachment", "store": "documents", "display": {"title": "The receipt"}}
+}
+```
+
+When Ana attaches the receipt, the inbox uploads the file to the store, as Ana, and the store
+gives it an ID, say `doc-7f3a`. Her answer gives that ID, `{"receipt": "doc-7f3a"}`. The case asks
+the store whether it issued that ID, through the check your platform team registered for the
+store (activities guide, "A document store"), and only then takes the answer:
+
+```text
+ana answered assess#1 accept as adjuster, setting receipt, checked by documents.issued@1
+```
+
+An ID the store didn't issue is refused, and the refusal stays in the case's history; the task
+stays open for a corrected answer. Text pasted where an ID belongs, the document's own words
+included, is not an ID the store issued, so it never lands:
+
+```text
+refused ana's answer accept: receipt is not a document documents issued
+```
+
+**Why never the file itself.** The case's history is kept for ever, replayed, and read by anyone
+with access to Temporal; a file in it could never be forgotten, and a large one would not fit.
+The ID is small, and says only where the file is. An answer giving more than 200 characters for
+an attachment is refused before the store is asked, never quoting what it gave:
+
+```text
+receipt is an attachment, the ID a store issued, at most 200 characters: upload the file to documents and give its ID
+```
+
+The case refuses to keep a file; it can't stop a client sending one. On Temporal an answer is a
+message the workflow records as it arrives, refused or not, so the inbox uploads files to the
+store and sends only their IDs.
+
+One field holds one file. A list's fields can't be attachments: `ventoux check` says so.
+
+**Opening it.** Whoever may see `receipt` opens it in the inbox, which asks the store **on their
+behalf**, as a reference's record is shown (see "References"): the store's own permissions decide,
+and what it shows never enters the case. Ventoux may hide more than the store, never show more.
+
+**The file's contents are its author's words.** That Ana attached a receipt, and the store issued
+it, is a fact; what the receipt says is whoever wrote it. An activity that reads the document,
+such as a summary a model writes, gives what it read marked untrusted (activities guide, "Output
+sources").
+
+**Only a person attaches a file, in a task's answer,** as with an option: an attachment the
+opening, an event's payload or a rule would set is refused, and so is an edit of one, since
+nothing would check that the store issued it. A system that sends a document it already stored
+gives a `reference` to the store.
+
+**Forgetting.** Forgetting a case makes its sensitive values unreadable (see "Forgetting a
+person"); the store keeps its files under its own rules. Mark an attachment `sensitive` if its ID
+itself says something, and have your store erase the file when the person is forgotten.
+
+An attachment reads like a reference to its store in expressions (see the expressions guide):
+`exists` asks whether one was attached; it is compared only with another value of the same store.
+
 ## Sensitive data
 
 A field marked `"sensitive": true` holds something personal a decision needs, such as a national
@@ -231,8 +381,9 @@ inputs, a plan step's fields, the state carried when a long case continues as ne
 answers to `view`. Failures are covered too: Temporal keeps a failure's message and stack trace
 beside the payloads, so Ventoux encrypts both, whoever raised it.
 
-Your platform team runs the **key provider** (Vault or a cloud KMS, after v1.0). It encrypts and
-decrypts for Ventoux, so a key never leaves it. In development, keys are kept in a local file. The client and the worker connect with a data converter that
+Your platform team runs the **key provider**, Vault's transit engine in production (the audit
+guide, `docs/guides/audit.md`, shows how). It encrypts and decrypts for Ventoux, so a key never
+leaves it. In development, keys are kept in a local file. The client and the worker connect with a data converter that
 holds it:
 
 ```python
@@ -314,11 +465,12 @@ class ClaimForget(ForgetWorkflow):
 
 ```python
 worker = case_worker(client, "claims", ClaimCases, ClaimPlans, implementations,
-                     forget=ClaimForget, activity_executor=activity_executor)
+                     forget=ClaimForget, activity_executor=activity_executor, audit=store)
 ```
 
 `activity_executor` is the thread pool the cases guide's `with` block opens, and shuts down once
-the worker has stopped.
+the worker has stopped; `store` is where the cases' records are written (the audit guide,
+`docs/guides/audit.md`).
 
 Forgetting is proposed by one person with such a role and approved by **another**: erasure can
 conflict with keeping records, so it is a decision, made by two people. The proposer can't approve
@@ -367,6 +519,12 @@ says so:
 | `"while_open"` | accepted while the case is open, refused once it is closed |
 | `"never"` | always refused |
 
+Closed is the case's own word, and so is what it keeps: the request reads both from the report the
+case returns as it ends, before it destroys anything. A case that has closed and is still writing
+its audit records runs on in Temporal, and is closed all the same. And if a migration moved the
+case to a release that keeps its records after the request was proposed, the release it ended on
+decides.
+
 **After forgetting:**
 
 - `report(case)` still works: it reads the report the case made when it closed, which holds
@@ -398,6 +556,9 @@ says so:
 | the case is never forgotten | `claim-7 keeps its records (forgetting: never): it can't be forgotten` |
 | the case closed before the approval reached it, and keeps closed cases | `claim-7 closed before forgetting was approved, and its definition keeps closed cases (forgetting: while_open)` |
 | the case's definition can't be read any more | `claim-7's definition can't be read: Temporal holds no history of it, so whether it keeps its records is unknown` |
+| the case's definition can't be read by the worker's code | `claim-7 holds a definition this worker can't read, so whether it keeps its records is unknown: deploy code that reads it, then propose again` |
+| the ID is a plan's run, not a case | `run-1 is not a case: it is a plan's run, and a request forgets a case` |
+| the case ended on a definition that never forgets | `claim-7 keeps its records (forgetting: never): it can't be forgotten` |
 | the case's file is viewed after forgetting | `claim-7 was forgotten: its case file can't be read` |
 | a forgotten case's history is read or replayed | `the key of claim-7 was destroyed when it was forgotten: its sensitive values can't be read or written` |
 
@@ -565,10 +726,11 @@ epoch. A hidden field's time is hidden with it; a sensitive field's time is not 
 
 ## Reports
 
-To answer questions across cases ("every claim above 10,000 this quarter"), use the **case export**,
-which copies case events and facts to your data warehouse or database. Don't query running cases.
-Sensitive values stay encrypted in the export, under the case's key, so forgetting a person reaches
-the warehouse too.
+To answer questions across cases ("every claim above 10,000 this quarter"), use the **audit
+export**, which copies every decision a case makes, with the facts it rested on, to a store your
+platform team keeps. Don't query running cases. Sensitive values stay encrypted in the export,
+under the case's key, so forgetting a person reaches the warehouse too. The audit guide
+(`docs/guides/audit.md`) shows what an event holds and how to read it.
 
 ## Common questions
 
@@ -613,10 +775,25 @@ the warehouse too.
    system="orders")`, which also makes the quickstart teach the rule of thumb from the start.
 8. **No date type yet** (layer 9a). An earlier draft had a sensitive `birth_date` with
    `Field.date()`; expressions have no date type (brief, D20), and adding one is a decision of its
-   own. The sensitive example is a `national_id`, a text.
+   own. The sensitive example is a `national_id`, a text. *Layer 16a adds the date* (see "Dates").
 9. **Hiding and encrypting are different promises** (layer 9a). `visible_to` filters the case view;
    only `sensitive` keeps a value out of Temporal's plain history.
 10. **Sensitive values are encrypted one by one, not whole payloads** (layer 9b). Each travels in
     its own part of a payload, so the rest of the history stays readable (brief, D15). An
     activity's own error message is treated as sensitive whatever the case declares: Ventoux
     can't know what it says.
+11. **A date is a day, and someone always gives it** (layer 16a). Writing "Dates" showed three
+    things to decide: a moment becomes a day only with a time zone, so Ventoux never converts one
+    and whoever gives the date chooses the day; a field filled with today's date would be the
+    clock by another door, so there is none; and a text date is still a text, so a date literal
+    in an expression needs its own form, `{"date": "…"}`.
+12. **An option is a value the system vouches for, when it is given** (layer 16b). Writing
+    "Options" showed what to decide: whether it is a type of its own or a checked reference; which
+    activity checks it, and how the catalog names it; what happens while the check runs; its
+    source (the person, and the system that checked it); and why only a person gives one.
+13. **An attachment is a reference the store issued, checked when it is given** (layer 16c).
+    Writing "Attachments" showed what to decide: a type of its own beside `reference`, naming a
+    registered store; how the store says it issued an ID, and how the catalog names that check;
+    how a file is opened (as a reference's record is, on the viewer's behalf); what marks its
+    contents; who may attach one; and what forgetting does, and doesn't, reach.
+

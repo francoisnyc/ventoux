@@ -1,0 +1,79 @@
+{
+  "case": "order-return",
+  "display": {
+    "title": "A returned order"
+  },
+  "fields": {
+    "order_id": {
+      "type": "reference",
+      "system": "orders",
+      "display": {
+        "title": "Order"
+      }
+    },
+    "email": {
+      "type": "string",
+      "display": {
+        "title": "Customer email"
+      }
+    },
+    "lines": {
+      "type": "list",
+      "display": {
+        "title": "Returned lines"
+      },
+      "fields": {
+        "sku": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "steps": {
+    "inspect_line": {
+      "kind": "task",
+      "display": {
+        "title": "Inspect a returned line"
+      },
+      "roles": [
+        "support"
+      ],
+      "for_each": {
+        "over": "lines",
+        "key": "sku"
+      },
+      "outcomes": {
+        "received": {
+          "display": {
+            "title": "Received"
+          }
+        },
+        "missing": {
+          "display": {
+            "title": "Missing"
+          }
+        }
+      }
+    },
+    "draft_line": {
+      "kind": "activity",
+      "display": {
+        "title": "Draft a letter about one line"
+      },
+      "activity": "letters.draft@2",
+      "for_each": {
+        "over": "lines",
+        "key": "sku"
+      },
+      "inputs": {
+        "to_customer": {
+          "var": "email"
+        },
+        "template": "line-returned"
+      }
+    }
+  }
+}

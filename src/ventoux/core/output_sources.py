@@ -5,11 +5,10 @@ policy is written on an input field. See docs/guides/activities.md.
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
-from typing import Any
 
-from pydantic import BaseModel, GetJsonSchemaHandler
-from pydantic_core import CoreSchema
+from pydantic import BaseModel
 
 from ventoux.core.provenance import is_label
 
@@ -24,8 +23,9 @@ UNDECLARED = f"untrusted:{UNDECLARED_LABEL}"
 # What an output field may hold: what the case file holds exactly and expressions read (brief, D20).
 # Numbers are exact decimals, never binary floats; a reference is a text. A nested model would put a
 # Python object in the case file, not data, so it is refused too (tutor review of layer 8d).
-HELD = (Decimal, str, bool)
-HELD_NAMES = "a decimal (Decimal), a text (str) or true or false (bool)"
+# A day is a `date`, matched exactly, so a `datetime`, a moment, is never held (brief, D66).
+HELD = (Decimal, str, bool, date)
+HELD_NAMES = "a decimal (Decimal), a text (str), true or false (bool) or a day (date)"
 
 
 @dataclass(frozen=True)
@@ -33,17 +33,6 @@ class OutputSource:
     """Where the value of one output field comes from: `system:kyc` or `untrusted:llm`."""
 
     source: str  # the source every value of this field is tagged with in the case file
-
-    # Pydantic: on an object inside `Annotated[...]`, `__get_pydantic_json_schema__` is called when
-    # the model's JSON Schema is made, and may add to the field's schema.
-    def __get_pydantic_json_schema__(
-        self, core_schema: CoreSchema, handler: GetJsonSchemaHandler
-    ) -> dict[str, Any]:
-        # The source goes into the published schema, which the contract hash covers: declaring or
-        # changing one changes the contract. A field with none adds nothing (brief, D29).
-        schema: dict[str, Any] = handler(core_schema)
-        schema["x-source"] = self.source
-        return schema
 
 
 def source(text: str) -> OutputSource:

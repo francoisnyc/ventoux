@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from activity_threads import activity_threads
 from one_copy import put_back, second_copies
 from replaying import replay_history
 from skipping_server import time_skipping
@@ -27,7 +26,7 @@ from temporalio.client import (
     WorkflowHandle,
     WorkflowQueryFailedError,
 )
-from temporalio.converter import WorkflowSerializationContext
+from temporalio.converter import DataConverter, WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 from test_temporal_case import LARGE, REVIEW_FORM, CasesWithPlans, refund_with_plan
@@ -40,6 +39,7 @@ from test_temporal_sensitive import (
     sensitive_claim,
 )
 from test_temporal_sensitive import reported as reported_case
+from worker_threads import worker_threads
 
 from ventoux.temporal import cases
 from ventoux.temporal.cases import (
@@ -55,6 +55,9 @@ from ventoux.temporal.cases import (
 )
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import (
+    NOT_A_CASE,
+    UNREAD,
+    CaseEnded,
     CaseLookup,
     CaseOpener,
     ForgetActivities,
@@ -62,6 +65,7 @@ from ventoux.temporal.forget import (
     ForgetWorkflow,
     answer_forget,
     closed_first,
+    ending_refusal,
     forget_report,
     lookup_refusal,
     opener_refusal,
@@ -69,6 +73,7 @@ from ventoux.temporal.forget import (
 )
 from ventoux.temporal.sandbox import SANDBOX
 from ventoux.temporal.worker import case_worker
+from ventoux.tooling.audit import AuditStore
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
 # uses from the development setup is passed through, imported once and shared (as in 8c's tests).
@@ -86,6 +91,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentForget,
         DevelopmentPlans,
         as_json,
+        development_audit,
         development_converter,
         load_definition,
     )
@@ -99,14 +105,17 @@ def on_temporal[T](
     scenario: Callable[[Client], Awaitable[T]],
     activities: Mapping[str, Activity] = FAKES,
     cases: type[CaseWorkflow] = DevelopmentCases,
+    audit: AuditStore | None = None,
+    converter: DataConverter | None = None,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a case worker serving
-    `activities` and requests to forget."""
+    `activities` and requests to forget; its records go to `audit`, else a fresh store; its keys
+    are `converter`'s, else fresh development ones."""
 
     async def go() -> T:
         async with (
-            time_skipping(development_converter()) as environment,
-            activity_threads() as threads,
+            time_skipping(converter or development_converter()) as environment,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -115,6 +124,7 @@ def on_temporal[T](
                 activities,
                 forget=DevelopmentForget,
                 activity_executor=threads,
+                audit=audit or development_audit(),
             ),
             Worker(
                 environment.client,
@@ -863,10 +873,11 @@ def test_the_guides_forget_example_runs_as_written() -> None:
             "ClaimPlans": DevelopmentPlans,
             "ClaimForget": DevelopmentForget,
             "implementations": FAKES,
+            "store": development_audit(),  # the guide's audit store (brief, D77)
         }
         # The guide's worker uses the executor its cases guide's `with` block opens: here, the
         # tests' own, shut down once the worker has stopped (fix-worker-executors).
-        async with activity_threads() as names["activity_executor"]:
+        async with worker_threads() as names["activity_executor"]:
             exec(serving, names)  # noqa: S102
             async with names["worker"]:  # the guide's own worker, on its queue
                 case = await start_case(
@@ -928,6 +939,15 @@ def refusal(when: str, tmp: Path) -> str:
         ),
         "the case's definition can't be read any more": lambda: lookup_refusal(
             "claim-7", CaseLookup("kept", False, "")
+        ),
+        "the case's definition can't be read by the worker's code": lambda: lookup_refusal(
+            "claim-7", CaseLookup("kept", True, "", unreadable=UNREAD)
+        ),
+        "the ID is a plan's run, not a case": lambda: lookup_refusal(
+            "run-1", CaseLookup("kept", False, "", unreadable=NOT_A_CASE)
+        ),
+        "the case ended on a definition that never forgets": lambda: ending_refusal(
+            "claim-7", CaseEnded("closed: duplicate, by ana", [], "never")
         ),
         "a forgotten case's history is read or replayed": lambda: destroyed_key(tmp),
     }

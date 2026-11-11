@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
 from test_advisor import INJECTED, claim
+from worker_threads import worker_threads
 
 from ventoux.authoring.advisor import Advice, Shown
 from ventoux.authoring.beside import advise_case
@@ -41,6 +41,7 @@ from ventoux.testing import (
     START,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
 )
 from ventoux.tooling.cli import main
@@ -127,7 +128,7 @@ def run_the_claim() -> Ran:
     async def go() -> Ran:
         async with (
             time_skipping(converter) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -135,6 +136,7 @@ def run_the_claim() -> Ran:
                 DevelopmentPlans,
                 FAKES,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=30)

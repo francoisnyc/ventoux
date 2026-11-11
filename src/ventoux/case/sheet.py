@@ -111,7 +111,17 @@ def case_map(package: Package, catalog: Catalog) -> str:
     section("Closing", [bullet(read_closing(case))])
     for reference in package.plans:
         section(f"Plan {text(reference)}", plan_read(reference, package, catalog))
+    # Each child it pins, mapped as a package of its own, one level down (brief, D74).
+    for reference, child in package.cases.items():
+        # Its own title is this heading, and the blank line after it this section's.
+        mapped = case_map(child, catalog).splitlines()[2:]
+        section(f"Child case {text(reference)}", [demoted(line) for line in mapped])
     return "\n".join(lines) + "\n"
+
+
+def demoted(line: str) -> str:
+    """A child's map line one level down: its sections are this map's subsections."""
+    return f"#{line}" if line.startswith("## ") else line
 
 
 def plan_read(reference: str, package: Package, catalog: Catalog) -> list[str]:

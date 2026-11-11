@@ -1007,7 +1007,8 @@ def test_a_system_nobody_registered_is_refused() -> None:
             "fields.order_id",
             "UNKNOWN_SYSTEM",
             "order_id is a reference to ordrs, which is not a registered system: the systems are "
-            "crm, documents, kyc, orders, policies, portal; use one of them, or ask the platform team "
+            "branches, crm, documents, kyc, orders, policies, portal; use one of them, or ask the "
+            "platform team "
             "to register it",
         )
     ]
@@ -1164,6 +1165,24 @@ def test_what_a_missing_contract_would_give_is_said_once() -> None:
     thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["check"]}
     claim["steps"]["thank"] = {**thank, "when": {"==": [{"var": "pay.outcome"}, "done"]}}
     assert [issue.code for issue in issues(claim)] == ["UNKNOWN_CONTRACT"]
+
+
+def test_an_input_reading_what_a_missing_contract_would_give_is_said_once() -> None:
+    # Found in layer 18c: an input under a policy, reading a missing contract's output, crashed
+    # the check looking for where it came from. One cause, one issue: only the contract is said.
+    claim = guide_json(0)
+    claim["steps"]["pay"]["activity"] = "payments.refund@3"
+    claim["steps"]["repay"] = {
+        **claim["steps"]["pay"],
+        "display": {"title": "Pay again"},
+        "activity": "payments.refund@2",
+        "requires": ["pay"],
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "pay.amount"}},
+    }
+    claim["steps"]["repay"].pop("reaches", None)
+    claim["steps"]["repay"].pop("when", None)
+    errors = [issue.code for issue in issues(claim) if issue.severity == "error"]
+    assert errors == ["UNKNOWN_CONTRACT"]
 
 
 def test_a_proposal_or_a_retry_never_reads_a_misspelt_outcome() -> None:

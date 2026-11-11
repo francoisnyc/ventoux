@@ -22,7 +22,8 @@ from pydantic import (
 
 from ventoux.case.freshness import seconds_in
 from ventoux.core.before_activity import given_as_reference
-from ventoux.core.expressions import FieldType, ListType, ReferenceType
+from ventoux.core.expressions import FieldType, ListType, ReferenceType, StringType
+from ventoux.core.expressions.check import a_type
 from ventoux.core.plan import (
     WRITTEN_FLAT,
     ActivityReference,
@@ -66,6 +67,10 @@ Roles = Annotated[tuple[RoleName, ...], AfterValidator(some_roles)]
 # A plan, by its name and version: `refund-order@1` (brief, D28).
 PlanReference = Annotated[
     str, matching(r"[a-z][a-z0-9-]*@[1-9][0-9]*", 'a plan reference looks like "refund-order@1"')
+]
+# A child case, by its name and the release its parent pins: `repair@3` (brief, D74).
+CaseReference = Annotated[
+    str, matching(r"[a-z][a-z0-9-]*@[1-9][0-9]*", 'a case reference looks like "repair@3"')
 ]
 
 
@@ -197,6 +202,38 @@ class ApprovalDisplay(Shape):
     reason: str = Field(min_length=1)
 
 
+class ForEach(Shape):
+    """A step run once per item of a list field, each run named by a number the engine gives its
+    item's key the first time it sees it (brief, D73)."""
+
+    over: Name  # the list field whose items it runs for
+    key: Name  # the text field of each item that tells one item from another
+
+
+class Assign(Shape):
+    """Who is asked when each entry opens: the person who opened the case, or whoever gave a
+    task's latest answer. Only people the case already knows, each named by the trusted caller,
+    so untrusted data never routes work (brief, D71)."""
+
+    to: Literal["opener", "answered"]  # whom: the opener, or a task's latest answerer
+    step: Name | None = None  # for `answered`: the task whose latest answer's person is asked
+
+    def aloud(self) -> str:
+        """The rule as a reader says it: `asked of whoever answered review`."""
+        if self.to == "opener":
+            return "asked of whoever opened the case"
+        return f"asked of whoever answered {self.step}"
+
+    @model_validator(mode="after")
+    def names_a_step_when_answered(self) -> "Assign":
+        """`answered` names its task; `opener` names none."""
+        if self.to == "answered" and self.step is None:
+            raise ValueError('"answered" names the task whose answerer is asked: add "step"')
+        if self.to == "opener" and self.step is not None:
+            raise ValueError('"opener" is the person who opened the case: remove "step"')
+        return self
+
+
 class Approval(Shape):
     """`count` different people with one of `roles` approve running the step, when `when` holds
     (brief, D11) (brief, D47)."""
@@ -208,6 +245,7 @@ class Approval(Shape):
         int, Whole(1, "how many people must approve: a whole number of at least 1, such as 2")
     ] = 1  # how many people must approve
     display: ApprovalDisplay
+    assign: Assign | None = None  # who is asked when it is asked; None: its queue (brief, D71)
 
 
 def sent_by(declared: DeclaredEvent) -> str:
@@ -234,6 +272,9 @@ class Step(Shape):
     proposed_by: tuple[RoleName, ...] = ()  # who may propose it
     repeatable: StrictBool = False  # may run again, when proposed
     reaches: tuple[Name, ...] = ()  # milestones reached when it completes
+    # Owed by the case: it doesn't close by itself until this step's latest run is done
+    # (brief, D72).
+    required: StrictBool = False
 
 
 class TaskStep(Step):
@@ -242,6 +283,8 @@ class TaskStep(Step):
     kind: Literal["task"]
     roles: Roles  # who may answer
     outcomes: Annotated[dict[EventName, Outcome], Field(min_length=1)]
+    assign: Assign | None = None  # who is asked when each run opens; None: its queue (brief, D71)
+    for_each: ForEach | None = None  # one run per item of a list field (brief, D73)
 
 
 class CallStep(Step):
@@ -263,6 +306,7 @@ class ActivityStep(CallStep):
 
     kind: Literal["activity"]
     activity: ActivityReference
+    for_each: ForEach | None = None  # one run per item of a list field (brief, D73)
 
     @property
     def called(self) -> str:
@@ -306,6 +350,24 @@ class PlanStep(Step):
         """A plan step has no approval: the plan carries its own, checked when it is read."""
         if isinstance(data, dict) and "approval" in data:
             raise ValueError("a plan step has no approval: its plan asks for its own")
+        return data
+
+
+class CaseStep(Step):
+    """A whole case opened from this step, a child of this case: its opening given from the case
+    file, and its end report read back as the step's outputs (brief, D74)."""
+
+    kind: Literal["case"]
+    case: CaseReference  # the child, with the release this case pins
+    inputs: dict[Name, PlanExpression] = {}  # each of the child's opening fields, from the file
+    max_age: MaxAge = {}  # how old each fact it reads may be when it runs (brief, D18)
+
+    @model_validator(mode="before")
+    @classmethod
+    def no_approval(cls, data: Any) -> Any:
+        """A case step has no approval: the child's own steps ask for theirs (brief, D74)."""
+        if isinstance(data, dict) and "approval" in data:
+            raise ValueError("a case step has no approval: its child's steps ask for their own")
         return data
 
 
@@ -552,6 +614,7 @@ type AnyStep = Annotated[
     Annotated[TaskStep, Tag("task step")]
     | Annotated[ActivityStep, Tag("activity step")]
     | Annotated[PlanStep, Tag("plan step")]
+    | Annotated[CaseStep, Tag("case step")]
     | Annotated[WorkflowStep, Tag("workflow step")]
     | Annotated[WaitStep, Tag("wait step")],
     Discriminator(kind_of),
@@ -579,6 +642,9 @@ class CaseDefinition(Shape):
     # Whether a request may forget it (brief, D32): `allowed` open or closed; `while_open`, refused
     # once it is closed (books and records); `never`, always refused.
     forgetting: Literal["allowed", "while_open", "never"] = "allowed"
+    # What its end report carries when it closes as a child: its own fields, read by its parent
+    # as the case step's outputs (brief, D74).
+    reports: tuple[Name, ...] = ()
 
     @property
     def rules(self) -> dict[str, Rule]:
@@ -637,6 +703,8 @@ class CaseDefinition(Shape):
             for name, field in self.fields.items()
             if field.sensitive and field.visible_to is None
         ]
+        problems += list_problems(self)
+        problems += report_problems(self)
         started_by_rules = {step for rule in self.rules.values() for step in rule.then.start}
         for name, step in self.steps.items():
             problems += step_problems(f"steps.{name}", step, self, name in started_by_rules)
@@ -743,9 +811,174 @@ def moment_problems(path: str, moment: object, case: CaseDefinition) -> list[str
     return []
 
 
+def for_each_problems(path: str, for_each: ForEach, case: CaseDefinition) -> list[str]:
+    """What keeps a step from repeating over `for_each.over`: it is a list field (brief, D73)."""
+    field = case.fields.get(for_each.over)
+    if field is None:
+        return [f"{path}: {for_each.over} is not a field"]
+    if not isinstance(field.declared, ListType):
+        declared = a_type(field.declared)
+        return [
+            f"{path}: {for_each.over} is {declared}, not a list: a step repeats over a list field"
+        ]
+    # A run is matched to its item by the key, so every item has one, as a text (brief, D73).
+    if not isinstance(field.declared.fields.get(for_each.key), StringType):
+        where = f"{for_each.key} is not a text field of {for_each.over}"
+        return [f"{path}: {where}: a key is a text field every item has"]
+    return []
+
+
+def repeated_step_problems(
+    path: str, name: str, step: TaskStep | ActivityStep, case: CaseDefinition
+) -> list[str]:
+    """A repeated step starts by itself, a run per item, and has no approval yet: a proposal or a
+    rule's start names a step, never an item (brief, D73)."""
+    problems = []
+    keys = [
+        *(["automatic"] if not step.automatic else []),
+        *(["proposed_by"] if step.proposed_by else []),
+        *(["repeatable"] if step.repeatable else []),
+    ]
+    starts_by_itself = f"{path}: a repeated step starts by itself, a run per item"
+    if keys:
+        problems.append(f"{starts_by_itself}: drop {' and '.join(keys)}")
+    for rule_name, rule in case.rules.items():
+        if name in rule.then.start:
+            problems.append(f"{starts_by_itself}: no rule starts it, and {rule_name} does")
+    if isinstance(step, ActivityStep) and step.approval is not None:
+        # Open approvals are kept one per step, never per run: a deliberate limit (brief, D48).
+        problems.append(f"{path}.approval: a repeated step has no approval yet")
+    return problems + one_run_shapes(path, name, step)
+
+
+def one_run_shapes(path: str, name: str, step: TaskStep | ActivityStep) -> list[str]:
+    """What assumes one run per step, refused on a repeated one for now: a milestone it reaches,
+    a field its answer sets, a fact it needs fresh, whom a rule asks. Each a deliberate limit, a
+    door for later (brief, D48) (brief, D73)."""
+    reach = f"a repeated step reaches no milestone yet: reach it from a step that requires {name}"
+    problems = [f"{path}.reaches: {reach}"] if step.reaches else []
+    if isinstance(step, TaskStep):
+        for outcome_name, outcome in step.outcomes.items():
+            where = f"{path}.outcomes.{outcome_name}"
+            if outcome.reaches:
+                problems.append(f"{where}.reaches: {reach}")
+            if outcome.sets:
+                problems.append(
+                    f"{where}.sets: a repeated task's answer sets no field yet: each answer would "
+                    "overwrite the last"
+                )
+        if step.assign is not None:
+            problems.append(f"{path}.assign: a repeated task is asked of its queue yet")
+    if isinstance(step, ActivityStep) and step.max_age:
+        problems.append(f"{path}.max_age: a repeated step needs no fact fresh yet")
+    return problems
+
+
+def list_problems(case: CaseDefinition) -> list[str]:
+    """What a list may not be yet, and the name a repeated step reads its item by (brief, D73)."""
+    problems = [
+        f"{kind}.{EACH}: {EACH} is the name a repeated step reads its item by: name it otherwise"
+        for kind, names in (
+            ("fields", case.fields),
+            ("steps", case.steps),
+            ("milestones", case.milestones),
+            ("events", case.events),
+        )
+        if EACH in names
+    ]
+    lists = {name for name, field in case.fields.items() if isinstance(field.declared, ListType)}
+    problems += [
+        f"fields.{name}: a list is never sensitive yet: keep the personal data out of it"
+        for name in lists
+        if case.fields[name].sensitive
+    ]
+    # A list is given at the opening only, for now: never by a person's form (brief, D73).
+    problems += [
+        f"steps.{step_name}.outcomes.{outcome_name}.sets: {field} is a list, and a form never "
+        "gives a list yet: a list is given at the opening"
+        for step_name, step in case.steps.items()
+        if isinstance(step, TaskStep)
+        for outcome_name, outcome in step.outcomes.items()
+        for field in outcome.sets
+        if field in lists
+    ]
+    return problems + misread_problems(case)
+
+
+# The name a repeated step reads its own item by: `each.amount` (brief, D73).
+EACH = "each"
+
+
+def misread_problems(case: CaseDefinition) -> list[str]:
+    """`each` read where no item is, and a repeated step's outcome or output read at all: several
+    runs have no one outcome (brief, D73)."""
+    repeated = {name for name, step in case.steps.items() if is_repeated(step)}
+    problems = []
+    for where, owner, expression in expressions_in(case):
+        for read in fields_read(expression):
+            first = read.split(".")[0]
+            if first == EACH and owner not in repeated:
+                problems.append(f"{where}: {EACH} is read only in a repeated step")
+            elif first in repeated:
+                problems.append(f"{where}: {read}: a repeated step has no one outcome")
+    return problems
+
+
+def is_repeated(step: object) -> bool:
+    """Whether the step runs once per item of a list (brief, D73)."""
+    return isinstance(step, TaskStep | ActivityStep) and step.for_each is not None
+
+
+def expressions_in(case: CaseDefinition) -> list[tuple[str, str | None, PlanExpression]]:
+    """Every expression the definition holds, where it is, and the step it belongs to (None for
+    a rule's): each step's `when`, its approval's `when`, its inputs; each rule's `when` and what
+    it sets."""
+    found: list[tuple[str, str | None, PlanExpression]] = []
+    for name, step in case.steps.items():
+        if step.when is not None:
+            found.append((f"steps.{name}.when", name, step.when))
+        approval = step.approval if isinstance(step, CallStep) else None
+        if approval is not None and approval.when is not None:
+            found.append((f"steps.{name}.approval.when", name, approval.when))
+        if isinstance(step, CallStep | PlanStep):
+            found += [
+                (f"steps.{name}.inputs.{field}", name, expression)
+                for field, expression in step.inputs.items()
+            ]
+    for name, rule in case.rules.items():
+        where = case.where(name)
+        if rule.when is not None:
+            found.append((f"{where}.when", None, rule.when))
+        found += [
+            (f"{where}.then.set.{field}", None, expression)
+            for field, expression in rule.then.set.items()
+        ]
+    return found
+
+
+def report_problems(case: CaseDefinition) -> list[str]:
+    """What a report can't carry: a field the case doesn't have; a sensitive one, for now; a list,
+    since an output is an exact value (brief, D29) (brief, D74)."""
+    problems: list[str] = []
+    for name in case.reports:
+        path = f"reports.{name}"
+        field = case.fields.get(name)
+        if field is None:
+            problems.append(
+                f"{path}: {case.case} has no field {name}: a report lists the case's own fields"
+            )
+        elif field.sensitive:
+            problems.append(
+                f"{path}: {name} is sensitive, and a report carries no sensitive field yet"
+            )
+        elif isinstance(field.declared, ListType):
+            problems.append(f"{path}: {name} is a list, and a report carries no list")
+    return problems
+
+
 def step_problems(
     path: str,
-    step: TaskStep | CallStep | PlanStep | WaitStep,
+    step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep,
     case: CaseDefinition,
     rule_starts: bool,
 ) -> list[str]:
@@ -757,6 +990,15 @@ def step_problems(
         if name not in case.milestones and name not in case.steps
     ]
     problems += reaching(f"{path}.reaches", step.reaches, case)
+    # A required step is owed in every case, so no condition may excuse it (brief, D72).
+    if step.required and step.when is not None:
+        problems.append(
+            f"{path}: a required step is owed in every case, so it has no when: start it from a "
+            "rule, or drop required"
+        )
+    if isinstance(step, TaskStep | ActivityStep) and step.for_each is not None:
+        problems += for_each_problems(f"{path}.for_each", step.for_each, case)
+        problems += repeated_step_problems(path, path.removeprefix("steps."), step, case)
     if isinstance(step, TaskStep):
         for outcome_name, outcome in step.outcomes.items():
             where = f"{path}.outcomes.{outcome_name}"
@@ -770,6 +1012,10 @@ def step_problems(
         problems += stale_names(path, step)
     if isinstance(step, WaitStep) and step.event not in case.events:
         problems.append(f"{path}.event: {step.event} is not an event")
+    if isinstance(step, TaskStep) and step.assign is not None:
+        problems += assign_problems(f"{path}.assign", step.assign, case)
+    if isinstance(step, CallStep) and step.approval is not None and step.approval.assign:
+        problems += assign_problems(f"{path}.approval.assign", step.approval.assign, case)
     # A step nobody may propose and that doesn't start by itself could never run; and a step starts
     # by itself at most once, so a repeatable one runs again only when proposed. Unless a rule
     # starts it: 11b's one loosening (brief, D39).
@@ -785,6 +1031,25 @@ def step_problems(
                 "name proposed_by, who may propose it"
             )
     return problems
+
+
+def assign_problems(path: str, rule: Assign, case: CaseDefinition) -> list[str]:
+    """What an assignment rule names that the case doesn't have: `answered` asks whoever answered
+    a task, so the step it names is one, since only a task is answered by a person (brief, D71)."""
+    if rule.step is None:
+        return []
+    named = case.steps.get(rule.step)
+    if named is None:
+        return [f"{path}.step: {rule.step} is not a step"]
+    if not isinstance(named, TaskStep):
+        kind = an(named.kind)
+        return [f"{path}.step: {rule.step} is {kind} step; only a task is answered by a person"]
+    return []
+
+
+def an(word: str) -> str:
+    """`an activity`, `a plan`: the article a sentence puts before a step's kind."""
+    return f"an {word}" if word[0] in "aeiou" else f"a {word}"
 
 
 def set_problems(path: str, rule: Rule, case: CaseDefinition) -> list[str]:
@@ -918,20 +1183,33 @@ def reaching(path: str, names: tuple[str, ...], case: CaseDefinition) -> list[st
 class CaseInvalid(Exception):
     """A case definition that can't be accepted: one line per problem, each with its path."""
 
+    def __init__(self, problems: list[tuple[str, str]]) -> None:
+        super().__init__("\n".join(line(path, said) for path, said in problems))
+        # Where each problem is, as its line says it: what the conformance suite compares, since
+        # reading gives no code and wording is never compared (brief, D80). "" is the root.
+        self.paths = tuple(path for path, _ in problems)
+
+
+def line(path: str, said: str) -> str:
+    """A problem as the author reads it: `steps.pay.activity: required`, or what is wrong alone at
+    the root."""
+    return f"{path}: {said}" if path else said
+
 
 def parse_case(data: object) -> CaseDefinition:
     """The case definition stored as `data`, or `CaseInvalid` listing every problem."""
     try:
         return CaseDefinition.model_validate(data)
     except ValidationError as error:
-        raise CaseInvalid("\n".join(problem(e) for e in error.errors())) from None
+        raise CaseInvalid([problem(e) for e in error.errors()]) from None
 
 
-STEP_KINDS = "a task, an activity, a plan, a workflow or a wait"
+STEP_KINDS = "a task, an activity, a plan, a case, a workflow or a wait"
 
 
-def problem(error: Any) -> str:
-    """One of Pydantic's errors as a line for the author: `steps.pay.activity: required`."""
+def problem(error: Any) -> tuple[str, str]:
+    """One of Pydantic's errors for the author: its path and what is wrong, `("steps.pay.activity",
+    "required")`."""
     loc = [str(part) for part in error["loc"]]
     # Pydantic's own markers aren't in the definition: the shape it picked (`task step`), `[key]`,
     # and a field's type gathered under `declared` with the type it picked.
@@ -949,18 +1227,18 @@ def problem(error: Any) -> str:
     kind = error["type"]
     if kind == "union_tag_not_found" and loc[:1] == ["rules"] and len(loc) == 2:
         # An entry of `rules` that is neither a raw rule nor a pattern (brief, D46).
-        return f"{path}: {RULE_SHAPES}"
+        return path, RULE_SHAPES
     if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["rules"]:
         # A timer's own moment takes the five others; a rule's `on`, a timer too.
-        return f"{path}: a moment is {MOMENTS if loc[-1] == 'since' else RULE_MOMENTS}"
+        return path, f"a moment is {MOMENTS if loc[-1] == 'since' else RULE_MOMENTS}"
     if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["steps"]:
         tag = error.get("ctx", {}).get("tag", "").removesuffix(" step")
         found = f", and this one is {tag!r}" if tag else ", and this one says none"
-        return f"{path}.kind: a step is {STEP_KINDS}{found}"
+        return f"{path}.kind", f"a step is {STEP_KINDS}{found}"
     if kind == "missing":
         message = "required"
     elif kind == "extra_forbidden":
         message = "not a field here"
     else:
         message = str(error["msg"]).removeprefix("Value error, ")
-    return f"{path}: {message}" if path else message
+    return path, message

@@ -230,6 +230,24 @@ def test_other_contract_differences_are_said_not_proven() -> None:
     ]
 
 
+def test_a_contracts_differences_dont_read_pydantics_rendering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The diff reads the models as Ventoux writes them, never pydantic's rendering, which
+    # changes between versions (brief, D83): the same lines with it made to fail if read.
+    with_a_fee = create_model("RefundOutput", refund_id=(str, ...), fee=(Decimal, ...))
+    catalog = catalog_with(refund_contract(6, refund_input(trusted_only()), output=with_a_fee))
+    before = lines(diff(packed(refund()), packed(calling("payments.refund@6")), catalog))
+
+    def unread(model: type[BaseModel], /, *args: object, **kwargs: object) -> dict[str, object]:
+        raise AssertionError(f"pydantic's rendering of {model.__name__} was read")
+
+    monkeypatch.setattr(BaseModel, "model_json_schema", classmethod(unread))
+    after = lines(diff(packed(refund()), packed(calling("payments.refund@6")), catalog))
+    assert after == before
+    assert any("output.required" in line for line in after)
+
+
 def test_a_verdict_names_its_comparison() -> None:
     # Looser or stricter only from a comparison on the closed list; not proven from none.
     with pytest.raises(ValueError, match="looser needs one of COMPARISONS"):
@@ -657,15 +675,12 @@ def test_an_output_source_made_untrusted_is_stricter() -> None:
 def test_one_system_for_another_is_not_proven() -> None:
     # Neither is a proof: what each system says is trusted, and a policy may name one and not
     # the other (brief, D21).
+    # Named as @2's output is, so only the source differs.
+    class LookupOutputFromOrders(BaseModel):
+        status: Annotated[str, source("system:crm")]
+
     from_crm = lookup_2.model_validate(
-        dict(lookup_2)
-        | {
-            "version": 3,
-            # Named as @2's output is, so only the source differs.
-            "output": create_model(
-                "LookupOutputFromOrders", status=(Annotated[str, source("system:crm")], ...)
-            ),
-        }
+        dict(lookup_2) | {"version": 3, "output": LookupOutputFromOrders}
     )
     found = diff(
         packed(looking_up("orders.lookup@2")),
@@ -905,7 +920,7 @@ def test_the_command_says_the_diff(tmp_path: Path, capsys: Any) -> None:
     (new / "notes.txt").write_text("to do")
     assert main(["diff", str(old), str(new)]) == 1
     assert capsys.readouterr().err == (
-        f"{new}: notes.txt isn't part of a package: a package holds case.json and plans/\n"
+        f"{new}: notes.txt isn't part of a package: a package holds case.json, plans/ and cases/\n"
     )
     # Unreadable: exit 2.
     (new / "notes.txt").unlink()

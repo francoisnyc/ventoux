@@ -1,0 +1,644 @@
+"""The conformance suite: definitions with the validation results any implementation must give
+(layer 20a) (brief, D80). See docs/layers/20-deployment.md and docs/guides/deployment.md."""
+
+import json
+import shutil
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from ventoux.case.engine import ENGINE
+from ventoux.core.validate import ISSUE_CODES, Issue
+from ventoux.testing import CATALOG
+from ventoux.tooling.cli import main
+from ventoux.tooling.conformance import (
+    SUITE,
+    SuiteUnreadable,
+    catalog_data,
+    differences,
+    given,
+    mismatches,
+    read_suite,
+    refused_first_problems,
+    uncovered,
+    unrecorded,
+)
+from ventoux.tooling.suite import Entry, PackageEntry, Suite
+
+ROOT = Path(__file__).parent.parent
+REFUND = ROOT / "examples" / "refund" / "refund.json"  # a valid case with no plan step
+
+
+def a_suite(folder: Path, *entries: dict[str, Any]) -> Path:
+    """A suite in `folder`: the development catalog, the refund case, and `entries`."""
+    (folder / "catalogs").mkdir(parents=True)
+    (folder / "catalogs" / "development.json").write_text(
+        json.dumps(catalog_data(CATALOG), indent=2, sort_keys=True) + "\n"
+    )
+    (folder / "cases").mkdir()
+    shutil.copy(REFUND, folder / "cases" / "refund.json")
+    (folder / "suite.json").write_text(json.dumps({"engine": 3, "entries": list(entries)}))
+    return folder
+
+
+def refund_entry(expected: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": "the refund case",
+        "kind": "package",
+        "case": "cases/refund.json",
+        "plans": [],
+        "cases": {},
+        "catalog": "development",
+        "expected": expected,
+    }
+
+
+def test_an_entry_expecting_an_issue_a_valid_definition_doesnt_give_is_a_mismatch(
+    tmp_path: Path,
+) -> None:
+    expected = {
+        "issues": [{"path": "steps.pay.when", "code": "UNKNOWN_FIELD", "severity": "error"}]
+    }
+    suite = a_suite(tmp_path, refund_entry(expected))
+    assert mismatches(suite) == [
+        "the refund case: expected steps.pay.when UNKNOWN_FIELD (error), not given"
+    ]
+
+
+CLOSED_EARLY = ROOT / "examples" / "checks" / "closed-before-it-acts.json"  # gives NEVER_FIRES
+NEVER_FIRES = {"path": "rules.say_goodbye.on", "code": "NEVER_FIRES", "severity": "error"}
+
+
+def closed_early_entry(expected: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": "closed before it acts",
+        "kind": "package",
+        "case": "cases/closed-before-it-acts.json",
+        "plans": [],
+        "cases": {},
+        "catalog": "development",
+        "expected": expected,
+    }
+
+
+def test_an_entry_expected_valid_whose_definition_gives_an_issue_is_a_mismatch(
+    tmp_path: Path,
+) -> None:
+    suite = a_suite(tmp_path, closed_early_entry({"issues": []}))
+    shutil.copy(CLOSED_EARLY, suite / "cases")
+    assert mismatches(suite) == [
+        "closed before it acts: given rules.say_goodbye.on NEVER_FIRES (error), not expected"
+    ]
+
+
+def test_issues_are_compared_in_any_order_as_a_multiset_never_by_message(tmp_path: Path) -> None:
+    # Expected twice, given once: one is missing. In another order: nothing else said.
+    twice = closed_early_entry({"issues": [NEVER_FIRES, NEVER_FIRES]})
+    suite = a_suite(tmp_path, twice)
+    shutil.copy(CLOSED_EARLY, suite / "cases")
+    assert mismatches(suite) == [
+        "closed before it acts: expected rules.say_goodbye.on NEVER_FIRES (error), not given"
+    ]
+
+
+def test_an_issue_of_another_severity_is_both_missing_and_extra(tmp_path: Path) -> None:
+    warning = {**NEVER_FIRES, "severity": "warning"}
+    suite = a_suite(tmp_path, closed_early_entry({"issues": [warning]}))
+    shutil.copy(CLOSED_EARLY, suite / "cases")
+    assert mismatches(suite) == [
+        "closed before it acts: expected rules.say_goodbye.on NEVER_FIRES (warning), not given",
+        "closed before it acts: given rules.say_goodbye.on NEVER_FIRES (error), not expected",
+    ]
+
+
+def test_an_expected_issue_carrying_a_message_is_refused_since_wording_is_never_compared(
+    tmp_path: Path,
+) -> None:
+    worded = {**NEVER_FIRES, "message": "never fires"}
+    suite = a_suite(tmp_path, closed_early_entry({"issues": [worded]}))
+    shutil.copy(CLOSED_EARLY, suite / "cases")
+    with pytest.raises(SuiteUnreadable) as refused:
+        mismatches(suite)
+    assert "entries.0.expected.issues.0.message: Extra inputs are not permitted" in str(
+        refused.value
+    )
+
+
+def with_unreadable_case(suite: Path) -> Path:
+    """`suite` with `cases/unreadable.json`: the refund case, `automatic` written as a word."""
+    case = json.loads(REFUND.read_text())
+    case["steps"]["review"]["automatic"] = "yes"
+    (suite / "cases" / "unreadable.json").write_text(json.dumps(case))
+    return suite
+
+
+def unreadable_entry(expected: dict[str, Any]) -> dict[str, Any]:
+    return {**refund_entry(expected), "name": "unreadable", "case": "cases/unreadable.json"}
+
+
+def test_a_definition_refused_when_read_matches_the_paths_it_is_refused_at(tmp_path: Path) -> None:
+    expected = {"read": "refused", "at": ["steps.review.automatic"]}
+    suite = with_unreadable_case(a_suite(tmp_path, unreadable_entry(expected)))
+    assert mismatches(suite) == []
+
+
+def test_a_definition_refused_when_read_but_expected_to_read_is_a_mismatch(tmp_path: Path) -> None:
+    suite = with_unreadable_case(a_suite(tmp_path, unreadable_entry({"issues": []})))
+    assert mismatches(suite) == [
+        "unreadable: expected to be read, refused when read at steps.review.automatic"
+    ]
+
+
+def test_a_definition_that_reads_but_expected_refused_is_a_mismatch(tmp_path: Path) -> None:
+    expected = {"read": "refused", "at": ["steps.review.automatic"]}
+    suite = a_suite(tmp_path, refund_entry(expected))
+    assert mismatches(suite) == [
+        "the refund case: expected refused when read at steps.review.automatic, read"
+    ]
+
+
+def test_a_definition_refused_at_another_path_is_a_mismatch(tmp_path: Path) -> None:
+    expected = {"read": "refused", "at": ["steps.review.repeatable"]}
+    suite = with_unreadable_case(a_suite(tmp_path, unreadable_entry(expected)))
+    assert mismatches(suite) == [
+        (
+            "unreadable: expected refused when read at steps.review.repeatable, "
+            "refused at steps.review.automatic"
+        )
+    ]
+
+
+PACKAGE = ROOT / "examples" / "packages" / "refund"  # a case with a plan step, and its plan
+
+
+def with_package(suite: Path) -> Path:
+    """`suite` with the refund package's case and its plan."""
+    shutil.copy(PACKAGE / "case.json", suite / "cases" / "refund-package.json")
+    (suite / "plans").mkdir(exist_ok=True)
+    shutil.copy(PACKAGE / "plans" / "refund-order.json", suite / "plans")
+    return suite
+
+
+def package_entry(plans: list[str]) -> dict[str, Any]:
+    return {
+        **refund_entry({"issues": []}),
+        "name": "the refund package",
+        "case": "cases/refund-package.json",
+        "plans": plans,
+    }
+
+
+def test_a_package_is_read_with_its_plans_as_the_one_check_reads_it(tmp_path: Path) -> None:
+    suite = with_package(a_suite(tmp_path, package_entry(["plans/refund-order.json"])))
+    assert mismatches(suite) == []
+
+
+def test_a_package_that_cant_be_put_together_is_a_broken_entry_said_never_a_result(
+    tmp_path: Path,
+) -> None:
+    suite = with_package(a_suite(tmp_path, package_entry([])))
+    assert mismatches(suite) == [
+        (
+            "the refund package: a broken entry, not a package: refund-order@1 is run by a plan "
+            "step and isn't in plans/: add it"
+        )
+    ]
+
+
+def with_plans(suite: Path) -> Path:
+    """`suite` with the refund order plan, one sending `done` nowhere, and one unreadable."""
+    plan = json.loads((PACKAGE / "plans" / "refund-order.json").read_text())
+    (suite / "plans").mkdir(exist_ok=True)
+    (suite / "plans" / "refund-order.json").write_text(json.dumps(plan))
+    plan["states"]["check_order"]["on"]["done"] = "nowhere"
+    (suite / "plans" / "nowhere.json").write_text(json.dumps(plan))
+    plan["states"]["check_order"]["activity"] = 3
+    (suite / "plans" / "unreadable.json").write_text(json.dumps(plan))
+    return suite
+
+
+def plan_entry(name: str, expected: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "kind": "plan",
+        "plan": f"plans/{name}.json",
+        "catalog": "development",
+        "expected": expected,
+    }
+
+
+def test_a_plan_alone_is_read_and_checked_against_its_catalog(tmp_path: Path) -> None:
+    unreached = [
+        {"path": f"states.{state}", "code": "UNREACHABLE_STATE", "severity": "error"}
+        for state in ("approve_refund", "pay", "paid")
+    ]
+    nowhere = {"path": "states.check_order.on.done", "code": "UNKNOWN_TARGET", "severity": "error"}
+    suite = with_plans(
+        a_suite(
+            tmp_path,
+            plan_entry("refund-order", {"issues": []}),
+            plan_entry("nowhere", {"issues": [nowhere, *unreached]}),
+            plan_entry("unreadable", {"read": "refused", "at": ["states.check_order.activity"]}),
+        )
+    )
+    assert mismatches(suite) == []
+
+
+def test_a_plan_entry_is_compared_as_a_package_is(tmp_path: Path) -> None:
+    suite = with_plans(a_suite(tmp_path, plan_entry("nowhere", {"issues": []})))
+    assert mismatches(suite)[0] == (
+        "nowhere: given states.approve_refund UNREACHABLE_STATE (error), not expected"
+    )
+
+
+def test_an_issue_with_a_code_not_listed_is_refused_when_made() -> None:
+    # Every code is listed, so the suite can say which have an entry (brief, D80): a check given
+    # a new code fails until it is listed.
+    with pytest.raises(ValueError, match="NOT_A_CODE is not a listed issue code"):
+        Issue("steps.pay", "NOT_A_CODE", "anything")
+    assert "UNKNOWN_FIELD" in ISSUE_CODES
+
+
+def test_a_listed_code_no_entry_expects_is_said_uncovered(tmp_path: Path) -> None:
+    suite = a_suite(tmp_path, closed_early_entry({"issues": [NEVER_FIRES]}))
+    shutil.copy(CLOSED_EARLY, suite / "cases")
+    said = uncovered(suite)
+    assert "UNKNOWN_FIELD: listed, and no entry expects it" in said
+    assert not any(line.startswith("NEVER_FIRES") for line in said)
+    assert len(said) == len(ISSUE_CODES) - 1
+
+
+# The committed suite, as the package ships it.
+COMMITTED = read_suite(SUITE)
+
+
+@pytest.mark.parametrize("entry", COMMITTED.entries, ids=lambda entry: entry.name)
+def test_this_engine_gives_what_each_committed_entry_expects(entry: Entry) -> None:
+    assert differences(entry, given(entry, SUITE)) == []
+
+
+def test_every_listed_code_has_a_committed_entry_expecting_it() -> None:
+    assert uncovered(SUITE) == []
+
+
+def test_the_committed_suite_names_the_engine_it_describes() -> None:
+    assert COMMITTED.engine == ENGINE
+
+
+def test_the_catalog_as_data_holds_everything_validation_reads_from_it() -> None:
+    data = catalog_data(CATALOG)
+    assert set(data) == {
+        "contracts",
+        "roles",
+        "systems",
+        "labels",
+        "option_checks",
+        "document_stores",
+    }
+    assert data["contracts"]["payments.refund@2"]["risk"] == "high"
+    assert data["roles"]["support-lead"] == {
+        "approves": "high",
+        "operates": False,
+        "forgets": False,
+        "edits": True,
+        "migrates": False,
+        "assigns": True,
+    }
+    assert data["option_checks"] == {"branches": "branches.holds@1"}
+    assert data["document_stores"] == {"documents": "documents.issued@1"}
+    assert "crm" in data["systems"] and "llm" in data["labels"]
+
+
+def test_the_committed_catalog_file_is_what_the_development_catalog_gives() -> None:
+    committed = (SUITE / "catalogs" / "development.json").read_text()
+    assert committed == json.dumps(catalog_data(CATALOG), indent=2, sort_keys=True) + "\n"
+
+
+def a_copy_of_the_suite(tmp_path: Path) -> Path:
+    copy = tmp_path / "suite"
+    shutil.copytree(SUITE, copy)
+    return copy
+
+
+def test_unchanged_passes_on_the_committed_suite(capsys: pytest.CaptureFixture[str]) -> None:
+    # The four codes the package refuses first, and OPENER_DECIDES: waiting on a decision.
+    assert main(["conformance", "--unchanged"]) == 0
+    assert "conforms" in capsys.readouterr().out
+
+
+def test_unchanged_fails_on_a_result_changed_naming_the_entry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    suite = a_copy_of_the_suite(tmp_path)
+    data = json.loads((suite / "suite.json").read_text())
+    entry = next(e for e in data["entries"] if e["name"].startswith("WRONG_KIND"))
+    entry["expected"]["issues"][0]["code"] = "UNKNOWN_CONTRACT"
+    (suite / "suite.json").write_text(json.dumps(data))
+    assert main(["conformance", "--unchanged", "--suite", str(suite)]) == 1
+    out = capsys.readouterr().out
+    assert "expected steps.pay.workflow UNKNOWN_CONTRACT (error), not given" in out
+    assert "given steps.pay.workflow WRONG_KIND (error), not expected" in out
+
+
+def test_unchanged_fails_on_a_catalog_file_not_as_generated_naming_the_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    suite = a_copy_of_the_suite(tmp_path)
+    catalog = suite / "catalogs" / "development.json"
+    catalog.write_text(catalog.read_text().replace('"risk": "high"', '"risk": "low"', 1))
+    before = catalog.read_text()
+    assert main(["conformance", "--unchanged", "--suite", str(suite)]) == 1
+    assert "development.json differs from what the development catalog gives, first at line" in (
+        capsys.readouterr().out
+    )
+    assert catalog.read_text() == before  # nothing written
+
+
+def test_write_writes_the_catalog_files_and_never_an_expected_result(tmp_path: Path) -> None:
+    suite = a_copy_of_the_suite(tmp_path)
+    (suite / "catalogs" / "development.json").unlink()
+    entries = (suite / "suite.json").read_text()
+    assert main(["conformance", "--write", "--suite", str(suite)]) == 0
+    assert (suite / "catalogs" / "development.json").read_text() == (
+        SUITE / "catalogs" / "development.json"
+    ).read_text()
+    assert (suite / "suite.json").read_text() == entries
+
+
+def suite_of(entries: list[dict[str, Any]], changes: list[dict[str, Any]] = []) -> Suite:  # noqa: B006
+    return Suite.model_validate({"engine": 3, "entries": entries, "changes": changes})
+
+
+VALID: dict[str, Any] = {"issues": []}
+NO_LINE = (
+    "and no line of changes names it: add one saying what it was, what it is now, why and when"
+)
+FIRES_NEVER = {"issues": [NEVER_FIRES]}
+
+
+def change(was: dict[str, Any] | None, now: dict[str, Any] | None) -> dict[str, Any]:
+    return {"entry": "closed before it acts", "was": was, "now": now, "why": "D80", "date": "x"}
+
+
+def test_a_result_changed_with_no_line_naming_it_is_unrecorded() -> None:
+    base = suite_of([closed_early_entry(VALID)])
+    head = suite_of([closed_early_entry(FIRES_NEVER)])
+    assert unrecorded(base, head) == [
+        f"closed before it acts: its expected result changed, {NO_LINE}"
+    ]
+
+
+def test_a_result_changed_with_its_line_is_recorded() -> None:
+    base = suite_of([closed_early_entry(VALID)])
+    head = suite_of([closed_early_entry(FIRES_NEVER)], [change(VALID, FIRES_NEVER)])
+    assert unrecorded(base, head) == []
+
+
+def test_a_line_that_says_another_change_records_nothing() -> None:
+    base = suite_of([closed_early_entry(VALID)])
+    head = suite_of([closed_early_entry(FIRES_NEVER)], [change(FIRES_NEVER, VALID)])
+    assert unrecorded(base, head) == [
+        f"closed before it acts: its expected result changed, {NO_LINE}"
+    ]
+
+
+def test_a_new_entry_needs_no_line_and_a_removed_one_does() -> None:
+    assert unrecorded(suite_of([]), suite_of([closed_early_entry(VALID)])) == []
+    assert unrecorded(suite_of([closed_early_entry(VALID)]), suite_of([])) == [
+        f"closed before it acts: removed, {NO_LINE}"
+    ]
+    head = suite_of([], [change(VALID, None)])
+    assert unrecorded(suite_of([closed_early_entry(VALID)]), head) == []
+
+
+def test_issues_in_another_order_are_no_change() -> None:
+    two = {"issues": [NEVER_FIRES, {**NEVER_FIRES, "path": "rules.x.on"}]}
+    turned = {"issues": [{**NEVER_FIRES, "path": "rules.x.on"}, NEVER_FIRES]}
+    assert (
+        unrecorded(suite_of([closed_early_entry(two)]), suite_of([closed_early_entry(turned)]))
+        == []
+    )
+
+
+def test_since_fails_on_a_result_changed_with_no_line_against_the_base(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = a_copy_of_the_suite(tmp_path)
+    data = json.loads((base / "suite.json").read_text())
+    entry = next(e for e in data["entries"] if e["name"].startswith("WRONG_KIND"))
+    entry["expected"] = {"issues": []}
+    (base / "suite.json").write_text(json.dumps(data))
+    assert main(["conformance", "--since", str(base)]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("WRONG_KIND: a step and its contract are the same kind")
+    assert "its expected result changed, and no line of changes names it" in out
+
+
+def test_since_a_base_with_no_suite_has_nothing_to_compare(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["conformance", "--since", str(tmp_path)]) == 0
+    assert "has no suite.json: no result to compare" in capsys.readouterr().out
+
+
+def test_ci_checks_the_suite_and_every_change_to_it_against_the_base() -> None:
+    from test_unchanged import WORKFLOW, ci_runs
+
+    assert ci_runs("- run: uv run ventoux conformance --unchanged")
+    changes = WORKFLOW.read_text().split("\n  changes:")[1].split("\n  package:")[0]
+    assert "- run: uv run ventoux conformance --since base/src/ventoux/conformance" in changes
+
+
+def test_every_committed_definition_is_an_entry_its_file_equal() -> None:
+    # The schema's corpus: every case and plan committed, each read by the schema and the parser.
+    from test_schema import CASES, PLANS
+
+    in_suite = {
+        name
+        for entry in COMMITTED.entries
+        if isinstance(entry, PackageEntry)
+        for name in (entry.case, *entry.plans)
+    }
+    for path in (*CASES, *PLANS):
+        written = str(path.relative_to(ROOT))
+        assert written in in_suite, f"{written} is no entry's"
+        assert (SUITE / written).read_bytes() == path.read_bytes(), f"{written} differs"
+
+
+GUIDE = ROOT / "docs" / "guides" / "deployment.md"
+
+
+def test_the_guides_example_entry_is_in_the_suite_as_written_and_this_engine_gives_it() -> None:
+    section = GUIDE.read_text().split("## Another implementation: the conformance suite")[1]
+    example = json.loads(section.split("```json\n")[1].split("```")[0])
+    entry = next(entry for entry in COMMITTED.entries if entry.name == example["name"])
+    assert entry.model_dump(mode="json", exclude_defaults=True) == example
+    assert differences(entry, given(entry, SUITE)) == []
+
+
+def files_in(folder: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(folder)): path.read_bytes()
+        for path in sorted(folder.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_export_writes_every_file_of_the_suite_byte_for_byte_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "out"
+    assert main(["conformance", "--export", str(out)]) == 0
+    assert files_in(out) == files_in(SUITE)
+
+
+def test_export_refuses_a_folder_holding_files_and_writes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "notes.txt").write_text("mine")
+    assert main(["conformance", "--export", str(tmp_path)]) == 2
+    assert "holds files already: export into a new folder" in capsys.readouterr().out
+    assert files_in(tmp_path) == {"notes.txt": b"mine"}
+
+
+def with_refused_first(suite: Path, case: str) -> Path:
+    """`suite` with UNKNOWN_PLAN said refused first, by the package of `case` given no plan."""
+    data = json.loads((suite / "suite.json").read_text())
+    data["refused_first"] = [
+        {
+            "code": "UNKNOWN_PLAN",
+            "why": "a plan step's plan not given is refused when the package is put together",
+            "case": case,
+            "plans": [],
+            "cases": {},
+        }
+    ]
+    (suite / "suite.json").write_text(json.dumps(data))
+    return suite
+
+
+def test_a_code_the_package_refuses_first_is_not_uncovered(tmp_path: Path) -> None:
+    suite = with_package(a_suite(tmp_path, refund_entry({"issues": []})))
+    with_refused_first(suite, "cases/refund-package.json")
+    assert not any(line.startswith("UNKNOWN_PLAN") for line in uncovered(suite))
+    assert refused_first_problems(suite) == []
+
+
+def test_a_code_said_refused_first_whose_package_is_put_together_is_said(tmp_path: Path) -> None:
+    suite = with_refused_first(a_suite(tmp_path, refund_entry({"issues": []})), "cases/refund.json")
+    assert refused_first_problems(suite) == [
+        (
+            "UNKNOWN_PLAN: said refused before validation, and its package is put together: "
+            "give an entry expecting it instead"
+        )
+    ]
+
+
+def test_a_broken_entry_never_hides_the_next(tmp_path: Path) -> None:
+    broken = {**unreadable_entry({"issues": []}), "name": "missing", "case": "cases/missing.json"}
+    suite = a_suite(tmp_path, broken, refund_entry(FIRES_NEVER))
+    assert mismatches(suite) == [
+        "missing: a broken entry: cases/missing.json isn't in the suite",
+        "the refund case: expected rules.say_goodbye.on NEVER_FIRES (error), not given",
+    ]
+
+
+def test_a_plan_file_an_entry_names_that_isnt_there_is_a_broken_entry(tmp_path: Path) -> None:
+    suite = with_package(a_suite(tmp_path, package_entry(["plans/gone.json"])))
+    assert mismatches(suite) == [
+        "the refund package: a broken entry: plans/gone.json isn't in the suite"
+    ]
+
+
+def test_an_entry_naming_a_catalog_the_runner_doesnt_know_is_a_broken_entry(
+    tmp_path: Path,
+) -> None:
+    suite = a_suite(tmp_path, {**refund_entry({"issues": []}), "catalog": "production"})
+    assert mismatches(suite) == [
+        (
+            "the refund case: a broken entry: it names the catalog production, and this runner "
+            "knows development"
+        )
+    ]
+
+
+def test_unchanged_says_a_suite_that_cant_be_read_and_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    suite = a_copy_of_the_suite(tmp_path)
+    (suite / "suite.json").write_text(json.dumps({"engine": 3, "entries": [], "extra": 1}))
+    assert main(["conformance", "--unchanged", "--suite", str(suite)]) == 2
+    assert "extra: Extra inputs are not permitted" in capsys.readouterr().out
+
+
+def test_a_code_said_refused_first_whose_files_arent_there_is_said(tmp_path: Path) -> None:
+    suite = with_refused_first(a_suite(tmp_path, refund_entry({"issues": []})), "cases/gone.json")
+    assert refused_first_problems(suite) == [
+        (
+            "UNKNOWN_PLAN: said refused before validation: a broken entry: cases/gone.json isn't "
+            "in the suite"
+        )
+    ]
+
+
+def test_since_says_a_base_suite_that_cant_be_read_and_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "suite.json").write_text(json.dumps({"engine": 3}))
+    assert main(["conformance", "--since", str(tmp_path)]) == 2
+    assert "entries: Field required" in capsys.readouterr().out
+
+
+A_LINE = change(VALID, FIRES_NEVER)
+KEPT = "a line of changes is never removed or rewritten; put it back as it was"
+
+
+def test_a_line_of_changes_the_base_holds_and_the_head_drops_is_said() -> None:
+    entries = [closed_early_entry(FIRES_NEVER)]
+    base = suite_of(entries, [A_LINE])
+    assert unrecorded(base, suite_of(entries, [])) == [
+        f"changes line 1 (closed before it acts, x) went: {KEPT}"
+    ]
+
+
+def test_a_line_of_changes_rewritten_is_said() -> None:
+    entries = [closed_early_entry(FIRES_NEVER)]
+    base = suite_of(entries, [A_LINE])
+    head = suite_of(entries, [{**A_LINE, "why": "another reason"}])
+    assert unrecorded(base, head) == [f"changes line 1 (closed before it acts, x) changed: {KEPT}"]
+
+
+def test_the_bases_lines_kept_first_and_new_ones_after_are_accepted() -> None:
+    entries = [closed_early_entry(FIRES_NEVER)]
+    base = suite_of(entries, [A_LINE])
+    later = {**A_LINE, "entry": "another entry", "date": "y"}
+    assert unrecorded(base, suite_of(entries, [A_LINE, later])) == []
+    # A new line put before the base's moves them: each is said changed, never read as kept.
+    assert unrecorded(base, suite_of(entries, [later, A_LINE])) == [
+        f"changes line 1 (closed before it acts, x) changed: {KEPT}"
+    ]
+
+
+def test_since_fails_on_a_line_of_changes_the_head_dropped(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = a_copy_of_the_suite(tmp_path)
+    data = json.loads((base / "suite.json").read_text())
+    entry = next(e for e in data["entries"] if e["name"].startswith("WRONG_KIND"))
+    data["changes"] = [
+        {"entry": entry["name"], "was": None, "now": entry["expected"], "why": "D80", "date": "x"}
+    ]
+    (base / "suite.json").write_text(json.dumps(data))
+    assert main(["conformance", "--since", str(base)]) == 1
+    assert "changes line 1 (WRONG_KIND" in capsys.readouterr().out
+
+
+def test_export_refuses_a_file_and_writes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "suite.zip"
+    out.write_text("mine")
+    assert main(["conformance", "--export", str(out)]) == 2
+    assert "is a file, not a folder: export into a new folder" in capsys.readouterr().out
+    assert out.read_text() == "mine"

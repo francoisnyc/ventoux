@@ -1,6 +1,7 @@
 """Run cases in memory, in tests: no Temporal server, scripted answers, fake activities."""
 
 import asyncio
+import dataclasses
 import json
 import shutil
 import tempfile
@@ -15,14 +16,17 @@ from temporalio.converter import DataConverter
 
 from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
+from ventoux.case.claims import ClaimRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import parse_case
+from ventoux.case.ending import ending_of
 from ventoux.case.engine import ENGINE
 from ventoux.case.freshness import seconds_in
 from ventoux.case.memory import (
     Activity,
     Advance,
     CaseRun,
+    ChildRunner,
     Finish,
     PlanRunner,
     as_json,
@@ -31,23 +35,35 @@ from ventoux.case.memory import (
 )
 from ventoux.case.migrations import migration_of
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
+from ventoux.case.recording import plan_decisions
 from ventoux.case.releases import Record, digest, package
 from ventoux.case.requests import ChangeRefused
-from ventoux.case.runtime import CaseRefused, EventRefused
+from ventoux.case.runtime import CaseRefused, EventRefused, decide
 from ventoux.case.state import (
     Answered,
+    Assigned,
+    CaseEnded,
+    CaseState,
     ChangeProposed,
+    ChildNotEnded,
+    Claimed,
     CloseAsked,
+    CloseCase,
+    ClosedByParent,
     Completed,
     Event,
     Failed,
     ForgetApproved,
+    GivenBack,
+    OpenCase,
     Opened,
     Proposed,
+    ReadChild,
     Retried,
     Sent,
     Shown,
     StartPlan,
+    Unassigned,
 )
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
@@ -55,7 +71,7 @@ from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeou
 from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, Wait, interpret
 from ventoux.core.output_sources import source
 from ventoux.core.plan import parse_plan
-from ventoux.core.policy import trusted_only
+from ventoux.core.policy import only_from, trusted_only
 from ventoux.core.provenance import Sourced
 from ventoux.core.references import reference
 from ventoux.core.sensitive import Sensitive, unwrapped
@@ -64,6 +80,7 @@ from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.forget import ForgetReport, ForgetStart, ForgetWorkflow
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
+from ventoux.tooling.audit import FileAudit
 from ventoux.tooling.builder.case import Case
 from ventoux.tooling.builder.written import written
 
@@ -80,6 +97,7 @@ __all__ = [
     "CaseRefused",
     "Change",
     "ChangeRefused",
+    "ClaimRefused",
     "CloseRefused",
     "DevelopmentCases",
     "DevelopmentPlans",
@@ -90,10 +108,13 @@ __all__ = [
     "RetryRefused",
     "StepStopped",
     "as_json",
+    "assign",
     "check_workflow_contract",
+    "claim",
     "close",
     "edit",
     "finish",
+    "give_back",
     "load_definition",
     "migrate",
     "propose",
@@ -104,6 +125,7 @@ __all__ = [
     "send",
     "shown",
     "skip",
+    "unassign",
     "wrapped",
 ]
 
@@ -277,6 +299,88 @@ orders_lookup_2 = ActivityContract(
     ),
 )
 
+
+# The case data guide's claim says which branch handles it, an option of `branches`: this is the
+# branches system's option check, which says whether it holds a branch (brief, D67).
+class BranchAsked(BaseModel):
+    option: Annotated[str, reference("branches")]  # the branch a person gave
+
+
+class BranchHeld(BaseModel):
+    held: Annotated[bool, source("system:branches")]  # whether the branches system holds it
+
+
+branches_holds = ActivityContract(
+    name="branches.holds",
+    version=1,
+    input=BranchAsked,
+    output=BranchHeld,
+    risk="low",
+    effect="read",  # an option's check only reads
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,
+    outcomes=[],
+    display=Display(
+        title="Check a branch",
+        description="Whether the branches system holds a branch, open, now.",
+    ),
+)
+
+
+# The case data guide's claim attaches its receipt, kept in the `documents` store: this is the
+# store's check, which says whether it issued an ID (brief, D68).
+class DocumentAsked(BaseModel):
+    attachment: Annotated[str, reference("documents")]  # the ID a person gave
+
+
+class DocumentIssued(BaseModel):
+    issued: Annotated[bool, source("system:documents")]  # whether the store issued it
+
+
+documents_issued = ActivityContract(
+    name="documents.issued",
+    version=1,
+    input=DocumentAsked,
+    output=DocumentIssued,
+    risk="low",
+    effect="read",  # a store's check only reads
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,
+    outcomes=[],
+    display=Display(
+        title="Check a document",
+        description="Whether the documents store issued an ID, for a file it holds.",
+    ),
+)
+
+
+# A ledger that takes an amount only as the system that opened the case gave it: the input policy
+# `only_from("opener")`, so the conformance suite has an entry expecting OPENER_DECIDES
+# (brief, D36) (brief, D80). Named apart from the tests' own `ledger.record@1`.
+class RecordAsked(BaseModel):
+    amount: Annotated[Decimal, only_from("opener")]  # only an amount the opening system gave
+
+
+class Recorded(BaseModel):
+    entry_id: str  # the ledger's entry
+
+
+ledger_post = ActivityContract(
+    name="ledger.post",
+    version=1,
+    input=RecordAsked,
+    output=Recorded,
+    risk="low",
+    effect="compute",
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,
+    outcomes=[],
+    display=Display(title="Post to the ledger", description="Post an amount to the ledger."),
+)
+
 # The development catalog: what a case can call in tests and the quickstart.
 CATALOG = Catalog()
 # The labels fields and outputs may be declared untrusted with: `untrusted:llm`. First, since a
@@ -285,7 +389,7 @@ for label in ("customer", "document", "email", "llm", "web"):
     CATALOG.register_label(label)
 # The systems references may name, before the contracts whose inputs name them (brief, D30).
 # `portal`, the customer portal, sends the cases guide's events (brief, D41).
-for system in ("crm", "documents", "kyc", "orders", "policies", "portal"):
+for system in ("branches", "crm", "documents", "kyc", "orders", "policies", "portal"):
     CATALOG.register_system(system)
 for contract in (
     payments_refund,
@@ -294,11 +398,16 @@ for contract in (
     letters_draft,
     letters_draft_3,
     kyc_check,
+    branches_holds,
+    documents_issued,
+    ledger_post,
 ):
     CATALOG.register(contract)
+CATALOG.register_option_check("branches", "branches.holds@1")
+CATALOG.register_document_store("documents", "documents.issued@1")
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support", edits=True)  # and may edit a case file (brief, D52)
-CATALOG.register_role("support-lead", approves="high", edits=True)
+CATALOG.register_role("support-lead", approves="high", edits=True, assigns=True)
 # The case data guide's claim: an adjuster assesses it, and only fraud sees its fraud score.
 CATALOG.register_role("adjuster")
 CATALOG.register_role("fraud")
@@ -323,11 +432,23 @@ def fake_draft(inputs: dict[str, Any]) -> dict[str, Any]:
     return {"draft_id": f"draft-{inputs['template']}"}
 
 
+def fake_documents(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The documents store issued one file's ID."""
+    return {"issued": inputs["attachment"] == "doc-7f3a"}
+
+
+def fake_branches(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The branches system holds two branches."""
+    return {"held": inputs["option"] in {"BR-0142", "BR-0007"}}
+
+
 FAKES: dict[str, Activity] = {
     "payments.refund@2": fake_refund,
     "orders.lookup@1": fake_lookup,
     "letters.draft@2": fake_draft,
     "letters.draft@3": fake_draft,
+    "branches.holds@1": fake_branches,
+    "documents.issued@1": fake_documents,
 }
 
 
@@ -378,6 +499,11 @@ class DevelopmentForget(ForgetWorkflow):
         return await self.drive(start)
 
 
+def development_audit() -> FileAudit:
+    """An audit store in a fresh temporary folder, for a test's case worker (brief, D77)."""
+    return FileAudit(tempfile.mkdtemp(prefix="ventoux-audit-"))
+
+
 def development_converter() -> DataConverter:
     """Ventoux's data converter with a fresh development key file, for one test server: tests
     reuse workflow IDs, and a case's key is never made twice (brief, D31)."""
@@ -422,6 +548,8 @@ def run_case(
     at: int = START,
     release: Record | None = None,
     engine: int = ENGINE,
+    cases: Mapping[str, Any] | None = None,
+    case_answers: Mapping[str, Sequence[Any]] | None = None,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
@@ -436,7 +564,10 @@ def run_case(
     fake workflows; a workflow contract with none is not bound, and its step fails. The case opens
     at `at`, seconds since the epoch; `later("3d")` in the script moves time on, every timer due
     by then fires, and every event after it happens then. `definition` may be the builder's
-    `Case`: its JSON is written and read back, and that runs, as the engine would get it."""
+    `Case`: its JSON is written and read back, and that runs, as the engine would get it.
+    `cases` gives the child cases its case steps open, as stored data, by reference (`repair@3`);
+    `case_answers` gives each child its own script, by step or by entry (`repair#2`), in the
+    form `answers` takes. A child plays it as it opens; its `CaseRun` is in `children`."""
     if isinstance(definition, Case):
         # The JSON runs, never the builder's objects (brief, D58).
         definition = json.loads(written(definition), parse_float=Decimal)
@@ -446,8 +577,121 @@ def run_case(
     # case checks its digest (brief, D51).
     named = None if release is None else f"{release.name} {release.release}"
     events: list[Event | Finish | Advance] = [
-        Opened(wrapped(case, as_json(file)), opened_by, at=now, engine=engine, release=named)
+        Opened(
+            wrapped(case, as_json(file)),
+            opened_by,
+            at=now,
+            engine=engine,
+            release=named,
+            # The test plays the API: it states the opener's roles too (brief, D71).
+            roles=frozenset(people.get(opened_by, ())) if opened_by is not None else frozenset(),
+            cases=dict(cases or {}),
+        )
     ]
+    events += script_events(answers, people, now)
+    implementations = {**FAKES, **activities}
+    runner = plan_runner(plans or {}, plan_answers or {}, implementations, people, catalog)
+    bound = {**WORKFLOW_FAKES, **workflows}
+    ran: dict[str, CaseRun] = {}
+    children = child_runner(
+        case_answers or {}, people, catalog, implementations, bound, ran, runner, engine
+    )
+    run = run_case_in_memory(
+        case,
+        catalog,
+        implementations,
+        events,
+        held=held,
+        plans=runner,
+        workflows=bound,
+        children=children,
+    )
+    run.children.update(ran)
+    return run
+
+
+def child_runner(
+    case_answers: Mapping[str, Sequence[Any]],
+    people: Mapping[str, Iterable[str]],
+    catalog: Catalog,
+    activities: Mapping[str, Activity],
+    workflows: Mapping[str, Activity],
+    ran: dict[str, CaseRun],
+    plans: PlanRunner,
+    engine: int = ENGINE,
+) -> ChildRunner:
+    """Opens a case step's child in memory, plays its script, and says how it ended as an event;
+    or None while it is open (brief, D74). Each child's run is kept in `ran`, by entry. The child
+    reads `catalog`, and calls `activities`, `workflows` and `plans`, as its parent does: one
+    reference is one plan. It opens at `engine`, as its parent did: the same code opens both."""
+
+    def run(
+        command: OpenCase | CloseCase | ReadChild, at: int
+    ) -> CaseEnded | ChildNotEnded | Failed | None:
+        if isinstance(command, CloseCase):
+            return close_child(command, at)
+        if isinstance(command, ReadChild):
+            # In memory a child that closed has reported already: one read is still open.
+            was = ran[command.entry]
+            if was.closed:
+                return ending_of(command.entry, was.definition, was.state, at)
+            return ChildNotEnded(command.entry, "open", at=at)
+        child = parse_case(command.definition)  # validated with its parent, in its package
+        step = command.entry.split("#")[0]
+        script = case_answers.get(command.entry, case_answers.get(step, ()))
+        parent = command.run.rpartition("/")[0]
+        opened = Opened(
+            {name: given.value for name, given in command.fields.items()},
+            None,  # opened by its parent case, never by a person (brief, D74)
+            at=at,
+            parent=(parent, command.entry),
+            sources={name: given.sources for name, given in command.fields.items()},
+            excluded=command.excluded,
+            engine=engine,
+        )
+        try:
+            # The opening alone first: a child that refuses it never opened, and the parent's
+            # step fails, for its operator to retry once the cause is fixed (brief, D74).
+            decide(child, catalog, CaseState(command.run), opened)
+        except CaseRefused as refused:
+            return Failed(command.entry, f"{command.case} refused its opening: {refused}", at=at)
+        events = [opened, *script_events(script, people, at)]
+        child_run = run_case_in_memory(
+            child, catalog, activities, events, name=command.run, plans=plans, workflows=workflows
+        )
+        ran[command.entry] = child_run
+        if not child_run.closed:
+            return None  # open: the step runs on
+        return ending_of(command.entry, child, child_run.state, at)
+
+    def close_child(command: CloseCase, at: int) -> CaseEnded | None:
+        """Its parent closes the open child: it carries on from where it was, closing."""
+        was = ran[command.entry]
+        child_run = run_case_in_memory(
+            was.definition,
+            catalog,
+            activities,
+            [ClosedByParent(command.reason, at=at)],
+            name=was.state.case,
+            plans=plans,
+            workflows=workflows,
+            state=was.state,
+        )
+        ran[command.entry] = child_run
+        if not child_run.closed:
+            return None  # its activities still run: the parent waits for its end
+        return ending_of(command.entry, child_run.definition, child_run.state, at)
+
+    return run
+
+
+def script_events(
+    answers: Sequence[Any], people: Mapping[str, Iterable[str]], at: int
+) -> list[Event | Finish | Advance]:
+    """The events a script plays after the opening at `at`, as the Ventoux API would send them:
+    each answer, proposal, request and `later`, with who sent it and their roles."""
+    now = at
+    events: list[Event | Finish | Advance] = []
     for item in answers:
         if isinstance(item, Later):
             now += item.seconds
@@ -460,6 +704,24 @@ def run_case(
             roles = frozenset(people.get(item.by, ()))
             events.append(
                 Proposed(item.step, item.by, roles, at=now, suggested_by=item.suggested_by)
+            )
+            continue
+        if isinstance(item, Claim):
+            events.append(Claimed(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
+            continue
+        if isinstance(item, Assign):
+            to_roles = frozenset(people.get(item.to, ()))
+            roles = frozenset(people.get(item.by, ()))
+            events.append(Assigned(item.entry, item.to, to_roles, item.by, roles, at=now))
+            continue
+        if isinstance(item, Unassign):
+            events.append(
+                Unassigned(item.entry, item.by, frozenset(people.get(item.by, ())), at=now)
+            )
+            continue
+        if isinstance(item, GiveBack):
+            events.append(
+                GivenBack(item.entry, item.by, frozenset(people.get(item.by, ())), at=now)
             )
             continue
         if isinstance(item, Retry):
@@ -506,12 +768,7 @@ def run_case(
             {name: Sensitive(value) for name, value in as_json(form[0]).items()} if form else None
         )
         events.append(Answered(entry, outcome, who, roles, given, at=now))
-    implementations = {**FAKES, **activities}
-    runner = plan_runner(plans or {}, plan_answers or {}, implementations, people, catalog)
-    bound = {**WORKFLOW_FAKES, **workflows}
-    return run_case_in_memory(
-        case, catalog, implementations, events, held=held, plans=runner, workflows=bound
-    )
+    return events
 
 
 def plan_runner(
@@ -552,12 +809,20 @@ def plan_runner(
             )
         except RunRefused as refused:
             return Failed(command.entry, f"{command.plan} can't start: {refused}", at=at)
+        # What the plan decided, for the record of the step's end, as on Temporal (brief, D77).
+        step = command.entry.split("#")[0]
+        decided = tuple(
+            dataclasses.replace(each, step=step, entry=command.entry)
+            for each in plan_decisions(ran.history)
+        )
         if ran.status == "succeeded":
-            return Completed(command.entry, {}, at=at)
+            return Completed(command.entry, {}, at=at, ran=decided)
         if ran.status == "failed":
-            return Completed(command.entry, {}, "failed", at=at)  # a failed final state: an outcome
+            # A failed final state: an outcome.
+            return Completed(command.entry, {}, "failed", at=at, ran=decided)
         if ran.status == "stopped":
-            return Failed(command.entry, f"{command.plan} stopped: {ran.reason}", at=at)
+            reason = f"{command.plan} stopped: {ran.reason}"
+            return Failed(command.entry, reason, at=at, ran=decided)
         return None  # waiting for an answer the script doesn't give: the step runs on
 
     return run
@@ -608,6 +873,57 @@ class Retry(NamedTuple):
 def retry(entry: str, who: str) -> Retry:
     """A script's retry by an operator: `retry("pay#1", "omar")` (brief, D26)."""
     return Retry(entry, who)
+
+
+class Claim(NamedTuple):
+    """A scripted claim: `by` takes the open entry `entry` from its queue (brief, D69)."""
+
+    entry: str
+    by: str
+
+
+def claim(entry: str, who: str) -> Claim:
+    """A script's claim of an open entry: `claim("review#1", "lee")` (brief, D69)."""
+    return Claim(entry, who)
+
+
+class Assign(NamedTuple):
+    """A scripted assignment: `by`, whose role assigns, gives `entry` to `to` (brief, D70)."""
+
+    entry: str
+    to: str
+    by: str
+
+
+def assign(entry: str, to: str, by: str) -> Assign:
+    """A script's assignment, or reassignment, of an open entry: `assign("review#1", "sam",
+    by="lee")`. The test plays the API, stating both people's roles from `people` (brief, D70)."""
+    return Assign(entry, to, by)
+
+
+class Unassign(NamedTuple):
+    """A scripted return to the queue: `by`, whose role assigns, frees `entry` (brief, D70)."""
+
+    entry: str
+    by: str
+
+
+def unassign(entry: str, by: str) -> Unassign:
+    """A script's return of a held entry to its queue, without its holder: `unassign("review#1",
+    by="lee")` (brief, D70)."""
+    return Unassign(entry, by)
+
+
+class GiveBack(NamedTuple):
+    """A scripted give-back: the holder `by` returns `entry` to its queue (brief, D69)."""
+
+    entry: str
+    by: str
+
+
+def give_back(entry: str, who: str) -> GiveBack:
+    """A script's give-back of a held entry: `give_back("review#1", "ana")` (brief, D69)."""
+    return GiveBack(entry, who)
 
 
 class Close(NamedTuple):
@@ -683,10 +999,17 @@ def migrate(
     )
 
 
-def release_of(definition: dict[str, Any], number: int, plans: Sequence[Any] = ()) -> Record:
-    """`definition` and its `plans` released in memory as release `number`, as CI would record
-    it: what a migration's target is in a test. Numbers are written as JSON writes them."""
-    released = package(as_text(definition), [as_text(plan) for plan in plans])
+def release_of(
+    definition: dict[str, Any],
+    number: int,
+    plans: Sequence[Any] = (),
+    cases: Mapping[str, Any] | None = None,
+) -> Record:
+    """`definition`, its `plans` and the child `cases` it pins (each a definition, by reference)
+    released in memory as release `number`, as CI would record it: what a migration's target is
+    in a test. Numbers are written as JSON writes them."""
+    children = {ref: package(as_text(child), []) for ref, child in (cases or {}).items()}
+    released = package(as_text(definition), [as_text(plan) for plan in plans], children)
     return Record(released.name, number, 1, digest(released), "memory", {}, released.written)
 
 

@@ -50,6 +50,7 @@ COMPARISONS = (
     "plan approvals",  # which of a plan's activities an approval state approves (13b, choice 30)
     "plan approvers",  # who may approve in a plan, as its activity's risk allows (brief, D11)
     "plan answerers",  # who may answer a plan's wait (brief, D22)
+    "assignment",  # whether a rule names who is asked, and so who alone may answer (brief, D71)
 )
 
 

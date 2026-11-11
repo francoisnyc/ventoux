@@ -1,0 +1,855 @@
+# Layer 16: More field types: dates, options, attachments
+
+Status: 2026-11-01, agreed; 16a built, its promises checked. This note starts from `main` at `12f26a7`, with layers
+0 to 15 merged. The warm-up was answered and recorded (learning question 43). The guides were
+written first (curriculum step 2): `docs/guides/expressions.md`, `docs/guides/case-data.md` and
+`docs/guides/builder.md` describe the date as if 16a worked, with the recommendations below. If a
+choice is answered otherwise, the guides change with it.
+
+**Answered 2026-11-01.** Choices A to C and 1 to 10 as recommended. D66 is written before 16a is
+built.
+
+Prior art: none in the prototype (the curriculum says so). Read for the date: the code a date
+touches today, `src/ventoux/core/expressions/` (the types, the check, the evaluator, the
+rendering), `src/ventoux/core/form.py` (`fits`), `src/ventoux/case/types.py` (`case_types`,
+`output_type`, `fits_type`) and `src/ventoux/temporal/converter.py` (how a `Decimal` crosses a
+payload). FEEL, whose one-line style D20 adopted, writes a date literal `date("2026-10-31")`; its
+`today()` is exactly what Ventoux leaves out.
+
+## Warm-up: learning question 43, what an injected instruction can still influence
+
+Recorded in `docs/LEARNING.md`, entry 43. The step advisor is shielded from the words, never the
+facts: arrivals still shape what it is shown, so it can tilt which admissible step a person is
+shown, never a value or a run. The authoring-loop half was filled in on request, so the question
+stays open.
+
+## What this layer is for
+
+**A field type is a check as much as a shape.** Today a case can hold a number, a text, a boolean,
+an outcome, a reference or a list. A day on the calendar has to be a text, so `"31/10/2026"`,
+`"yesterday"` and `"2026-02-30"` are all accepted, and two of them can't even be ordered: `<`
+compares numbers only. The layer adds three types, each checked where its value enters the case:
+
+| Type | What the check is | Where it runs |
+|---|---|---|
+| **date** (16a) | a real day on the calendar, ordered | pure: at validation and in the evaluator |
+| **option** (16b) | one of a registered system's list (a branch, a product) | when the answer is given, through an activity, recorded |
+| **attachment** (16c) | a reference to a registered document store; never the bytes | when it is given; the history holds the reference |
+
+**A date is a value, not a clock.** `incident_date >= policy_start` reads two facts the case file
+holds, recorded when they were given: the same answer today, tomorrow and on replay. "Was it in
+the last 30 days?" would read the calendar, and decide differently on replay (learning question
+32, for `now`); a day also depends on a time zone, which a moment doesn't carry. So no expression
+reads today. "Within 30 days" is said with two recorded dates, or with a timer (brief, D44), whose
+firing the history records.
+
+## The split
+
+| PR | What it builds | Its negative test |
+|---|---|---|
+| **16a: the date** | A `date` field type and a `date` literal; equality, ordering and `string` on dates; a date checked wherever a value enters the case (the opening, a form, an activity's output, an event's payload); the rendering; the builder's `Field.date()`; the JSON Schema; the diff and the plain forms naming the type. | **curriculum:** a date compared with a number is refused before anything runs. Also: `{"today": []}` has no shape; `"2026-02-30"`, `"20261031"` and a moment (`2026-10-31T23:30`) are not dates; a date compared with a text is refused. |
+| **16b: the option** | A field whose values are a registered system's list, checked through a read-only activity when the answer is given, the check recorded. | **curriculum:** an option the system's list doesn't hold is refused, and the refusal recorded. |
+| **16c: the attachment** | A reference to a registered document store, given with an answer; the history holds the reference, never the bytes. | **curriculum:** an attachment that names no registered store is refused. |
+
+**Why this order.** The date is entirely inside the expression language and the pure layers:
+nothing new crosses a payload but a value. The option leans on activities, called when an answer
+is given, which is new for a form. The attachment builds on references (brief, D16) and on a store
+the platform team registers. Each part's choices are written when that part starts, so 16b and 16c
+are only sketched here.
+
+### Where each point of the curriculum's layer 16 lands
+
+1. **A field type is a check as much as a shape:** every part; for the date, choices 1 and 7.
+2. **A date is a value, not a clock; no expression reads today:** choices 2 and 5.
+3. **An answer checked against a system when it is given:** 16b.
+4. **A document kept as a reference, never its bytes:** 16c.
+5. **In the definition format, the JSON Schema, the builder, the diff and the plain forms:** for
+   the date, choices 8 and 9.
+
+## Choices for the whole layer
+
+A. **The split:** 16a, 16b, 16c, as in the table, in that order, one pull request each
+   (`layer-16a-dates`, …). *Recommended.*
+
+B. **Decisions: one per part,** recorded in the brief before its part is built, added and never
+   rewriting an earlier one: D66 for the date. 16b and 16c take the next numbers when they start.
+   D20's operator list is not rewritten: D66 says what it adds to it ("Adds to D20, whose text is
+   kept"), as earlier decisions have. *Recommended.*
+
+C. **No new dependency.** The date is Python's `datetime.date`; the check is a small named
+   function. *Recommended.*
+
+## Choices for 16a: the date
+
+1. **How a date is written in JSON.** JSON has no date, so it is text, and the declared type makes
+   it a date.
+   - **In a case file, an answer, an event or an output:** exactly `YYYY-MM-DD`, ten characters,
+     a real day: `"2026-10-31"`. Refused: `"2026-02-30"`, `"2026-1-5"`, `"31/10/2026"`, and a
+     moment, `"2026-10-31T23:30:00Z"`. *Note:* Python's `date.fromisoformat` accepts more than this
+     since 3.11 (`"20261031"`, the week date `"2026-W44-6"`), so the check is its own named
+     function, `calendar_date`, and a test pins each of those refusals.
+   - **The years:** 0001 to 9999, Python's range, four digits. *Recommended.*
+   - **As a literal in an expression:** `{"date": "2026-10-31"}`, read `date("2026-10-31")`, FEEL's
+     notation. A bare `"2026-10-31"` stays a text, so `incident_date == "2026-10-31"` is refused
+     (same type on both sides, D20). The alternatives: no literal at all (a fixed date, such as a
+     regulation's start, would then have to be a field the opener fills), or treating any text
+     shaped like a date as one (a guess, and a text field could change meaning). *Recommended:*
+     the literal.
+
+2. **Which comparisons and operators it gets.**
+   - `==`, `!=` between two dates; `<`, `<=`, `>`, `>=` between two dates (until now, numbers
+     only); `string` of a date gives `"2026-10-31"`; `exists` as for any field; `if` and `in`
+     with dates as for any type (`in` takes a list of date literals).
+   - **No date arithmetic in 16a:** no `date + days`, no "days between". "Reported within 30
+     days" is then `reported_on <= date(…)`, a compute activity, or a timer. The alternative is
+     a named operator, `days(from, to)` giving a number, which a deadline written as data would
+     want. It would be a decision of its own, recorded in D20's list with its reason; nothing in
+     16a needs it, and the README draft's "Beyond v1.0" (timers anchored to a date) is where it
+     would come with a use. *Recommended:* none now.
+   - The messages change for the ordering operators: "`>` compares two numbers or two dates, and
+     this is a string", and "…, and this is a number, not a date" when one side is a date. The
+     guide quotes both.
+
+3. **Where a date may come from, and its provenance.** From where every value comes from, with
+   that place's source, unchanged: the opener (`system:opener`), a person's form (the person, as
+   any answer), an activity's output (its contract's sources, D29; an output annotated
+   `datetime.date` is read as a date by `output_type`), an event's payload (as declared, D41), and
+   a field declared untrusted (`untrusted:customer`: it may inform, never decide, D38). **The
+   engine never gives one:** no field is filled with today's date, the case's opening day
+   included. *Recommended.* The alternative, an `opened_on` date the engine fills from workflow
+   time, would need choice 4's time zone, and is the clock by another door.
+
+4. **What a date has to do with time zones.** Nothing: a date is a day, the same everywhere. A
+   moment becomes a day only in a time zone (23:30 on 31 October in New York is 1 November in
+   UTC), so **Ventoux never turns a moment into a day**. Whoever gives the date chooses which day
+   it means: the adjuster, or the activity whose system knows its business's zone, whose contract
+   then says it returns a date. *Recommended.* The alternative, a deployment-wide zone used to
+   turn workflow time into a day, makes a case's decisions depend on where it is deployed.
+
+5. **No expression may read today.** Written into D66 in plain words, as D20 says it for the
+   clock: no operator reads the calendar, and `today` has no shape, so it can't be written, by a
+   person or a model under the JSON Schema (D60). `{"today": []}` is refused with the list of
+   operators, as `{"now": []}` is. The tests: the check's refusal, and the published schema
+   holding no `today`. *Recommended.*
+
+6. **A date inside the engine is a `datetime.date`, never a `datetime`.** The evaluator works on
+   Python values (a number is a `Decimal`, D20), so a date is a `date`, compared as one. Two traps:
+   - **`datetime` is a subclass of `date` in Python,** so `isinstance(moment, date)` is true.
+     Every place that takes a date (`fits`, the evaluator, the builder) refuses a `datetime`
+     explicitly, with a negative test each.
+   - **On a payload, a date is text.** Temporal's JSON can't hold a date, and reading it back
+     gives a `str`. So the converter writes a `date` as `"YYYY-MM-DD"`, and the engine reads a
+     value into a date **by its field's declared type** where a value enters: the opening, an
+     answer, an event, an activity's output, and the state a case continues as new with (D27).
+     Nothing is guessed from a text's shape. *Corrected in the tutor's review of the design:* this
+     said an output "is already read by its contract's Pydantic model", but outputs are read with
+     lax `model_validate` (`case/runtime.py`), unlike inputs (strict, D36): a timestamp
+     `1793145600` landed as 2026-10-28, a day Pydantic picked in UTC, and `"2026-10-31T00:00:00Z"`
+     and a `datetime` at midnight as 2026-10-31. Strict mode alone would refuse `"2026-10-31"`,
+     which is how a date comes back over Temporal. So an output's date fields are read by
+     `calendar_date`, as the other entry points are, before Pydantic reads the rest: a moment, a
+     number or any other text fails the step, and nothing it gave lands.
+     *Recommended.* The alternative, keeping dates as text inside the engine and comparing texts,
+     works for `YYYY-MM-DD` by luck of the format, but then a date and a text look the same at
+     runtime, and "a field holds a value of the wrong type" can't be told (fail closed lost).
+   - A consequence for the form: D9's form "converts nothing" today. Reading a date from its text
+     by its declared type is the one reading added, written in D66: a text that isn't a date is
+     refused, never guessed.
+
+7. **What is refused, and where.**
+   - At validation (`ventoux check`, case validation): a date compared with a number or a text;
+     an ordering between a date and anything else; a literal that isn't a day; `today`.
+   - Where a value is given: a date field given a text that isn't a day, a number, or a moment,
+     each refused with what is wrong, then what to do: `incident_date is a date, written
+     YYYY-MM-DD, and the answer gives a string that isn't one`. *Corrected while building:* this
+     quoted the value, `"31/10/2026"`; a refusal names the kind, never the value, since it reaches
+     people who may not see it (brief, D30).
+   - At runtime, failing closed: a date field holding a `str`, a `datetime` or a number is an
+     error (`` `<` compares two numbers or two dates, and it was given a string ``), never `false`.
+     *Corrected while building:* the evaluator is untyped and refuses by operator, so the message
+     names the operator, not the field.
+
+8. **Shown, and where the type appears.**
+   - **The one-line rendering:** a field by its name; a literal as `date("2026-10-31")`.
+   - **The plain forms, the case map and the diff (D55, D56):** a date as `2026-10-31`, never a
+     day name or a local format, so the same everywhere and in every language. A field whose type
+     changes (a text to a date) is reported by the diff as a change of type, as for any field.
+     Formatting a date for a person's locale is the inbox's, later. *Recommended.*
+   - **The JSON Schema (D60):** a date field as `{"type": "date"}`, and the literal as an object
+     with one key, `date`, a string matching `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`; the schema stays
+     shape only (D60), and the calendar check is the engine's. *Corrected in the tutor's review of
+     the design:* "ten characters" let `"31/10/2026"` through, so the pattern says the shape.
+
+9. **The builder (D58).** `Field.date()`, and a `datetime.date` as a literal, written `{"date":
+   "…"}`. A `datetime` is refused (choice 6). `date.today()` in a builder file is the build day
+   written in as a fixed date; the builder can't tell it from any other date, and `--unchanged`
+   catches it the next day. The guide says so. *Recommended.*
+
+10. **What 16a leaves out.** Times, moments and durations as field types; date arithmetic (choice
+    2); timers anchored to a date field (README draft, "Beyond v1.0"); a locale's formatting.
+
+## Seams and tests for 16a (curriculum step 4)
+
+*Asked before the seams were agreed (2026-11-01): "we don't deal with UTC or time zones; what if
+workers run in different datacenters?"* The engine is safe: its time is seconds since the epoch,
+from the history, and a date compares the same anywhere. The gap is an activity turning a moment
+into a day with the machine's zone: two workers would give the same moment different days.
+**Answered:** the activities guide says an activity names its zone; a test runs the date tests
+under two process time zones; D66 gains a bullet (it is unmerged and nothing cites it yet).
+
+11. **The seams the tests use,** all public today; no test reads an internal:
+    - **Expressions** (`ventoux.core.expressions`): `parse_expression(data)` refuses a literal
+      that isn't a day (`ExpressionInvalid`); `check(expression, types)` with a new `DateType`
+      (`{"type": "date"}`) in the types; `evaluate(expression, values)` with a `datetime.date`
+      among the values; `render(expression)`.
+    - **A case, in memory** (`ventoux.case`): `parse_case(data)` reading a `{"type": "date"}`
+      field; `run_case_in_memory(case, catalog, implementations, events)` with `Opened(file=…)`,
+      `Answered(form=…)` and an event's arrival giving dates, as text and as `date`; what the run
+      reports (its history, a refusal's message, the view's values).
+    - **Validation:** `ventoux check` on a definition (a date compared with a number refused
+      before anything runs), and the type an activity's output annotated `datetime.date` is read
+      as, through a step's condition reading it.
+    - **On Temporal:** one test on the test server: a case opened with a date, answered with one,
+      sent one by an event, continued as new, then a proposal whose condition reads two dates,
+      decided in the new run; its view queried. *Corrected while building:* this said "the dates
+      come back as dates", but a query's answer is a payload, where a date is its text (D66), so
+      the view gives `"2026-10-31"`; what comes back as a day is the case's own state, which the
+      proposal's admission proves.
+    - **The builder, the schema, the readings:** `Field.date()` and a `datetime.date` literal
+      producing the JSON; `case_schema()` (a date field and the literal, no `today`); the plain
+      diff and the case map, through `ventoux diff` and `ventoux map` output as the guides show.
+    - **The guides:** the existing guide tests (`test_the_guide_reads_as_the_renderer_renders`,
+      `test_the_guide_refuses_as_the_check_refuses`, `test_the_guides_examples_are_the_files_their_tests_run`)
+      run the new rows, so the docs can't drift; a new one runs the runtime table, which no test
+      read until now.
+
+12. **The tests, in order, negative first,** each watched failing for the right reason:
+    1. `{"date": "2026-02-30"}` is refused (then `"20261031"`, `"2026-W44-6"`, `"2026-1-5"`, a
+       moment, year 0); `{"date": "2026-10-31"}` reads `date("2026-10-31")`.
+    2. **The curriculum's:** a date compared with a number is refused by `check`; then with a text;
+       two dates order; `string` of a date is a text; `{"today": []}` refused with the list.
+    3. `evaluate`: a date field holding a text, or a `datetime`, is an error, never `false`; two
+       dates compare; `string` gives `YYYY-MM-DD`.
+    4. A case: a form giving `"31/10/2026"`, a number or a `datetime` for a date is refused with
+       what to do; `"2026-10-31"` is read into a date by its type, and a condition reads it.
+    5. The opening and an event's payload, the same; an activity's output annotated
+       `datetime.date` is read as a date by a condition, and a contract output that is a
+       `datetime` is refused at registration.
+    6. On Temporal: the round trip, through continue-as-new (choice 6).
+    7. The builder: `Field.date()`, a literal, a `datetime` refused; `examples/builder/dates.py`.
+    8. The schema: a date field and literal; no `today` anywhere in it.
+    9. The plain diff and the case map name a date field's type; a type changed from text to date
+       is reported.
+    10. The date tests, run in a subprocess with `TZ=America/New_York` and again with
+        `TZ=Pacific/Kiritimati` (UTC+14), give the same results: the engine reads no local zone.
+
+## Decided while building 16a
+
+- **The clock behind `date`** (asked 2026-11-01, answered (a)). The boundary test banned
+  `datetime` in `core` and `case`, and `date.today()` lives on the `date` class. (a): a pure layer
+  imports exactly `from datetime import date`, and the boundary test refuses `today`, `now`,
+  `utcnow`, `fromtimestamp` and `astimezone`, as attributes and through `getattr` with the name
+  written out, each with a negative test; a moment is refused by its exact type, `is_day`. (b),
+  set aside: Ventoux's own day type, with no clock, and a conversion at every edge. D66 says so.
+  *A known limit:* `getattr(date, name)` with a name computed at runtime isn't seen; nothing in
+  `core` or `case` reads an attribute by a name from data on a date.
+- **No new engine version.** Every definition readable before 16a decides as it did; no recorded
+  history holds a message that changed. By D60's dated line the format's `$id` stays `engine-2`.
+- **The guide's runtime table isn't run by any test,** and one row (`approved_amount should be a
+  number, and it holds a string`) is a message nothing produces: the evaluator is untyped and
+  refuses by operator. Raised for the promises (step 6).
+- **A sensitive date** (slice 4). The wrapper holds "the plain value, of its field's type"
+  (brief, D31), but the reading skipped wrapped values, so a sensitive date was kept as
+  `Sensitive("2026-10-31")` and its condition could never read it as a day. Now the day is read
+  inside the wrapper, with a test. The opening keeps its values as a form does, through the same
+  `kept`, so a date given at the opening is read into a day too.
+- **Four walkers over expressions** (slice 5). Besides the parser, the check, the evaluator and the
+  renderer, four functions walk an expression and fail closed on a node they don't know:
+  `fields_read` (`core/provenance.py`), `given_as_reference` (`core/before_activity.py`), and the
+  readings in `case/warnings.py` and `case/known.py`. Each now takes a date literal as a literal,
+  reading no field, and each has a test that fails without it (one by mutation: the reference
+  input's message said "a computed value" for a date literal, not "a value written in the
+  definition"). Found because `parse_case` raised `TypeError: not an expression: date` on a
+  condition holding a literal. *Worth a later check:* a test that every walker knows every kind
+  of literal, so a fifth kind can't be missed the same way.
+- **An activity's date output is read as a date by validation** (`output_type`, `case/types.py`),
+  so a condition comparing it with a number is refused before anything runs.
+- **The Temporal round trip** (slice 6). The converter writes a `date`, matched exactly, as its
+  text, and refuses a `datetime`; `state_from_data` takes the declared types (`case_types`) and
+  reads each date back into a day, a sensitive one inside its wrapper, refusing one that isn't.
+  The types are required, so a caller can't forget them; the tests whose states hold no date pass
+  `{}`. The first version of the Temporal test passed with the reading removed: `settle` was
+  admitted before the crossing, so nothing read a date after it. Now the adjuster proposes it in
+  the new run, and with the reading removed the proposal is refused, failing closed.
+- **The builder** (slice 7). `Field.date()` reads as a `DateExpr`, compared with another date or
+  a `datetime.date`, written `{"date": "…"}`; `string` and `in_` take a date. *A limit of the type
+  check:* a `datetime` is a `date` to mypy too, so `incident < datetime(…)` type-checks, and the
+  builder refuses it only when the file runs, by its exact type. The guide quotes that refusal,
+  and a test reads the guide's line.
+- **The release digest couldn't read a date** (slice 7): `canonical` fails closed on a value it
+  doesn't know, so no package with a date literal could have been released. A date now digests as
+  `{"#date": "2026-10-31"}`, as a decimal is `{"#decimal": …}`, so a date and its text digest
+  apart (a test, watched failing with the plain text). No package pinned before 16a holds a date,
+  so method 1 gives each the digest it pinned (brief, D51).
+- **A pinned package of its own for the date** (`tests/digests/dates`), not a date added to
+  `every-shape`: every-shape's digest is pinned for ever, and changing its content would change
+  it. The new package gets its first pin; every existing pin is unchanged.
+- **The case map refused a date field** (slice 9): `kind_of` (`case/reading.py`) fails closed on a
+  type it doesn't know, so `ventoux map` exited 1 on any package with a date. It now reads "a
+  date"; the plain diff, which reads fields through it, then said both changes with no change of
+  its own: a text become a date (`string -> date`), and a date literal moved by a day, each "not
+  proven either way", read as possibly looser (brief, D55).
+- **A plan's fields take dates too.** A case's and a plan's fields share one list of types
+  (`DeclaredType`, `core/plan.py`), so adding the date there gives both, and the plan schema says
+  so. Nothing in 16a promises more about plans than that the type parses.
+- **Two schema refusals test nothing** (`tests/test_schema.py`, layer 14e): "an operator D20
+  doesn't list" and "a number written as a string" put an approval on `settle`, a plan step,
+  which takes none, so the schema refuses them for that. Left to 14e's owner; 16a's literal test
+  uses `settle`'s own `when`, with a control the schema accepts.
+
+## Sketched, decided when their parts start
+
+- **16b, the option.** Its choices are below, in "16b: the option" (2026-11-02).
+- **16c, the attachment.** Its choices are below, in "16c: the attachment" (2026-11-02).
+
+## Promises
+
+Every claim this note, D66 and the guides make about the date, and the test that fails if it
+isn't true. Tests are in `tests/test_dates.py` unless named. "Pinned" means it passed at once, the code
+having been written for an earlier test; "mutation" means it was watched failing with the code
+broken on purpose, then restored.
+
+| # | Promise | Test | Seen failing |
+|---|---|---|---|
+| 1 | **The curriculum's:** a date compared with a number is refused before anything runs | `test_a_date_compared_with_a_number_is_refused_before_anything_runs`; through validation, `test_an_outputs_date_is_read_as_a_date_by_validation` | failed first |
+| 2 | A date is exactly `YYYY-MM-DD`, a real day, years 0001 to 9999: `2026-02-30`, `20261031`, `2026-W44-6`, `2026-1-5`, a moment, year 0 and non-ASCII digits refused | `test_a_date_literal_that_is_not_a_day_is_refused`, `test_only_yyyy_mm_dd_naming_a_real_day_is_a_date`, `test_the_first_and_the_last_day_a_date_can_be` | failed first; the edges pinned |
+| 3 | A literal is `{"date": …}`, read `date("…")`; anything but a text in it is refused | `test_a_date_literal_is_a_day_and_reads_as_feel_writes_it`, `test_a_date_literal_takes_a_text`, `test_the_guide_reads_as_the_renderer_renders` | failed first |
+| 4 | A text shaped like a date stays a text: compared or ordered with a date, refused | `test_a_date_compared_with_a_text_is_refused_write_a_date_literal`, `test_a_date_ordered_against_a_text_is_refused` | pinned (the type rule already refused) |
+| 5 | Two dates order and compare; `in`, `if` and `string` take a date; `string` gives `YYYY-MM-DD` | `test_two_dates_compare`, `test_two_dates_compare_as_days`, `test_if_takes_dates_as_any_type`, `test_string_of_a_date_is_a_text`, `test_string_of_a_date_gives_yyyy_mm_dd` | failed first; `if` pinned |
+| 6 | No expression reads today: `today` has no shape, in the check or the published schema | `test_today_has_no_shape_so_it_cannot_be_written`, `test_the_published_schema_holds_the_date_and_no_today` | pinned (fixed list) |
+| 7 | No date arithmetic: the operator list is D20's and the literal, nothing more | `test_an_unknown_operator_is_refused_with_one_message` (the whole list, word for word) | failed first (it named `date`) |
+| 8 | At runtime a date field holding a text or a moment is an error, never `false` | `test_a_date_field_holding_a_text_is_an_error_never_false`, `test_a_date_field_holding_a_moment_is_an_error` | failed first; the moment by mutation (a `TypeError` without the guard) |
+| 9 | A form giving a text that isn't a day, a number or a moment is refused, naming the kind, never the value (D30) | `test_a_form_giving_a_date_that_is_not_a_day_is_refused` | failed first |
+| 10 | A form's or the opening's `YYYY-MM-DD` is read into a day, and a condition reads it | `test_a_form_date_is_read_into_a_day_and_a_condition_reads_it` | mutation (reading removed) |
+| 11 | A sensitive date stays wrapped, with the day inside | `test_a_sensitive_date_is_kept_wrapped_and_read_into_a_day` | failed first |
+| 12 | The opening and an event refuse a date that isn't a day, saying how one is written; an event's date lands as a day | `test_an_opening_giving_a_date_that_is_not_a_day_is_refused`, `test_an_event_carrying_a_date_that_is_not_a_day_is_refused`, `test_an_events_date_lands_as_a_day` | failed first; the opening by mutation |
+| 13 | **Tutor:** an activity's output date that is a timestamp, a moment's text or a `datetime` fails its step, and nothing it gave lands; `YYYY-MM-DD` and a `date` land | `test_an_output_date_that_is_a_moment_fails_the_step_and_nothing_lands`, `test_an_output_date_lands_as_a_day` | failed first, for the right reason once a date could land |
+| 14 | A contract's output may be a `date`, never a `datetime` | `test_a_contract_whose_output_is_a_day_registers`, `test_a_contract_whose_output_is_a_moment_is_refused_at_registration` | pinned (with 13's change) |
+| 15 | Every walker over expressions takes a date literal as a literal | `test_an_outputs_date_is_read_as_a_date_by_validation` (provenance, warnings, known), `test_a_reference_goes_only_where_its_system_is_expected` (its date row), `test_a_condition_with_a_date_literal_runs_its_activity` | each by mutation |
+| 16 | Ventoux never makes a date up: every date a case holds has the source of whoever gave it | `test_every_date_a_case_holds_was_given_never_made_up` | pinned |
+| 17 | On a payload a date is `YYYY-MM-DD`; a `datetime` never crosses | `test_a_date_crosses_a_payload_as_yyyy_mm_dd`, `test_a_moment_never_crosses_a_payload_as_a_date` | failed first |
+| 18 | A carried state reads each date back as a day, by its type; one that isn't a day is refused | `test_a_carried_state_reads_its_dates_back_as_days`, `test_a_carried_date_that_isnt_a_day_is_refused` | failed first |
+| 19 | On Temporal, after continue-as-new, the case still decides on days; a query gives each date as its text | `test_dates_cross_continue_as_new_and_the_case_still_decides_on_days` (`tests/test_temporal_dates.py`) | mutation (the reading removed: the proposal refused) |
+| 20 | A pure layer imports only `from datetime import date`, and reads no clock through it (`today`, `now`, `utcnow`, `fromtimestamp`, `astimezone`, also by `getattr`) | `test_a_pure_layer_may_import_the_date_alone`, `test_anything_else_from_datetime_is_forbidden`, `test_pure_layers_may_not_reach_a_clock_through_the_date`, `test_a_date_as_a_value_reads_no_clock`, `test_pure_layers_import_nothing_forbidden` (`tests/test_layers.py`) | failed first |
+| 21 | Workers may run in any zone: the date tests give the same results in New York and on Kiritimati | `test_the_date_tests_give_the_same_results_in_any_time_zone` (`tests/test_time_zones.py`) | mutation (a day read through the machine's zone: nine differ) |
+| 22 | **Tutor:** the schema's literal is `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`, shape only | `test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser[a date literal not written YYYY-MM-DD]`, `test_a_date_literal_written_yyyy_mm_dd_is_accepted_by_the_schema` (`tests/test_schema.py`) | failed first, after a control |
+| 23 | The builder: `Field.date()`, a `date` literal, `string` and `in_`; a `datetime` refused when the file runs; the guide's example is checked and quotes the refusal | `test_the_builder_refuses_a_moment_beside_a_date`, `test_the_builder_writes_string_and_in_of_a_date`, `test_the_builder_guide_quotes_the_refusal_of_a_moment`, `test_every_example_is_a_package_the_check_accepts`, `test_the_guides_examples_are_the_files_their_tests_run`, `test_the_builder_writes_every_key_of_the_format` | failed first |
+| 24 | A date and its text digest apart; every package pinned before 16a keeps its digest; the date's shapes are pinned | `test_a_date_and_its_text_digest_apart`, `test_method_1_gives_the_digests_it_pinned`, `test_the_pinned_packages_use_every_shape` | mutation (plain text: one digest) |
+| 25 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say`, `test_the_published_schema_holds_the_date_and_no_today` | pinned |
+| 26 | The case map and the plain diff read "a date"; a text become a date and a moved literal are reported, read as possibly looser | `test_the_case_map_reads_a_date_field_as_a_date`, `test_the_plain_diff_reports_a_text_become_a_date_and_a_date_moved` | failed first; mutation |
+| 27 | The guides' tables say what the code says: refusals, renderings, runtime errors | `test_the_guide_refuses_as_the_check_refuses`, `test_the_guide_reads_as_the_renderer_renders`, `test_the_guides_runtime_errors_are_what_the_evaluator_says` (`tests/test_expressions.py`) | the runtime one failed first, on the row nothing produced |
+| 28 | A plan's field may be a date (it parses; nothing more is promised for plans) | `test_a_plans_field_may_be_a_date` | pinned |
+| 29 | **Tutor:** a sensitive date crosses continue-as-new sealed, and is read back as a day inside its wrapper, so admission in the new run still compares two days | `test_a_sensitive_date_crosses_continue_as_new_and_is_still_read_as_a_day` (`tests/test_temporal_dates.py`) | mutation (`read_back` given the wrapper, not the value inside: the new run's workflow task fails with `ValueError`, its message encrypted (D31), and the case waits; the test without a sensitive date still passes) |
+
+**Left out, on purpose:** the activities guide's rule that an activity names its zone is the
+platform team's: Ventoux can't see inside an activity, so no test can prove it. Test 21 proves the
+engine's own half.
+
+**Found here, the promise nothing kept:** the expressions guide's runtime row `approved_amount should
+be a number, and it holds a string` was no message the evaluator gives, and no test read the table.
+The row now says what happens (`` `>` compares two numbers or two dates, and it was given a string ``),
+and `test_the_guides_runtime_errors_are_what_the_evaluator_says` runs every row.
+
+
+# 16b: the option
+
+Status: 2026-11-02, agreed: choices 13 to 24 as recommended; D67 written before 16b is built.
+Branch `layer-16b-options`, from `main` at `0dbf274`,
+with 16a merged (#80). The warm-up was learning question 39, recorded. The guides were written
+first: `docs/guides/case-data.md` ("Options"), `expressions.md` (the type and a refusal),
+`activities.md` ("An option's check") and `builder.md` (`examples/builder/options.py`), with the
+recommendations below.
+
+## What 16b is for
+
+**An answer a system must vouch for, checked when it is given.** An outcome's list is the
+definition's, so validation checks it before anything runs (D9). A branch, a product, a cost
+centre: those lists are a system's, and change on their own. A reference (D16) says "an ID in
+`branches`" and nothing checks it; the resolver only shows the record, later, and keeps nothing.
+An option is checked against the system's list at the one honest moment, when the person gives
+it, through an activity, so the answer the system gave is in the history and replay reads it.
+
+```text
+ana answers assess#1 accept, {"branch": "BR-0142"}
+  -> the answer is held; branches.holds@1 is scheduled with "BR-0142"
+  -> {"held": true}: the answer is taken, `branch` lands, checked by branches.holds@1
+  -> {"held": false}: refused ana's answer accept: branch is not one of the options branches holds
+```
+
+The curriculum's negative test: an option the system's list doesn't hold is refused, and the
+refusal recorded.
+
+**What is new in the engine:** until now an answer is taken, or refused, the moment it arrives.
+An answer holding an option is decided by two events: the answer, then the check's result.
+
+## Choices for 16b
+
+13. **A type of its own: `{"type": "option", "system": "branches"}`.** Beside `reference`, not a
+    reference marked `"checked": true`: an option is checked, a reference never is, and a type
+    that says so can't be half-configured. Where a contract's input wants a reference to
+    `branches`, an option of `branches` fits it (it is one, and a checked one); never the other
+    way. *Recommended.*
+
+14. **One check per system, named by the catalog, never by the definition.** The platform team
+    registers a read-only activity whose contract takes exactly one input, the value (a
+    reference to the system), and gives exactly one output, `held`, a boolean whose source is the
+    system; then `catalog.register_option_check("branches", "branches.holds@1")`. Refused: a check
+    whose effect isn't `read`, another shape, a system nobody registered, a second check for one
+    system. A definition names the system; `ventoux check` refuses an option of a system that has
+    no check (fail closed: nothing could check it). *Recommended.* The alternative, the definition
+    naming its check activity per field, lets two cases ask the same system differently.
+
+15. **The answer is held while the check runs.** The answer's form is checked as today (types,
+    outcome, role, D9, D22); if it sets an option, the engine schedules the check, one run per
+    option field, and holds the answer: nothing it sets lands, its outcome isn't the task's
+    yet, and the task's entry stays open, "being checked". When every check has answered:
+    - all held: the answer is taken as any answer is, its history line saying `checked by
+      branches.holds@1`;
+    - one not held: the answer is refused, the refusal recorded in the history, naming the field
+      and the system, never the value (D30); the task stays open for a corrected answer;
+    - a check fails after its contract's retries, or gives what its contract doesn't describe:
+      the answer is not taken, saying why, and the task stays open. Never taken as held (fail
+      closed); not "needs attention" either, since nothing has failed that a person can't fix by
+      answering again.
+    A second answer to the entry while it is being checked is refused at once ("assess#1 is being
+    checked"). A close waits for the checks, as for any running activity (D10). *Recommended.*
+    The alternatives: checking in the client before the answer is sent (the trusted caller vouches
+    for identity, never for facts, D19, and nothing would be in the history), or a Temporal update
+    running the check (the in-memory engine and the replay would still need the held answer).
+
+16. **Its source: the person, and the system that checked it.** `branch` lands with
+    `{person:ana, system:branches}`: Ana chose it, the system vouched for it. Both are trusted, so
+    nothing a policy allows changes; the history and the case map say both. Only the person counts
+    as "whose answer feeds" a step for approvals (D25). *Recommended.* The alternative, the person
+    alone, hides that a system was asked.
+
+17. **Only a person gives an option.** An option field set at the opening, by an event or by a
+    rule, or an activity's output typed as one, is refused by validation: nothing would check it.
+    A system that already knows the branch gives a `reference`. *Recommended.* The alternative,
+    checking at the opening and on events too, makes the opening and an event wait on an activity,
+    which neither does today; it can come later, with a use.
+
+18. **Checked once, when given; a fact with its time.** "BR-0142 was held when Ana answered" stays
+    true when the branch closes. The check's answer records when it was obtained (D18); a step that
+    needs the option still held uses `max_age`, and a stale option, given by a person, makes the
+    case need attention, as any stale fact from a person does (D18). *Recommended.*
+
+19. **Expressions read it like a reference.** `==` and `!=` with a value of the same system
+    (another option or a reference to it), `exists`, `string`; never a literal, since only the
+    system says which values exist, so `branch == "BR-0142"` is refused before anything runs.
+    *Recommended.* The alternative, comparing with literals, writes the system's list into the
+    definition, which is what an outcome is for.
+
+20. **Replay and the history.** The check is an activity like any other: scheduled, recorded,
+    replayed from its result, never asked again. The held answer crosses continue-as-new in the
+    state; a state carried before 16b holds none. A refusal and an acceptance are history lines,
+    word for word as the guides show.
+
+21. **No new engine version.** A definition readable before 16b holds no option, and the answer
+    path of one without an option is unchanged: it decides as it did (D60's dated line). The JSON
+    Schema's `$id` stays `engine-2`. *Recommended*, to confirm when built.
+
+22. **Shown, and the rest of the format.** The case map: "branch is an option of branches,
+    checked when given"; the plain diff names a type changed to an option; the digest reads it as
+    a type like any other; the builder gives `Field.option("branches")`. The inbox's picker (the
+    list to choose from) is the inbox's, later, through the resolver (D16).
+
+23. **Decision: D67,** recorded in the brief before 16b is built, adding to D9, D16, D18, D19 and
+    D30, whose text is kept.
+
+24. **What 16b leaves out:** checking options at the opening, on events or from rules; an option
+    of several values; listing a system's options for a picker; the attachment (16c).
+
+## Seams and tests for 16b (curriculum step 4)
+
+*Found while writing the seams (2026-11-02):* a case continues as new only at a quiet point,
+nothing running (`continue_now`, `temporal/cases.py`); an answer is held only while its check runs,
+so **continue-as-new never carries a held answer**. Choice 20's "the held answer crosses
+continue-as-new" needs no carried field: a test pins that the case doesn't switch while a check
+runs.
+
+25. **The seams the tests use,** all public:
+    - **The catalog:** `Catalog.register_option_check(system, contract)` refuses a check of the
+      wrong effect or shape, an unregistered system, a second check (`CatalogRefused`, its
+      message). `catalog.option_check(system)` gives the check's reference, for the engine.
+    - **Validation:** `parse_case` and `validate_case` (`ventoux check`): an option of a system
+      with no check; an option field the opening, an event, a rule or an output would set.
+    - **Expressions:** `check(expression, types)` with an `OptionType(system=…)`: an option
+      against a literal refused; against an option or reference of its system accepted; and the
+      fit of an option where a contract wants a reference (`fits_type`).
+    - **A case, in memory:** `run_case(..., activities={"branches.holds@1": …})`, reading the
+      history, the case file and its sources, `waiting_for` and `needs_attention`. The check's run
+      is named `assess#1.branch` (the entry, then the field), so `held=["assess#1.branch"]` keeps
+      it running while a test sends a second answer or a close.
+    - **On Temporal:** one test on the test server: refused, then taken, both in the history; the
+      recorded history replays without asking the check again; the case doesn't continue as new
+      while a check runs.
+    - **The readings and the format:** `Field.option("branches")`, `case_schema()`, `ventoux map`,
+      `ventoux diff --plain`, the digest (a new pinned package), and the guides' tables and
+      examples, run as in 16a.
+
+26. **The tests, in order, negative first:**
+    1. The catalog refuses an option check: `effect: write`; an input or output of another shape;
+       an unregistered system; a second check for one system.
+    2. Validation refuses an option of a system with no check, and an option field set by the
+       opening, an event, a rule or an output.
+    3. **The curriculum's:** an answer setting an option the system doesn't hold is refused, the
+       refusal in the history, naming the field and the system, never the value; nothing lands;
+       the task stays open; a corrected answer is then taken.
+    4. Held: the answer is taken, `checked by branches.holds@1`, its sources the person and the
+       system.
+    5. The check fails, or gives another shape: the answer is not taken, saying why; the task
+       open; the case not needing attention.
+    6. A second answer while being checked is refused; a close waits for the check.
+    7. Expressions: an option against a literal refused (the guide's row); against an option of
+       its system accepted; an option fits a reference input of its system, never the other way.
+    8. A stale option, by `max_age`, needs attention (D18).
+    9. On Temporal: refused then taken; replayed without asking again; no switch while checking.
+    10. The builder, the schema, the case map, the plain diff, the digest, and the guides' blocks.
+
+## Decided while building 16b
+
+- **The catalog refuses with `ValueError`,** as every catalog rule does, not a `CatalogRefused`
+  class as choice 25 said; the message is the seam.
+- **"A system nobody registered" needs no rule of its own** (slice 1). A check's contract takes a
+  reference to its system and gives a value from it, and the catalog refuses to register a
+  contract whose reference or source names an unregistered system (D30). So no check for an
+  unregistered system can reach `register_option_check`; naming another system's check is refused
+  by its shape (its reference and its source name the other system).
+- **The builder reads an option as a `ReferenceExpr`** (slice 10), not a class of its own: an
+  option compares exactly as a reference does, and neither class knows its system, so a text
+  beside it is refused when the file runs and another system's value by `ventoux check`. A new
+  class would have added nothing a test could tell apart.
+- **The development catalog has `branches` and its check, `branches.holds@1`,** with a fake that
+  holds BR-0142 and BR-0007: so the guide's example passes `ventoux check` and runs on the
+  development worker. Tests that need a system with no check build a small catalog of their own.
+- **The plain diff walks into a declared type** (slice 10). It showed every model under an
+  expression's operator as one expression, and a declared type is one by inheritance, so a
+  reference or an option moved to another system crashed the diff.
+  It now names `fields.branch.system`.
+
+## Promises (16b)
+
+Every claim this part of the note, D67 and the guides make about the option, and the test that
+fails if it isn't true. Tests are in `tests/test_options.py` unless named. "Pinned" and "mutation"
+as in 16a's table.
+
+| # | Promise | Test | Seen failing |
+|---|---|---|---|
+| 1 | **The curriculum's:** an option the system doesn't hold is refused and the refusal recorded, naming the field and the system, never the value; nothing lands; the task stays open; a corrected answer is taken | `test_an_option_the_system_does_not_hold_is_refused_and_the_refusal_recorded` | failed first |
+| 2 | The catalog refuses an option check that writes, takes or gives another shape, or is a system's second; a read-only check of the right shape registers | `test_an_option_check_that_writes_is_refused`, `test_an_option_check_of_another_shape_is_refused` (three shapes), `test_a_second_option_check_for_one_system_is_refused`, `test_a_read_only_check_of_the_right_shape_is_how_its_system_is_asked` | failed first |
+| 3 | A check for a system nobody registered can't be registered | D30's rule: `test_the_guides_refusals_are_what_the_catalog_says` (`tests/test_catalog.py`, its `reference("sail")` row) | pinned (no rule of its own, see "Decided while building 16b") |
+| 4 | `ventoux check` refuses an option of a system with no check, and accepts one with a check | `test_an_option_of_a_system_with_no_check_is_refused`, `test_an_option_a_person_gives_with_its_systems_check_is_accepted` | failed first |
+| 5 | Only a person gives an option: the opening, an event and a rule are refused | `test_an_option_given_at_the_opening_is_refused`, `test_an_event_carrying_an_option_is_refused`, `test_a_rule_setting_an_option_is_refused` | failed first |
+| 6 | Held, the answer is taken, `checked by branches.holds@1`; the value's sources are the person and the system, the outcome's the person alone | `test_an_option_the_system_holds_comes_from_the_person_and_the_system` | failed first |
+| 7 | The check fails, or answers another shape: the answer is not taken, saying why; the task waits; the case doesn't need attention | `test_an_option_whose_check_cannot_be_made_is_not_taken` (both) | failed first (a `StopIteration`, then "not held" for a garbled answer) |
+| 8 | A second answer while checking is refused; a close waits for the check, and the held answer is then not taken | `test_a_second_answer_while_the_first_is_checked_is_refused`, `test_a_close_waits_for_a_running_check_and_the_held_answer_is_not_taken` | failed first |
+| 9 | Expressions read it like a reference: `==`/`!=` with the same system's option or reference; another system's refused; a literal refused; `string` gives a text; it fits a reference input of its system, never the other way | `test_an_option_compares_with_a_value_of_its_system`, `test_an_option_never_compares_with_another_systems_value`, `test_string_of_an_option_is_a_text`, `test_an_option_goes_where_a_reference_to_its_system_is_wanted`, the guide's row in `test_the_guide_refuses_as_the_check_refuses` (`tests/test_expressions.py`) | failed first |
+| 10 | Checked once, when given: a stale option, by `max_age`, makes the case need attention, and can't be fetched again | `test_a_stale_option_needs_attention_where_it_must_be_fresh` | pinned; mutation |
+| 11 | **Found at step 6:** only the person counts as whose answer feeds a step (D25): whoever gave an option a rule's condition read can't approve what it started; the system excludes nobody | `test_whoever_gave_an_option_a_rule_read_cant_approve_what_it_started` | pinned; mutation (the system alone as the source: Ana's approval accepted) |
+| 12 | On Temporal: refused, then taken, both in the history; the check runs once per answer | `test_an_option_not_held_is_refused_on_temporal_and_the_corrected_one_taken` (`tests/test_temporal_options.py`) | pinned (the adapter runs a check as any activity) |
+| 13 | The history replays without asking the check again | `test_a_case_with_a_checked_option_replays_without_asking_the_system_again` (`tests/test_temporal_options.py`) | pinned; a replay runs no activity, so it proves the history replays, not more |
+| 14 | A case never continues as new while an answer is held | `test_a_case_never_continues_as_new_while_an_answer_is_held` (`tests/test_temporal_options.py`) | mutation (the "nothing running" guard removed: the case hangs to its bound) |
+| 15 | **Found at step 6:** carrying a held answer is refused, never dropped | `test_a_held_answer_is_never_carried_to_a_new_run` | mutation |
+| 16 | The builder: `Field.option(system)`; a text beside it refused when the file runs; the guide's example is the file its test runs, and `ventoux check` accepts it | `test_the_builder_refuses_a_text_beside_an_option`, `test_the_guides_examples_are_the_files_their_tests_run`, `test_every_example_is_a_package_the_check_accepts`, `test_the_builder_writes_every_key_of_the_format` | failed first |
+| 17 | The case map reads "an option of branches, checked when given"; the plain diff names a moved system and a reference become an option | `test_the_case_map_reads_an_option_with_its_system`, `test_the_plain_diff_reports_an_option_moved_to_another_system`, `test_the_plain_diff_reports_a_reference_become_an_option` | the map and the moved system failed first (the map refused, the diff crashed); the retyping pinned |
+| 18 | The option's shapes are pinned in a package of their own; every earlier pin keeps its digest | `test_the_pinned_packages_use_every_shape`, `test_method_1_gives_the_digests_it_pinned` (`tests/test_digests.py`) | failed first |
+| 19 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say` | pinned |
+| 20 | **Found at step 6:** the activities guide's check is the development catalog's, and registers | `test_the_activities_guides_option_check_is_the_development_one` | mutation (a timeout changed in the guide) |
+| 21 | **Found at step 6:** the case-data guide's two history lines are what the case writes | `test_the_case_data_guides_lines_are_what_the_case_writes` | mutation (a word changed in the guide) |
+| 22 | **Tutor:** an edit of an option is refused when it is proposed, so no approved edit sets one to a value its system never vouched for | `test_an_edit_of_an_option_is_refused_when_it_is_proposed`; the cases guide quotes it (`test_the_guides_change_example_runs_as_written`, `tests/test_change_requests.py`) | failed first (the edit was applied: `BR-9999`, from `person:lee` and `person:sam`, no `system:branches`) |
+| 23 | **Tutor:** only `true` is held, and only `true` or `false` is an answer: a check answering `"yes"`, `1` or `"no"` never vouches, nor speaks for the system; the answer is not taken, saying why | `test_a_check_answering_anything_but_true_or_false_never_vouches` | failed first (each recorded as "not one of the options branches holds"); mutation (the exact-type guard removed and `is not True` made a truthiness test: all three fail) |
+
+**Left out, on purpose:** D67's "an activity's output would set" named nothing that can happen: an
+output is typed by its contract, which can declare a reference and never an option, and only a
+rule sets a field. D67, unmerged, now says so in place, as the case-data guide does. Choice 16's "the case map
+says both" sources isn't true: the map reads the definition, never a case's values. The history
+says which check vouched (`checked by`), and the sources hold both (promise 6).
+
+**Found here, a promise nothing kept:** choice 16's approval rule (promise 11) and the carried
+state's refusal (promise 15) were in the code and in no test; the activities guide's block and
+the case-data guide's lines (promises 20 and 21) were run by no test.
+
+## From the tutor's review of 16b
+
+- **An edit never sets an option** (D52, D67). An approved edit set `branch` to `BR-9999`, a value
+  the system doesn't hold: `edit_problem` checked its type only, and the value then read as two
+  people's, with no `system:branches`, and could reach an activity wanting a reference to
+  `branches` as though the system had vouched for it. Choice 17 listed the opening, events, rules
+  and outputs, and missed edits. `edit_problem` now refuses an edit of an option when it is
+  proposed, saying an option is given by a person's answer, where its system checks it; D67 says
+  so in place. Checking an edit the way an answer is checked would be a decision of its own, and
+  isn't built.
+- **A check's answer is read by its exact type** (optional findings 1 and 2). Pydantic's lax
+  reading took `"yes"` and `1` as true and `"no"` as false, so with `is not True` made a
+  truthiness test every option test still passed, and a malformed answer was recorded as the
+  system's "not held". Now anything but `true` or `false` is not taken, saying the check gave
+  what an option's check never answers, D67's own path for an answer its contract doesn't
+  describe. With the guard in place, `is not True` and a truthiness test can't be told apart,
+  so the test pins the pair, not the line.
+
+
+# 16c: the attachment
+
+*Warm-up (2026-11-02): learning question 40, "arrival is a fact, content is not", retrieved and
+recorded in `docs/LEARNING.md`; still open.*
+
+## What 16c is for
+
+**A document kept as a reference, never its bytes in the history.** A file can't live in the case:
+the history is kept for ever, replayed, and read by anyone with namespace access (D16), it can't
+be forgotten (layer 9c), and a payload has a size limit. The file lives in a **document store** the
+platform team registers; the case keeps the ID the store issued, checked when a person gives it,
+as 16b checks an option:
+
+```text
+inbox: Ana uploads receipt.pdf to documents, as Ana       -> the store issues "doc-7f3a"
+ana answers assess#1 accept, {"receipt": "doc-7f3a"}
+  -> the answer is held; documents.issued@1 is scheduled with "doc-7f3a"
+  -> {"issued": true}:  taken, `receipt` lands, checked by documents.issued@1
+  -> {"issued": false}: refused ana's answer accept: receipt is not a document documents issued
+inbox, later: Lee opens receipt -> the store's resolver, asked as Lee
+```
+
+The curriculum's negative test: an attachment that names no registered store is refused.
+
+**What is new in the engine:** little. 16b made an answer that waits on a check; 16c gives that
+check a second kind of field.
+
+## Choices for 16c
+
+27. **A type of its own, naming a store: `{"type": "attachment", "store": "documents"}`** (step 1,
+    choice (b)). Beside `reference` and `option`: an attachment is an ID a store issued and
+    vouched for; a reference to `documents` says nothing of the kind, and nothing knows how to open
+    it. The key is `store`, not `system`: the guides say "store", and validation refuses a system
+    that isn't one. An attachment fits where a contract wants a reference to its store (it is one,
+    and a checked one), never the other way. *Recommended.*
+
+28. **A store is a registered system with a check: `catalog.register_document_store(system,
+    check)`.** The check is a read-only activity whose contract takes exactly `attachment`, a
+    reference to the store, and gives exactly `issued`, a boolean whose source is
+    `system:<store>`. Refused, each saying what to do: a check whose effect isn't `read`; another
+    shape; a second check for one store. As in 16b, a check for an unregistered system can't be
+    registered at all (D30). *Recommended.* The alternative, one shape for options and stores
+    (`option` and `held`), saves a few lines and reads wrong in every contract a platform team
+    writes.
+
+29. **The curriculum's: an attachment that names no registered store is refused** by `ventoux
+    check`, in two words: a store nobody registered as a system (`UNKNOWN_SYSTEM`'s wording), and
+    a registered system that isn't a store (`NOT_A_STORE`: "crm is not a document store: register
+    it with register_document_store, or make receipt a reference to crm"). Fail closed: nothing
+    could check the ID, and nothing could open the file. *Recommended.*
+
+30. **Checked when given, by 16b's held answer, unchanged.** The engine holds the answer, schedules
+    the check per checked field (an option's or an attachment's), and takes it once every check
+    has vouched. The same rules as choice 15: issued, taken, `checked by documents.issued@1`, its
+    sources the person and `system:documents` (D67's choice 16); not issued, refused and recorded,
+    naming the field and the store, never the value (D30), the task open; the check failed, or
+    answered anything but `true` or `false`, not taken, saying why; a second answer refused while
+    checking; a close waits. An answer setting an option and an attachment waits for both.
+    *Recommended.* The engine's code generalises from "an option" to "a checked field": its kind
+    says which check, which input, which output, and the refusal's words.
+
+31. **Only a person attaches a file, in a task's answer** (D67's rule, extended): an attachment the
+    opening, an event's payload or a rule would set is refused, and so is an edit of one (the
+    tutor's 16b finding), since nothing would check it. A system that sends a file it stored gives
+    a `reference` to the store. *Recommended.* Events carrying attachments (an email's files) are
+    a real use; they would make an event wait on an activity, which choice 17 left out, and so
+    does this.
+
+32. **Never the bytes, as far as the case can see.** The ID is a text of at most 200 characters;
+    a form giving more is refused before anything is checked, saying how an attachment is given
+    ("receipt is an attachment, the ID a store issued, at most 200 characters: upload the file to
+    documents and give its ID"), never quoting it (D30). A pasted ID the store didn't issue is
+    refused by the check. **What this doesn't do:** an answer reaches a case on Temporal as a
+    signal, recorded before the engine reads it, so a client that pastes a file into an answer
+    puts it in the signal's payload, refused or not. The inbox, which uploads, is what keeps bytes
+    off the wire; the case only refuses to keep them. *Recommended.* The alternative, an update
+    with a validator that refuses before recording, changes how every answer is sent, for one
+    type: a decision of its own.
+
+33. **Opening it is a resolver, as a reference's record is shown (D16).** `resolvers.show(view,
+    "receipt", viewer)` works on an attachment field as on a reference: the case view lists an
+    attachment the viewer may see among its systems, so a hidden attachment has nothing to open,
+    and the store, asked on the viewer's behalf, decides the rest. Nothing it returns enters the
+    case or the history. No new registry: the platform team registers a resolver for the store.
+    *Recommended.*
+
+34. **Its contents are their author's words; nothing new marks them.** The engine never reads a
+    file. An activity that does (a model summarising the receipt) declares its outputs' source as
+    any activity does (layer 4b), `untrusted:document` for what it read. *Recommended*: nothing to
+    build, and no promise beyond the guide's pointer.
+
+35. **Forgetting reaches the ID, not the file.** An attachment may be `sensitive`, as any field: its
+    ID is sealed, and forgetting the case destroys its key (layer 9c). The store keeps the file
+    under its own rules; the guide says so, and that the store erases it. *Recommended.* Asking the
+    store to erase on forgetting would make forgetting an activity: a decision of its own.
+
+36. **Expressions read it like a reference** (D67's choice 19): `exists`, `==`/`!=` with an
+    attachment or a reference of the same store, `string`; never a literal. An attachment is not
+    an option, and the two never compare, even naming one system.
+
+37. **Shown, and the rest of the format.** The case map: "receipt is an attachment in documents,
+    checked when given"; the plain diff names a type changed to an attachment, and a moved store;
+    the digest reads it as a type (a new pinned package, as in 16a and 16b); the builder gives
+    `Field.attachment("documents")`; the JSON Schema. The development catalog gains a
+    `documents.issued@1` check (the `documents` system is already there) and a fake that issued
+    `doc-7f3a`.
+
+38. **No new engine version.** No definition readable before 16c holds an attachment, and the
+    answer path without one is unchanged: `$id` stays `engine-2`. *Recommended*, to confirm when
+    built.
+
+39. **Decision: D68,** recorded in the brief before 16c is built, adding to D16, D30, D52 and D67,
+    whose text is kept.
+
+40. **What 16c leaves out:** uploading (the inbox's); several files in one field, and an
+    attachment in a list's fields (refused, `ventoux check` saying so); events carrying
+    attachments (choice 31); a file's name, media type or size in the case; scanning a file;
+    asking the store to erase on forgetting (choice 35).
+
+
+## Seams and tests for 16c (curriculum step 4)
+
+*Found while writing the seams (2026-11-02):* a list's fields may be declared an option since 16b,
+and `ventoux check` accepts it, though nothing can fill one: a form and the opening refuse every
+list ("branches_seen is a list, and the answer gives a list"), and a list comes only from an
+activity's output, whose contract can declare neither an option nor an attachment. Choice 40's
+refusal covers both checked types: a list's field that is an option or an attachment is refused,
+saying why.
+
+41. **The seams the tests use,** all public, as 16b's:
+    - **The catalog:** `Catalog.register_document_store(system, check)` refuses a check of the
+      wrong effect or shape and a second check for one store (`ValueError`, its message);
+      `catalog.document_store(system)` gives the check's reference, or None.
+    - **Validation:** `parse_case` and `validate_case` (`ventoux check`): an attachment naming a
+      system nobody registered (`UNKNOWN_SYSTEM`) or one that isn't a store (`NOT_A_STORE`); an
+      attachment the opening, an event or a rule would set; a list's field that is an option or
+      an attachment.
+    - **Expressions:** `check(expression, types)` with an `AttachmentType(store=…)`: a literal
+      refused (the guide's row); an attachment or reference of its store accepted; an option of
+      the same system refused; `string`; the fit where a contract wants a reference (`fits_type`).
+    - **A case, in memory:** `run_case(..., activities={"documents.issued@1": …})`, reading the
+      history, the case file and its sources, `waiting_for` and `needs_attention`; `edit(...)`
+      for the refused edit; an ID of 201 characters for the bound. The check's run is named
+      `assess#1.receipt`, as 16b's.
+    - **Opening:** `case_view(...)` and `Resolvers.show(view, "receipt", viewer)`: an attachment
+      the viewer may see is opened through the store's resolver; a hidden one is refused.
+    - **On Temporal:** one test on the test server, an answer setting an option and an attachment,
+      taken once both checks vouched; its history replays.
+    - **The readings and the format:** `Field.attachment("documents")`, `case_schema()`,
+      `ventoux map`, `ventoux diff --plain`, the digest (`tests/digests/attachments`), and the
+      guides' tables and blocks, each run by a test.
+
+42. **The tests, in order, negative first:**
+    1. **The curriculum's:** `ventoux check` refuses an attachment naming no registered store: a
+       system nobody registered, and a registered system that isn't a store.
+    2. The catalog refuses a store's check that writes, has another shape, or is a second one;
+       a read-only check of the right shape registers, and an attachment of that store is
+       accepted.
+    3. Validation refuses an attachment the opening, an event or a rule would set, and a list's
+       field that is an option or an attachment.
+    4. An ID the store didn't issue is refused and recorded, naming the field and the store; the
+       task open; a corrected one taken, `checked by documents.issued@1`, its sources the person
+       and `system:documents`.
+    5. An ID longer than 200 characters is refused before the store is asked, never quoted.
+    6. The check fails, or answers anything but `true` or `false`: not taken, saying why. An
+       answer setting an option and an attachment waits for both checks.
+    7. An edit of an attachment is refused when proposed.
+    8. Expressions: a literal refused; its store's values accepted; an option of the same system
+       refused; it fits a reference input of its store, never the other way.
+    9. Opening: shown through the store's resolver; hidden from a viewer who can't see it. A
+       sensitive attachment's ID stays sealed, and is forgotten with the case.
+    10. On Temporal: an option and an attachment checked in one answer, replayed.
+    11. The builder, the schema, the case map, the plain diff, the digest, and the guides' blocks.
+
+## Decided while building 16c
+
+- **One module for both checks** (slice 2). `core/options.py` became `core/checks.py`: an
+  option's check and a store's keep the same rules (read only; one input, a reference to the
+  system; one truth value, from it), so each kind is a `Shape` naming its words, its input and its
+  output (`OPTION`: `option`, `held`; `DOCUMENT`: `attachment`, `issued`). 16b's messages are
+  unchanged, word for word, and its tests pin them.
+- **A sensitive reference could never be resolved** (found in slice 9). The case view keeps a
+  sensitive value wrapped, and `Resolvers.show` took only a plain text, so it said "receipt is not
+  set: there is no record to show" of a value the viewer may see. This predates 16c: a sensitive
+  reference had the same fault. `show` now takes the ID out of its wrapper. The view is already
+  filtered for the viewer, so a value hidden from them still has nothing to resolve.
+- **An answer waiting for two checks was decided at the first that didn't vouch** (found in slice
+  10, on Temporal). Choice 15 said "when every check has answered", but the engine refused the
+  answer as soon as one check said no, and forgot it while the other still ran. In memory checks
+  finish in order, so no test saw it; on Temporal they race. The late check then came back to
+  no answer, or, if the person had answered again meanwhile, it counted towards the new answer:
+  a stale "held" could vouch for a value nobody checked. A 16b fault, with two options; 16c's two
+  checks showed it. The held answer now notes what each check says and is decided once every
+  check is back, by the first problem in the answer's own order, so the line never depends on
+  which check came back first; until then a second answer is refused as being checked.
+
+## Promises (16c)
+
+Every claim this part of the note, D68 and the guides make about the attachment, and the test
+that fails if it isn't true. Tests are in `tests/test_attachments.py` unless named. "Pinned" and
+"mutation" as in 16a's table.
+
+| # | Promise | Test | Seen failing |
+|---|---|---|---|
+| 1 | **The curriculum's:** an attachment naming no registered store is refused: a system nobody registered (`UNKNOWN_SYSTEM`), and one that isn't a store (`NOT_A_STORE`) | `test_an_attachment_in_a_system_nobody_registered_is_refused`, `test_an_attachment_in_a_system_that_is_not_a_store_is_refused` | failed first |
+| 2 | The catalog refuses a store's check that writes, takes or gives another shape, or is a store's second; a read-only check of the right shape makes its system a store | `test_a_stores_check_that_writes_is_refused`, `test_a_stores_check_of_another_shape_is_refused` (three shapes), `test_a_second_check_for_one_store_is_refused`, `test_a_read_only_check_of_the_right_shape_makes_its_system_a_store` | failed first |
+| 3 | A check for a system nobody registered can't be registered | D30's rule: `test_the_guides_refusals_are_what_the_catalog_says` (`tests/test_catalog.py`, its `reference("sail")` row) | pinned, as 16b's row 3 |
+| 4 | Only a person attaches a file: an event, a rule and the opening are refused | `test_an_event_carrying_an_attachment_is_refused`, `test_a_rule_setting_an_attachment_is_refused`, `test_an_attachment_given_at_the_opening_is_refused` | failed first (the rule first for a wrong reason: an attachment didn't fit an attachment) |
+| 5 | A list's field that is an option or an attachment is refused (`CHECKED_IN_A_LIST`) | `test_a_checked_field_in_a_list_is_refused` (both kinds) | failed first |
+| 6 | An ID the store didn't issue is refused and recorded, naming the field and the store, never the ID; the task stays open; a corrected one is taken, `checked by documents.issued@1`, from the person and the store, its outcome the person's | `test_an_id_the_store_did_not_issue_is_refused_and_the_refusal_recorded`, `test_an_attachment_comes_from_the_person_and_the_store` | failed first |
+| 7 | An ID of more than 200 characters is refused before the store is asked, saying how one is given, never quoting it; 200 is an ID | `test_an_id_longer_than_200_characters_is_refused_before_the_store_is_asked` | failed first |
+| 8 | The check fails, gives another shape, or answers anything but `true` or `false`: not taken, saying why; the task waits; the case doesn't need attention | `test_an_attachment_whose_check_cannot_be_made_is_not_taken` (three ways) | pinned; mutation (the shape's answer not read) |
+| 9 | An answer setting an option and an attachment waits for both; one that doesn't vouch refuses the whole answer | `test_an_answer_with_an_option_and_an_attachment_waits_for_both_checks`, `test_one_check_that_doesnt_vouch_refuses_the_whole_answer` | pinned; mutation (taken after one check; a refusal ignored) |
+| 10 | **Found in slice 10:** an answer is decided once every check is back, by the first problem in its own order; meanwhile a second answer is refused as being checked, so a late check never speaks for a new answer | `test_an_answer_is_held_until_every_check_is_back_even_when_one_refuses` | failed first (on Temporal by a race, then in memory); mutation (decided at the first refusal) |
+| 11 | An edit of an attachment is refused when it is proposed | `test_an_edit_of_an_attachment_is_refused_when_it_is_proposed` | failed first (the edit applied) |
+| 12 | Expressions read it like a reference to its store: `==`/`!=` with an attachment or a reference of its store, `string`, `exists`; another store's attachment, an option of the same system and a literal refused; it fits a reference input of its store | `test_an_attachment_compares_with_a_value_of_its_store`, `test_an_attachment_never_compares_with_another_kind_or_store`, `test_string_and_exists_read_an_attachment`, `test_an_attachment_goes_where_a_reference_to_its_store_is_wanted`, the guide's row in `test_the_guide_refuses_as_the_check_refuses` (`tests/test_expressions.py`) | failed first |
+| 13 | It is opened through its store's resolver, as the viewer; nothing the store returns enters the history | `test_an_attachment_is_opened_through_its_store_as_the_viewer` | failed first |
+| 14 | A hidden attachment has nothing to open | `test_a_hidden_attachment_has_nothing_to_open` | pinned (the view hides it before anything is resolved) |
+| 15 | A sensitive attachment keeps its ID wrapped, never in the history, and whoever may see it opens it | `test_a_sensitive_attachment_keeps_its_id_wrapped` | wrapping pinned; opening failed first (the resolver never unwrapped, "not set") |
+| 16 | Forgetting the case forgets a sensitive attachment's ID with its key | layer 9c's: `tests/test_forget.py`, `tests/test_temporal_forget.py` (a sealed value, whatever its type) | pinned; nothing of 16c's own |
+| 17 | On Temporal: both checks run as activities; the refusal and the taking are kept; the history replays | `test_an_option_and_an_attachment_are_checked_on_temporal_then_taken`, `test_a_case_with_an_attachment_replays_without_asking_the_store_again` (`tests/test_temporal_attachments.py`) | the first failed first, by the race (row 10); the replay is weak, as 16b's row 13 |
+| 18 | The builder: `Field.attachment(store)`; a text beside it refused when the file runs; the guide's example is the file its test runs, and `ventoux check` accepts it | `test_the_builder_refuses_a_text_beside_an_attachment`, `test_the_guides_examples_are_the_files_their_tests_run`, `test_every_example_is_a_package_the_check_accepts`, `test_the_builder_writes_every_key_of_the_format` | failed first |
+| 19 | The case map reads "an attachment in documents, checked when given"; the plain diff names a reference become an attachment, and a moved store | `test_the_case_map_reads_an_attachment_with_its_store`, `test_the_plain_diff_reports_an_attachment_changed` (both) | failed first ("can't read receipt's type") |
+| 20 | The attachment's shapes are pinned in a package of their own; every earlier pin keeps its digest | `test_the_pinned_packages_use_every_shape`, `test_method_1_gives_the_digests_it_pinned` (`tests/test_digests.py`) | failed first |
+| 21 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say` | pinned |
+| 22 | The development catalog's store is the activities guide's, and registers; its resolver block opens a file as the viewer; the case-data guide's three lines are what the case writes | `test_the_activities_guides_store_is_the_development_one`, `test_the_activities_guides_resolver_opens_the_file_as_the_viewer`, `test_the_case_data_guides_lines_are_what_the_case_writes` | mutation (a timeout, the viewer, a word changed in the guide) |
+| 23 | The development check is recorded in the lock | `test_every_development_contract_matches_its_recorded_hash` (`tests/test_catalog.py`) | failed first |
+| 24 | **Tutor:** a plan's field is never an option or an attachment (`CHECKED_IN_A_PLAN`): nothing in a plan checks one, and a plan takes a reference instead | `test_a_plans_field_is_never_checked_so_never_an_option_or_an_attachment` (both kinds); the plans guide's row in `tests/test_validate.py`'s table | failed first (the plan accepted) |
+
+**Left out, on purpose:** that a file's contents are their author's words (choice 34) builds
+nothing: an activity that reads one marks its output as any activity does (layer 4b, its own
+tests). That the inbox keeps bytes off the wire (choice 32) is the inbox's, not the engine's: the
+case refuses only to keep them (row 7).
+
+**Found here, a promise nothing kept:** the activities guide's resolver block (row 22) was run by
+no test. Two promises were broken while building, each now tested: an answer was decided at its
+first check that didn't vouch, though choice 15 said "when every check has answered" (row 10, a
+16b fault); and a sensitive reference could never be resolved (row 15, older than 16c).
+
+## From the tutor's review of 16c
+
+- **A plan never holds an option or an attachment** (D67, amended; D68). A plan's fields share
+  the case's list of types, so since 16b a plan could declare `chosen` an option or an attachment,
+  set by a wait's answer; nothing in a plan checks one, and `run_plan` gave `NOT-IN-THE-SYSTEM` to
+  `branches.holds@1` as though the system had vouched for it. A plan gives no output to the case
+  (D28), so the case file stayed clean, but inside the plan the type claimed a vouch nobody gave.
+  Plan validation now refuses either among a plan's fields, saying a plan takes a reference, which
+  a case's option or attachment fits. Seams step 4 had checked lists and edits, and missed plans.
+- **The engine version** (question 1 of the pull request): `engine-2` stays. The one shape that
+  decides differently from 16b's code, two or more checked fields in one answer with a refusal
+  before another check is back, exists only in code merged on 2026-11-02 and never released
+  (0.0.0), so no history outside the tests holds it. After the first release, a change of this
+  kind takes a new engine version (D60). D68 says so, and D67 is amended for both points.
+

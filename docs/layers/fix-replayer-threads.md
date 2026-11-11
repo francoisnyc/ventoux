@@ -147,7 +147,7 @@ were set aside there too (its 4 and 5).
 ## Not in this fix
 
 - **A guard over the whole suite** (above). Without it, a replayer or worker built later without
-  an owned executor is caught only by running the plugin above.
+  an owned executor is caught only by running the plugin above. *Built 2026-10-30, below.*
 - **A daemon thread for the helper's shutdown**, which would let `asyncio.run` return as soon as
   the bound fails (fix-worker-executors, decision 2). A choice of its own, still open.
 
@@ -169,3 +169,56 @@ No executor thread was alive after any test.
 |---|---|
 | A replay's workflow-task threads have ended once it is done, failed or not: none is left for the garbage collector | `test_the_threads_a_failed_replay_ran_on_have_ended_once_it_raises` (`tests/test_temporal.py`): a history replayed against changed code raises `NondeterminismError`, and no thread started during the replay may still be alive while that error is held. No collection is forced. Seen failing three runs of three on `main`'s `replay()` (`ThreadPoolExecutor-1_0` alive), and three of three with `replay_history` giving the `Replayer` no executor (`ThreadPoolExecutor-2_0` alive). Passes three of three with the fix. |
 | The pool is shut down off the loop, within a bound, its work waited for | Reused, not re-tested: `test_an_activity_that_ends_in_time_is_waited_for` and `test_an_activity_still_running_at_the_end_fails_within_the_bound` (`tests/test_activity_threads.py`) pin `activity_threads()`, the helper `replay_history` opens its pool with. |
+
+## Amended 2026-10-30: the draft's choices 2a and 3 taken
+
+*The text above stands; this adds to it.* After this fix merged, the draft's choices were
+reviewed: 1, 2a and 3 taken. Choice 1 is what was decided above. 2a and 3 were left open there
+("If the tutor prefers the rename, it is mechanical and can follow on its own"; the guard "stays
+open"), so they follow here.
+
+1. **The helper is renamed `worker_threads`** (`tests/worker_threads.py`, its test
+   `tests/test_worker_threads.py`), the draft's 2a. It holds a worker's activity threads and a
+   replayer's workflow-task threads, and its docstrings now say both, and that it was
+   `activity_threads`. The name changes at its 42 mentions in 17 files; nothing else does. Notes written
+   before this keep the old name, as they were written.
+2. **A guard around every test,** the draft's 3. `no_thread_outlives_its_test`
+   (`tests/thread_guard.py`, an `autouse` fixture `tests/conftest.py` imports) notes the threads
+   alive before each test. Any thread the test started that is still alive once it ends fails the
+   test, named, saying what to shut down. No garbage collection is forced.
+   - **Broader than the draft's wording.** The draft said executor threads. The guard checks every
+     Python thread, so a pool with a name of its own, or a plain `threading.Thread`, is caught too.
+   - **Its first run, on `main` before this change** (as a plugin that printed instead of failing,
+     over the whole suite): no test of the 3870 left any thread alive. So nothing else needed
+     saying, or excusing.
+3. **The tests that pin one site stay.** `test_the_thread_an_activity_ran_on_has_ended_once_its_worker_stops`,
+   its case-worker twin, and `test_the_threads_a_failed_replay_ran_on_have_ended_once_it_raises`
+   name the place that broke. The guard catches whatever they don't.
+
+### Checked
+
+Each mutation applied, the Temporal tests run (223), the file put back:
+
+| Mutation | Before the guard | With it |
+|---|---|---|
+| `replay_history` gives the `Replayer` no executor | 1 test failed (the replay test above) | 1 failed, 6 more errors from the guard |
+| `plan_worker` makes its own executor, ignoring the one given | 1 | 1 failed, 18 errors |
+| `case_worker` makes its own executor | 1 (#73's case-worker test) | 1 failed, 69 errors |
+| `worker_threads` shuts nothing down | 3 | 3 failed, 90 errors |
+
+Each error is the guard's failure at a test's end ("threads this test started are still alive:
+ThreadPoolExecutor-…"). A test that passes and leaves a thread is reported as passed plus an
+error, since the guard fails at teardown.
+
+The first full run with the guard in place caught one thread: the guard's own test. Its inner
+pytest ran in the same process, so the pool the inner test leaves running on purpose was still
+alive when the outer test ended. The inner pytest now runs in a process of its own
+(`runpytest_subprocess`), and its threads end with that process.
+
+### Promises
+
+| Promise | Test that would fail |
+|---|---|
+| A test that leaves a thread it started alive fails, naming the thread and saying what to shut down | `test_a_pool_left_running_fails_the_test_that_started_it` (`tests/test_thread_guard.py`): a test in a pytest of its own, in a process of its own, with the guard as the suite has it, keeps a pool running. Seen failing with the guard checking nothing. |
+| A test that shuts its pool down passes the guard | `test_a_pool_shut_down_in_the_test_passes`, the same way. |
+| Every test in the suite is guarded | The mutations above: each fails tests across the suite that no single-site test covers. |

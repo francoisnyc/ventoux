@@ -8,6 +8,7 @@ as `load_definition` reads a definition.
 
 import dataclasses
 import json
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -51,6 +52,10 @@ def exact_json(value: Any, parts: list[str]) -> str:
         )
     if value is None or isinstance(value, (bool, int, str)):
         return json.dumps(value)
+    if type(value) is date:
+        # A day, as its text: it is read back into a day by its field's type (brief, D66). The
+        # exact type, so a `datetime`, a moment, is refused below as anything unknown is.
+        return json.dumps(value.isoformat())
     if isinstance(value, Decimal):
         if not value.is_finite():
             raise TypeError(f"{value} is not a number JSON can hold: give a finite Decimal")

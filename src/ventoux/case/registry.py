@@ -9,7 +9,7 @@ See docs/layers/12-releases.md (12e).
 """
 
 import copy
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from ventoux.case.activation import Manifest, activation_problems
@@ -43,6 +43,9 @@ class Activation:
     released: Released
     contracts: dict[str, Hash]  # every contract its record needs, with its hash
     task_queue: str  # the queue its cases run on, whose workers activation checked
+    # The child releases it pins, by label (`repair 3`): never retired while it is in use
+    # (brief, D75).
+    pins: list[str] = field(default_factory=list[str])
 
 
 @dataclass
@@ -62,14 +65,31 @@ class Registry:
     log: list[str] = field(default_factory=list[str])  # activations and retirements, in order
 
 
-def publish(registry: Registry, manifest: Manifest) -> tuple[Registry, Answer]:
+def always() -> bool:
+    """A rule in force: what `publish` asks when nothing was recorded before the rule."""
+    return True
+
+
+def publish(
+    registry: Registry, manifest: Manifest, keeping_checked: Callable[[], bool] = always
+) -> tuple[Registry, Answer]:
     """Keep `manifest`, a worker's as it starts, in place of any earlier one of its identity;
-    refused if it moves a workflow type that open cases call (brief, D29) (brief, D54)."""
+    refused if it moves a workflow type that open cases call (brief, D29) (brief, D54).
+    `keeping_checked` says whether the rule on providers (brief, D81) is in force, asked only
+    where it would apply: on Temporal, whether the history recorded it (a registry recorded
+    before replays as it was recorded)."""
     here = registry.environment
     if manifest.environment != here:
         return registry, Answer(
             False, [f"{manifest.identity} serves {manifest.environment}, not {here}"]
         )
+    if not registry.development and manifest.case is not None and keeping_checked():
+        # A case worker in production keeps its keys in the deployment's key service and writes
+        # its records to its audit store: one with a development provider, or that doesn't say,
+        # never polls (brief, D81).
+        kept = keeping_problems(manifest)
+        if kept:
+            return registry, Answer(False, kept)
     for reference, bound in sorted(manifest.binds.items()):
         before = registry.bindings.get(reference)
         calling = callers(registry, reference)
@@ -92,6 +112,34 @@ def publish(registry: Registry, manifest: Manifest) -> tuple[Registry, Answer]:
     for reference, bound in manifest.binds.items():
         registry.bindings[reference] = bound.workflow
     return registry, Answer(True, [f"{manifest.identity} serves {manifest.task_queue} in {here}"])
+
+
+def keeping_problems(manifest: Manifest) -> list[str]:
+    """What keeps a production case worker from polling: a provider for development, or one it
+    doesn't say. Both are said when both are wrong."""
+    who = manifest.identity
+    found: list[str] = []
+    if manifest.keys is None:
+        found.append(
+            f"{who} doesn't say what keeps its keys: a case worker in production must; deploy a "
+            "build that does"
+        )
+    elif manifest.keys.development:
+        found.append(
+            f"{who} keeps its keys with {manifest.keys.name}, which is for development: "
+            "production keeps them in the deployment's key service; deploy the worker with it"
+        )
+    if manifest.audit is None:
+        found.append(
+            f"{who} doesn't say where it writes its audit records: a case worker in production "
+            "must; deploy a build that does"
+        )
+    elif manifest.audit.development:
+        found.append(
+            f"{who} writes its audit records to {manifest.audit.name}, which is for development: "
+            "production writes them to the deployment's audit store; deploy the worker with it"
+        )
+    return found
 
 
 def callers(registry: Registry, reference: str) -> dict[str, str]:
@@ -117,6 +165,9 @@ class Activating:
     task_queue: str  # where its new cases will run
     pollers: dict[str, list[str]]  # each queue's pollers, by identity, as the command saw them
     by: str  # who activates it, as the trusted caller states (brief, D19)
+    # The child releases its package pins, each with the digest the package gives it; none
+    # before 18d (brief, D75).
+    pins: tuple[Released, ...] = field(default=(), kw_only=True)
 
 
 def activate(registry: Registry, asked: Activating) -> tuple[Registry, Answer]:
@@ -134,6 +185,7 @@ def activate(registry: Registry, asked: Activating) -> tuple[Registry, Answer]:
     problems = activation_problems(
         label, asked.contracts, asked.task_queue, here, registry.manifests, asked.pollers
     )
+    problems += [why for child in asked.pins if (why := pin_problem(registry, asked, child))]
     if problems:
         return registry, Answer(False, [refused, *problems])
     before = registry.active.get(released.name)
@@ -141,7 +193,8 @@ def activate(registry: Registry, asked: Activating) -> tuple[Registry, Answer]:
         return registry, Answer(True, [f"{label} is already active in {here}"])
     registry = copy.deepcopy(registry)
     registry.active[released.name] = released.release
-    registry.activated[label] = Activation(released, dict(asked.contracts), asked.task_queue)
+    pins = [str(child) for child in asked.pins]
+    registry.activated[label] = Activation(released, dict(asked.contracts), asked.task_queue, pins)
     line = f"{asked.by} activated {label} in {here}"
     if before is not None and before > released.release:
         line += f", rolling back from {released.name} {before}"
@@ -151,6 +204,23 @@ def activate(registry: Registry, asked: Activating) -> tuple[Registry, Answer]:
     return registry, Answer(True, [line])
 
 
+def pin_problem(registry: Registry, asked: Activating, child: Released) -> str | None:
+    """Why the parent `asked` activates can't open its pinned `child` here: its cases open the
+    child on that release, on their own queue, so it must be activated here, not retired, with
+    the digest the parent's package gives it, on that queue (brief, D75). None if it can."""
+    here, pins = registry.environment, f"{asked.released} pins {child}"
+    if str(child) in registry.retired:
+        return f"{pins}, which is retired in {here}"
+    known = registry.activated.get(str(child))
+    if known is None:
+        return f"{pins}, which {here} never activated"
+    if known.released.digest != child.digest:
+        return f"{pins}, whose digest in {here} is another"
+    if known.task_queue != asked.task_queue:
+        return f"{pins}, which {here} activated on {known.task_queue}, not {asked.task_queue}"
+    return None
+
+
 @dataclass(frozen=True)
 class Opening:
     """A case asking, as it opens, whether it may: on which release, from which queue."""
@@ -158,12 +228,16 @@ class Opening:
     case: str  # its ID: `refund-7`
     task_queue: str  # the queue it runs on, as its workflow knows it
     released: Released | None  # its release; None: a draft
+    # True for a child case, which opens on the release its parent's pins, whichever is active
+    # (brief, D75); False for a case of its own.
+    pinned: bool = False
 
 
 def opened(registry: Registry, asked: Opening) -> tuple[Registry, Answer]:
     """Let the case open, and list it as open on its release, if that release is its package's
-    active one here, with the same digest, on the queue it was activated on; a draft only in a
-    development environment (brief, D51) (brief, D54). One request, so nothing comes between the
+    active one here (for a child, `pinned`, any release activated here and not retired), with the
+    same digest, on the queue it was activated on; a draft only in a development environment
+    (brief, D51) (brief, D54) (brief, D75). One request, so nothing comes between the
     check and the listing."""
     here, case, released = registry.environment, asked.case, asked.released
     if released is None:
@@ -178,7 +252,8 @@ def opened(registry: Registry, asked: Opening) -> tuple[Registry, Answer]:
         return registry, Answer(True, [f"{case} is open on {label} in {here}"])  # asked again
     why = target_problem(registry, released)
     active = registry.active.get(released.name)
-    if why is None and active != released.release:
+    # A child opens on the release its parent pins, whichever is active (brief, D75).
+    if why is None and not asked.pinned and active != released.release:
         why = f"{released.name} {active} is active in {here}"
     if why is not None:
         return registry, Answer(False, [f"{refused}: {why}"])
@@ -270,6 +345,8 @@ def retire(
         return registry, Answer(
             False, [f"{refused}: it is active in {here}: activate another first"]
         )
+    if (pinned := pinned_by(registry, label)) is not None:
+        return registry, Answer(False, [f"{refused}: {pinned}, pins it"])
     registry = copy.deepcopy(registry)
     said: list[str] = []
     for case in open_on(registry, asked.released):
@@ -290,6 +367,21 @@ def retire(
     line = f"{asked.by} retired {label} in {here}"
     registry.log.append(line)
     return registry, Answer(True, [*said, line])
+
+
+def pinned_by(registry: Registry, label: str) -> str | None:
+    """The first release still in use here that pins the release `label`: active, or with a
+    case open on it, so its cases may still open a child there (brief, D75). None if none."""
+    here = registry.environment
+    for parent, activation in sorted(registry.activated.items()):
+        if label not in activation.pins:
+            continue
+        released = activation.released
+        if registry.active.get(released.name) == released.release:
+            return f"{parent}, active in {here}"
+        if count := len(open_on(registry, released)):
+            return f"{parent}, with {count} open case{'' if count == 1 else 's'} in {here}"
+    return None
 
 
 def harden(registry: Registry, by: str) -> tuple[Registry, Answer]:

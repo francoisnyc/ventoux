@@ -1,5 +1,6 @@
 """The catalog: the activities a definition can call, each looked up by its reference."""
 
+from ventoux.core.checks import DOCUMENT, OPTION, check_problem
 from ventoux.core.contract import ActivityContract, Contract, is_reference
 from ventoux.core.contract_hash import contract_hash
 from ventoux.core.output_sources import UNDECLARED_LABEL, declared_sources
@@ -28,8 +29,12 @@ class Catalog:
         self._operators: set[str] = set()  # the roles that may act on a failed step (brief, D26)
         self._forgetters: set[str] = set()  # the roles that may forget a case (brief, D32)
         self._editors: set[str] = set()  # the roles that may edit a case file (brief, D52)
+        self._assigners: set[str] = set()  # the roles that may assign an entry (brief, D70)
         self._migrators: set[str] = set()  # the roles that may migrate a case (brief, D53)
         self._systems: set[str] = set()  # the systems a reference may name (brief, D30)
+        # Each system's option check, by its reference: one per system (brief, D67).
+        self._option_checks: dict[str, str] = {}
+        self._document_stores: dict[str, str] = {}  # each store, and the check that it issued an ID
 
     def register_label(self, label: str) -> None:
         """Let fields be declared `untrusted:<label>`. Registered by the platform team, like roles,
@@ -67,6 +72,46 @@ class Catalog:
         """The registered systems, in order."""
         return sorted(self._systems)
 
+    def register_option_check(self, system: str, check: str) -> None:
+        """Name `check`, a registered contract's reference, as how to ask `system` whether it
+        holds a value: an option of `system` is checked by it when a person gives one
+        (brief, D67)."""
+        problem = check_problem(OPTION, system, self.get(check))
+        if problem is not None:
+            raise ValueError(problem)
+        # One way to ask a system, so two cases never check one option two ways (brief, D67).
+        if system in self._option_checks:
+            raise ValueError(
+                f"{system} has an option check already, {self._option_checks[system]}: "
+                "a system has one"
+            )
+        self._option_checks[system] = check
+
+    def option_check(self, system: str) -> str | None:
+        """The reference of `system`'s option check, or None if it has none: then nothing can
+        check an option of it, and a definition holding one is refused (brief, D67)."""
+        return self._option_checks.get(system)
+
+    def register_document_store(self, system: str, check: str) -> None:
+        """Make `system` a document store, `check` (a registered contract's reference) saying
+        whether it issued an ID: an attachment in `system` is checked by it when a person gives
+        one (brief, D68)."""
+        problem = check_problem(DOCUMENT, system, self.get(check))
+        if problem is not None:
+            raise ValueError(problem)
+        # One way to ask a store, so two cases never check one ID two ways (brief, D68).
+        if system in self._document_stores:
+            raise ValueError(
+                f"{system} is a document store already, checked by "
+                f"{self._document_stores[system]}: a store has one check"
+            )
+        self._document_stores[system] = check
+
+    def document_store(self, system: str) -> str | None:
+        """The reference of the check that `system`, a document store, issued an ID; or None if
+        `system` isn't a store: then nothing can check an attachment in it (brief, D68)."""
+        return self._document_stores.get(system)
+
     def register_role(
         self,
         name: str,
@@ -75,12 +120,14 @@ class Catalog:
         forgets: bool = False,
         edits: bool = False,
         migrates: bool = False,
+        assigns: bool = False,
     ) -> None:
         """Let waits and approvals name the role `name`, which may approve activities up to the
         risk `approves` (none by default); if `operates`, act on a case's failed steps, skipping
         one included (brief, D26) (brief, D52); if `forgets`, propose or approve forgetting a case
         (brief, D32); if `edits`, propose or approve an edit of a case file (brief, D52); if
-        `migrates`, propose or approve moving a case to another release (brief, D53). Registered
+        `migrates`, propose or approve moving a case to another release (brief, D53); if `assigns`,
+        give an open entry to someone, or back to its queue (brief, D70). Registered
         by the platform team, like labels, so a typo is caught (brief, D22)."""
         checked_role(name, approves)
         self._roles[name] = approves
@@ -92,6 +139,8 @@ class Catalog:
             self._editors.add(name)
         if migrates:
             self._migrators.add(name)
+        if assigns:
+            self._assigners.add(name)
 
     @property
     def operators(self) -> list[str]:
@@ -114,6 +163,12 @@ class Catalog:
     def migrators(self) -> list[str]:
         """The registered roles that may propose or approve a migration, in order (brief, D53)."""
         return sorted(self._migrators)
+
+    @property
+    def assigners(self) -> list[str]:
+        """The registered roles that may give an open entry to someone, or back to its queue, in
+        order (brief, D70)."""
+        return sorted(self._assigners)
 
     @property
     def roles(self) -> dict[str, str | None]:

@@ -119,6 +119,7 @@ Every problem it finds:
 | `UNKNOWN_SOURCE` | a field's source label isn't registered | `untrusted:lml has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
 | `INPUT_POLICY` | an input could get a value its policy refuses | `letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, and this value comes from suggested_recipient (untrusted:llm): use a value a system or a person gave` |
 | `UNTRUSTED_TRANSITION` | a transition's condition reads a field the plan declares untrusted | `the transition to approve_refund reads note, which the plan declares untrusted:llm, and untrusted data can't choose a plan's path: branch in the case instead, where a step's condition or a person's task decides` |
+| `CHECKED_IN_A_PLAN` | a plan's field is an option or an attachment, which nothing in a plan checks | `chosen is an option of branches, and nothing in a plan checks one: make it a reference to branches, which a case's option fits` |
 
 A wait handles a `timeout` event exactly when it declares a `timeout`; without one, `timeout` is an
 unknown event.
@@ -278,8 +279,8 @@ stops when:
   tries the next transition to `pay`:
 
   ```
-  stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares numbers, and it
-  was given a string: the step needs attention, and nothing after it runs
+  stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares two numbers or
+  two dates, and it was given a string: the step needs attention, and nothing after it runs
   ```
 
   The same holds for a condition that gives anything but `true` or `false`, for an event the

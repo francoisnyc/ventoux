@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
-from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHistory
@@ -19,6 +18,7 @@ from temporalio.client import Client, WorkflowHistory
 from test_approvals import FOUR_EYES, PEOPLE
 from test_temporal_case import QUEUE, Case, on_temporal, replay, reported, runs_of
 from test_temporal_timers import HERE
+from worker_threads import worker_threads
 
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow, answer, close, start_case
@@ -27,6 +27,7 @@ from ventoux.testing import (
     FAKES,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
     fixture_converter,
 )
@@ -60,14 +61,14 @@ def test_a_state_from_before_11h2_reads_back() -> None:
     # entry with none given yet, of one person, and an approval given by its one person, exactly
     # as it was (brief, D27, D47).
     carried: dict[str, Any] = json.loads(CARRIED_BEFORE.read_text())
-    asked = state_from_data(carried["asked"])
+    asked = state_from_data(carried["asked"], {})
     open_approval = asked.approvals["pay"]
     assert (open_approval.entry, open_approval.count, open_approval.approved) == (
         "pay.approval#1",
         1,
         {},
     )
-    paid = state_from_data(carried["paid"])
+    paid = state_from_data(carried["paid"], {})
     kept = paid.runs[-1].approved
     assert kept is not None and kept.approvers == ("sam",)
     # Written again, it is what main wrote, with the new keys at their defaults.
@@ -142,7 +143,7 @@ def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> Ca
             case = await start_case(client, DevelopmentCases, CLOSABLE, LARGE, id, QUEUE)
             await signals(case)
             async with (
-                activity_threads() as threads,
+                worker_threads() as threads,
                 case_worker(
                     client,
                     QUEUE,
@@ -150,6 +151,7 @@ def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> Ca
                     DevelopmentPlans,
                     FAKES,
                     activity_executor=threads,
+                    audit=development_audit(),
                 ),
             ):
                 return await asyncio.wait_for(case.result(), timeout=20)

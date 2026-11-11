@@ -9,6 +9,7 @@ import inspect
 import json
 import runpy
 from collections.abc import Callable, Iterator
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from types import UnionType
@@ -20,6 +21,7 @@ from ventoux.case.definition import (
     ActivityStep,
     CaseDefinition,
     CaseField,
+    CaseStep,
     CloseReason,
     DeclaredEvent,
     Milestone,
@@ -150,7 +152,8 @@ def given_keys(found: object, keys: set[Key], values: set[tuple[str, str, str]])
     elif isinstance(found, tuple | list):
         for item in found:
             given_keys(item, keys, values)
-    elif not isinstance(found, str | bool | int | Decimal) and found is not None:
+    # A date literal is a leaf, as a number is: it has no keys of its own (brief, D66).
+    elif not isinstance(found, str | bool | int | Decimal | date) and found is not None:
         raise TypeError(f"the coverage test can't read a {type(found).__name__}")
 
 
@@ -165,7 +168,9 @@ def written_by_the_builder() -> list[CaseDefinition | Plan]:
             if isinstance(value, Case):
                 for name, text in package(value).items():
                     data = parse_json(text)
-                    found.append(parse_case(data) if name == "case.json" else parse_plan(data))
+                    # A child's case.json is under cases/<reference>/ (brief, D74).
+                    is_case = name.endswith("case.json")
+                    found.append(parse_case(data) if is_case else parse_plan(data))
     return found
 
 
@@ -199,6 +204,7 @@ CALLS: dict[type[BaseModel], Callable[..., object]] = {
     WorkflowStep: Case.workflow,
     WaitStep: Case.wait,
     PlanStep: Case.plan_step,
+    CaseStep: Case.child_case,
     CaseField: Case.field,
     Milestone: Case.milestone,
     DeclaredEvent: Case.event,
@@ -211,8 +217,9 @@ CALLS: dict[type[BaseModel], Callable[..., object]] = {
     ApprovalState: BuiltPlan.approval,
 }
 # A key a call takes under another name, or says by being the call it is: `display` is `title`
-# (and `description`), a step's `kind` is which call writes it, a field's type is its `kind`.
-SAID_OTHERWISE = {"display": "title", "kind": None, "declared": "kind"}
+# (and `description`), a step's `kind` is which call writes it, a field's type is its `kind`, a
+# case step's `case` is its `child` and the `release` pinned (`repair@3`).
+SAID_OTHERWISE = {"display": "title", "kind": None, "declared": "kind", "case": "child"}
 
 
 def test_every_call_takes_every_key_of_its_kind() -> None:

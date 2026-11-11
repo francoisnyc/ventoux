@@ -1,0 +1,587 @@
+{
+  "contracts": {
+    "branches.holds@1": {
+      "effect": "read",
+      "idempotency_key": null,
+      "input": {
+        "properties": {
+          "option": {
+            "title": "Option",
+            "type": "string",
+            "x-reference": "branches"
+          }
+        },
+        "required": [
+          "option"
+        ],
+        "title": "BranchAsked",
+        "type": "object"
+      },
+      "name": "branches.holds",
+      "outcomes": [],
+      "output": {
+        "properties": {
+          "held": {
+            "title": "Held",
+            "type": "boolean",
+            "x-source": "system:branches"
+          }
+        },
+        "required": [
+          "held"
+        ],
+        "title": "BranchHeld",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 3
+      },
+      "risk": "low",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 10
+      },
+      "version": 1
+    },
+    "documents.issued@1": {
+      "effect": "read",
+      "idempotency_key": null,
+      "input": {
+        "properties": {
+          "attachment": {
+            "title": "Attachment",
+            "type": "string",
+            "x-reference": "documents"
+          }
+        },
+        "required": [
+          "attachment"
+        ],
+        "title": "DocumentAsked",
+        "type": "object"
+      },
+      "name": "documents.issued",
+      "outcomes": [],
+      "output": {
+        "properties": {
+          "issued": {
+            "title": "Issued",
+            "type": "boolean",
+            "x-source": "system:documents"
+          }
+        },
+        "required": [
+          "issued"
+        ],
+        "title": "DocumentIssued",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 3
+      },
+      "risk": "low",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 10
+      },
+      "version": 1
+    },
+    "kyc.check@1": {
+      "effect": "read",
+      "idempotency_key": null,
+      "input": {
+        "properties": {
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "string",
+            "x-input-policies": [
+              {
+                "kind": "trusted_only"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customer_id"
+        ],
+        "title": "KycInput",
+        "type": "object"
+      },
+      "name": "kyc.check",
+      "output": {
+        "properties": {
+          "analyst_notes": {
+            "title": "Analyst Notes",
+            "type": "string",
+            "x-source": "untrusted:llm"
+          },
+          "contact_email": {
+            "title": "Contact Email",
+            "type": "string"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Risk Score",
+            "x-source": "system:kyc"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string",
+            "x-source": "system:kyc"
+          }
+        },
+        "required": [
+          "status",
+          "risk_score",
+          "analyst_notes",
+          "contact_email"
+        ],
+        "title": "KycOutput",
+        "type": "object"
+      },
+      "risk": "low",
+      "timeout": 600,
+      "version": 1
+    },
+    "ledger.post@1": {
+      "effect": "compute",
+      "idempotency_key": null,
+      "input": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount",
+            "x-input-policies": [
+              {
+                "kind": "only_from",
+                "systems": [
+                  "opener"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "title": "RecordAsked",
+        "type": "object"
+      },
+      "name": "ledger.post",
+      "outcomes": [],
+      "output": {
+        "properties": {
+          "entry_id": {
+            "title": "Entry Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "Recorded",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 3
+      },
+      "risk": "low",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 10
+      },
+      "version": 1
+    },
+    "letters.draft@2": {
+      "effect": "write",
+      "idempotency_key": "idempotency_key",
+      "input": {
+        "properties": {
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "template": {
+            "title": "Template",
+            "type": "string"
+          },
+          "to_customer": {
+            "title": "To Customer",
+            "type": "string",
+            "x-input-policies": [
+              {
+                "kind": "trusted_only"
+              }
+            ]
+          }
+        },
+        "required": [
+          "to_customer",
+          "template",
+          "idempotency_key"
+        ],
+        "title": "DraftInput",
+        "type": "object"
+      },
+      "name": "letters.draft",
+      "outcomes": [],
+      "output": {
+        "properties": {
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id"
+        ],
+        "title": "DraftOutput",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 5
+      },
+      "risk": "low",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 30
+      },
+      "version": 2
+    },
+    "letters.draft@3": {
+      "effect": "write",
+      "idempotency_key": "idempotency_key",
+      "input": {
+        "properties": {
+          "customer": {
+            "title": "Customer",
+            "type": "string",
+            "x-input-policies": [
+              {
+                "kind": "trusted_only"
+              }
+            ],
+            "x-reference": "crm"
+          },
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "template": {
+            "title": "Template",
+            "type": "string"
+          }
+        },
+        "required": [
+          "customer",
+          "template",
+          "idempotency_key"
+        ],
+        "title": "LetterInput",
+        "type": "object"
+      },
+      "name": "letters.draft",
+      "outcomes": [],
+      "output": {
+        "properties": {
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id"
+        ],
+        "title": "DraftOutput",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 5
+      },
+      "risk": "low",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 30
+      },
+      "version": 3
+    },
+    "orders.lookup@1": {
+      "effect": "read",
+      "idempotency_key": null,
+      "input": {
+        "properties": {
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "title": "LookupInput",
+        "type": "object"
+      },
+      "name": "orders.lookup",
+      "outcomes": [
+        "not_found"
+      ],
+      "output": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "LookupOutput",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 3
+      },
+      "risk": "low",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 10
+      },
+      "version": 1
+    },
+    "orders.lookup@2": {
+      "effect": "read",
+      "idempotency_key": null,
+      "input": {
+        "properties": {
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "title": "LookupInput",
+        "type": "object"
+      },
+      "name": "orders.lookup",
+      "outcomes": [
+        "not_found"
+      ],
+      "output": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string",
+            "x-source": "system:orders"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "LookupOutputFromOrders",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 3
+      },
+      "risk": "low",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 10
+      },
+      "version": 2
+    },
+    "payments.refund@2": {
+      "effect": "write",
+      "idempotency_key": "idempotency_key",
+      "input": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount",
+            "x-input-policies": [
+              {
+                "kind": "trusted_only"
+              }
+            ]
+          },
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string",
+            "x-input-policies": [
+              {
+                "kind": "trusted_only"
+              }
+            ]
+          }
+        },
+        "required": [
+          "order_id",
+          "amount",
+          "idempotency_key"
+        ],
+        "title": "RefundInput",
+        "type": "object"
+      },
+      "name": "payments.refund",
+      "outcomes": [
+        "declined"
+      ],
+      "output": {
+        "properties": {
+          "refund_id": {
+            "title": "Refund Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refund_id"
+        ],
+        "title": "RefundOutput",
+        "type": "object"
+      },
+      "retry": {
+        "backoff_coefficient": 2.0,
+        "initial_interval": 1,
+        "maximum_attempts": 5
+      },
+      "risk": "high",
+      "timeouts": {
+        "schedule_to_start": 60,
+        "start_to_close": 30
+      },
+      "version": 2
+    }
+  },
+  "document_stores": {
+    "documents": "documents.issued@1"
+  },
+  "labels": [
+    "customer",
+    "document",
+    "email",
+    "llm",
+    "web"
+  ],
+  "option_checks": {
+    "branches": "branches.holds@1"
+  },
+  "roles": {
+    "adjuster": {
+      "approves": null,
+      "assigns": false,
+      "edits": false,
+      "forgets": false,
+      "migrates": false,
+      "operates": false
+    },
+    "claims-sensitive": {
+      "approves": null,
+      "assigns": false,
+      "edits": false,
+      "forgets": false,
+      "migrates": false,
+      "operates": false
+    },
+    "fraud": {
+      "approves": null,
+      "assigns": false,
+      "edits": false,
+      "forgets": false,
+      "migrates": false,
+      "operates": false
+    },
+    "operations": {
+      "approves": null,
+      "assigns": false,
+      "edits": false,
+      "forgets": false,
+      "migrates": false,
+      "operates": true
+    },
+    "platform": {
+      "approves": null,
+      "assigns": false,
+      "edits": false,
+      "forgets": false,
+      "migrates": true,
+      "operates": false
+    },
+    "privacy": {
+      "approves": null,
+      "assigns": false,
+      "edits": false,
+      "forgets": true,
+      "migrates": false,
+      "operates": false
+    },
+    "support": {
+      "approves": null,
+      "assigns": false,
+      "edits": true,
+      "forgets": false,
+      "migrates": false,
+      "operates": false
+    },
+    "support-lead": {
+      "approves": "high",
+      "assigns": true,
+      "edits": true,
+      "forgets": false,
+      "migrates": false,
+      "operates": false
+    }
+  },
+  "systems": [
+    "branches",
+    "crm",
+    "documents",
+    "kyc",
+    "orders",
+    "policies",
+    "portal"
+  ]
+}

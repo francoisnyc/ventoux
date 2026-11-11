@@ -15,6 +15,7 @@ import json
 import sys
 from collections.abc import Sequence
 from decimal import Decimal
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from ventoux.case.changes import DiffRefused
 from ventoux.case.checked import said
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
 from ventoux.case.diff import Diff, diff
+from ventoux.case.engine import ENGINE
 from ventoux.case.notes import NotesRefused, as_diff, told
 from ventoux.case.plain import plain
 from ventoux.case.reading import ReadingRefused
@@ -51,6 +53,12 @@ from ventoux.tooling.check import (
     shown,
     write,
 )
+from ventoux.tooling.conformance import (
+    SUITE,
+    conformance_command,
+    export_command,
+    since_command,
+)
 from ventoux.tooling.deployment import (
     Configuration,
     Unconfigured,
@@ -58,11 +66,12 @@ from ventoux.tooling.deployment import (
     deployment_catalog,
     read,
 )
+from ventoux.tooling.doctor import doctor_command
 from ventoux.tooling.draft_sheet import draft_sheet_command
 from ventoux.tooling.drafting import draft_command
 from ventoux.tooling.environments import environment_command
 from ventoux.tooling.releases import FolderStore, Run, read_package, release
-from ventoux.tooling.schema import write_schemas
+from ventoux.tooling.schema import SCHEMA_BASE, SCHEMAS, write_schemas
 from ventoux.tooling.summary import LIMIT, cant_be_read, for_summary_file, summarize
 
 # What `ventoux simulate` exits with.
@@ -100,12 +109,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema", help="write the JSON Schema of a case and of a plan, from the engine's models"
     )
     publishing.add_argument(
-        "--out", type=Path, default=Path("schema"), help="the folder to write into (schema/)"
+        "--out",
+        type=Path,
+        default=SCHEMAS,
+        help="the folder to write into (the package's own schema/, installed or not)",
     )
     publishing.add_argument(
         "--unchanged",
         action="store_true",
         help="write nothing: fail if a committed schema differs from the models (for CI)",
+    )
+    conforming = commands.add_parser(
+        "conformance", help="check this engine against the conformance suite (layer 20a)"
+    )
+    conforming.add_argument(
+        "--suite", type=Path, default=SUITE, help="the suite's folder (the one the package ships)"
+    )
+    conforming.add_argument(
+        "--write", action="store_true", help="write the catalog files, never an expected result"
+    )
+    conforming.add_argument(
+        "--unchanged", action="store_true", help="check, writing nothing (the default; for CI)"
+    )
+    conforming.add_argument(
+        "--export",
+        type=Path,
+        help="write the suite's files into a new folder, as the package holds them",
+    )
+    conforming.add_argument(
+        "--since",
+        type=Path,
+        help="a base's suite folder: fail on a result changed with no line of changes saying so",
     )
     simulating = commands.add_parser(
         "simulate", help="play a story on the in-memory engine, and check what it expects"
@@ -211,9 +245,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     advising.add_argument("--model", help="the model to ask (else pyproject.toml's model)")
     advising.add_argument("--recording", type=Path, help="replay a recording instead of a model")
     advising.add_argument("--at", type=int, help="the time, in seconds since the epoch (now)")
-    advising.add_argument("--address", default="localhost:7233", help="Temporal's frontend")
-    advising.add_argument("--namespace", default="default")
+    connecting(advising, "reader")
+    commands.add_parser("version", help="the package's version, the engine's and the schema's")
+    doctoring = commands.add_parser("doctor", help="check a deployment, changing nothing")
+    doctoring.add_argument("environment", help="the environment to check: `production`")
+    doctoring.add_argument(
+        "--strict", action="store_true", help="fail on a rule doctor can't check, too"
+    )
     arguments = parser.parse_args(argv)
+    if arguments.command == "doctor":
+        return doctor_command(arguments)
+    if arguments.command == "version":
+        return print_versions()
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
     if arguments.command == "advise":
@@ -223,6 +266,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(refused, file=sys.stderr)
             return CANT_READ
         return advise_command(arguments, found)  # needs no catalog: the case's worker has it
+    if arguments.command == "conformance":
+        # The suite names its own catalogs, never the deployment's (brief, D80).
+        if arguments.export is not None:
+            return export_command(arguments.suite, arguments.export)
+        if arguments.since is not None:
+            return since_command(arguments.since, arguments.suite)
+        return conformance_command(arguments.suite, arguments.write)
     if arguments.command == "schema":
         return write_schemas(arguments.out, arguments.unchanged)  # needs no catalog: shape only
     # Every other command reads contracts or roles: the deployment's catalog, named in
@@ -297,8 +347,29 @@ def environments(commands: Any) -> None:
     manifest.add_argument("action", choices=["publish"])
     manifest.add_argument("file", type=Path, help="the manifest, as JSON")
     for each in (create, harden, check, activate, retire, manifest):
-        each.add_argument("--address", default="localhost:7233", help="Temporal's frontend")
-        each.add_argument("--namespace", default="default")
+        connecting(each, "operator")
+
+
+def connecting(command: Any, default: str) -> None:
+    """The flags of a command that talks to Temporal: where, and as whom (brief, D81)."""
+    command.add_argument(
+        "--address", help="Temporal's frontend (else pyproject.toml's, or localhost:7233)"
+    )
+    command.add_argument("--namespace", help="the namespace (else pyproject.toml's, or default)")
+    command.add_argument(
+        "--identity",
+        help=f"the identity to connect as, from [tool.ventoux.temporal] (else {default})",
+    )
+
+
+def print_versions() -> int:
+    """Three versions, each its own (brief, D82): the package's, from its installed metadata, so
+    it can't differ from what pyproject.toml built; the engine's that new cases open at
+    (brief, D51); the schema's `$id` (brief, D60)."""
+    print(f"ventoux {metadata.version('ventoux')}")
+    print(f"engine {ENGINE}")
+    print(f"schema {SCHEMA_BASE}")
+    return 0
 
 
 def releases_folder(flag: Path | None, found: Configuration) -> Path:

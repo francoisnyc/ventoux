@@ -10,17 +10,24 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from ventoux.case.audit import AuditRecord
 from ventoux.case.called import unbound
-from ventoux.case.closing import needs_attention
+from ventoux.case.claims import assignees
 from ventoux.case.definition import CaseDefinition, parse_case
+from ventoux.case.owing import attention, waiting_for
 from ventoux.case.runtime import decide
 from ventoux.case.state import (
     CancelWorkflow,
+    CaseEnded,
     CaseState,
+    ChildNotEnded,
+    CloseCase,
     Completed,
     Event,
     Failed,
+    OpenCase,
     PlanCancelled,
+    ReadChild,
     Schedule,
     StartPlan,
     StartWorkflow,
@@ -42,6 +49,24 @@ Activity = Callable[[dict[str, Any]], dict[str, Any]]
 PlanRunner = Callable[[StartPlan, int], Completed | Failed | None]
 
 
+# Opens a case step's child and runs it as far as it goes: how it ended, as an event at the time
+# given; or None while it is open, and the step keeps running. Given by the caller, which knows
+# the child's script, as a plan's runner knows the plan's (brief, D74).
+# A close asked of an open child, or a read of how it ended, goes to the same runner, which
+# knows the child it opened.
+ChildRunner = Callable[
+    [OpenCase | CloseCase | ReadChild, int], CaseEnded | ChildNotEnded | Failed | None
+]
+
+
+def no_children(command: OpenCase | CloseCase | ReadChild, at: int) -> Failed | None:
+    """A driver that runs no child cases: a case step fails, and a person looks at it. Nothing
+    opened, so a close or a read reaches nothing."""
+    if isinstance(command, CloseCase | ReadChild):
+        return None
+    return Failed(command.entry, f"{command.case} can't open here: no child cases run", at=at)
+
+
 def no_plans(command: StartPlan, at: int) -> Failed:
     """A deployment that supplies no plans: a plan step fails, and a person looks at it."""
     return Failed(command.entry, f"no plan {command.plan} is available", at=at)
@@ -53,7 +78,9 @@ class CaseRun:
 
     status: str  # open; closing: nothing new starts; closed (brief, D10)
     waiting_for: list[str]  # open tasks and approvals, in the order they opened (brief, D24)
-    needs_attention: list[str]  # failed step runs, each with its reason (brief, D17)
+    # Failed step runs, each with its reason (brief, D17), then each owed step that can't start
+    # (brief, D72).
+    needs_attention: list[str]
     flags: list[str]  # what completed after the close was requested, for a person to look at
     history: list[str]
     steps_done: frozenset[str]
@@ -63,6 +90,9 @@ class CaseRun:
     # Each timer still set, soonest first, with its due time: pending work that waits on nobody,
     # so never in `waiting_for` (brief, D24) (brief, D44).
     timers: list[str]
+    # Each child case its case steps opened, as it ended, by the entry that opened it
+    # (brief, D74).
+    children: dict[str, "CaseRun"] = field(default_factory=dict[str, "CaseRun"])
 
     def view(self, roles: Iterable[str]) -> CaseView:
         """The case file as a person holding `roles` sees it (brief, D30)."""
@@ -72,6 +102,16 @@ class CaseRun:
         """The open approval `entry`'s sheet as a person holding `roles` reads it at `at`, with
         the age of each fact it depends on (brief, D18)."""
         return sheet_of(self.definition, self.state, entry, roles, at, self.registered)
+
+    @property
+    def audit(self) -> list[AuditRecord]:
+        """Each act the case decided, as an audit record, in order (brief, D76)."""
+        return self.state.audit
+
+    @property
+    def assignees(self) -> dict[str, str]:
+        """Each held open entry and its holder, in the order the entries opened (brief, D69)."""
+        return assignees(self.state)
 
     @property
     def closed(self) -> bool:
@@ -108,14 +148,19 @@ def run_case_in_memory(
     held: Iterable[str] = (),
     plans: PlanRunner = no_plans,
     workflows: Mapping[str, Activity] | None = None,
+    children: ChildRunner = no_children,
+    state: CaseState | None = None,
 ) -> CaseRun:
     """Play `events` in order, the first opening the case; `name` names the case in its keys.
     The runs of the steps in `held` keep running until a `Finish` names them, so a test can
     close a case while an activity runs (brief, D10). `workflows` binds each workflow contract
     to the code that runs it, by reference; one it doesn't bind fails its step. Before each
     event, and at each `Advance`, every timer due by its time fires first (brief, D44)."""
-    state = CaseState(name)
-    driver = Driver(case, catalog, implementations, frozenset(held), plans, workflows or {})
+    # A child case closed by its parent continues from where it was, with no new opening.
+    state = CaseState(name) if state is None else state
+    driver = Driver(
+        case, catalog, implementations, frozenset(held), plans, workflows or {}, children
+    )
     for event in events:
         state = driver.until(state, event.at)
         if isinstance(event, Advance):
@@ -126,14 +171,14 @@ def run_case_in_memory(
         else:
             state = driver.carry(state, event)
     done = frozenset(run.step for run in state.runs if run.status == "done")
-    attention = needs_attention(state)
-    waiting = list(state.waiting.values())
+    needing = attention(driver.case, state)
+    waiting = waiting_for(driver.case, state)
     registered = tuple(catalog.roles)
     timers = set_timers(state)
     return CaseRun(
         state.phase,
         waiting,
-        attention,
+        needing,
         state.flags,
         state.history,
         done,
@@ -154,6 +199,7 @@ class Driver:
     holding: frozenset[str]  # steps whose runs wait for a `Finish`
     plans: PlanRunner  # runs a plan step's plan
     workflows: Mapping[str, Activity]  # the workflows bound here, by contract
+    children: ChildRunner = no_children  # opens and runs a case step's child
     held: dict[str, Schedule | StartWorkflow] = field(
         default_factory=dict[str, Schedule | StartWorkflow]
     )  # by entry
@@ -196,6 +242,9 @@ class Driver:
                 elif isinstance(command, StartPlan):
                     if (ended := self.plans(command, at)) is not None:
                         queue.append(ended)  # else it waits for an answer: the step runs on
+                elif isinstance(command, OpenCase | CloseCase | ReadChild):
+                    if (closed := self.children(command, at)) is not None:
+                        queue.append(closed)  # else the child is open: the step runs on
                 elif isinstance(command, StartWorkflow) and command.workflow not in self.workflows:
                     # Fail closed: nothing guesses where to run an unbound workflow (brief, D29).
                     queue.append(Failed(command.entry, unbound(command.workflow), at=at))
@@ -233,10 +282,19 @@ def as_json(values: Mapping[str, Any]) -> dict[str, Any]:
     """`values` as the API would pass them on from JSON, whose numbers are exact decimals
     (brief, D20): a whole number in a test is one. A float is passed on as it is, and refused by
     the type check, since it may already have lost its exact value."""
-    return {
-        name: Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value
-        for name, value in values.items()
-    }
+    return {name: exact(value) for name, value in values.items()}
+
+
+def exact(value: Any) -> Any:
+    """`value` as JSON gives it: a whole number an exact decimal, inside a list's records too
+    (brief, D73); anything else as it is."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return Decimal(value)
+    if isinstance(value, list):
+        return [exact(item) for item in value]
+    if isinstance(value, dict):
+        return {name: exact(item) for name, item in value.items()}
+    return value
 
 
 def wrapped(case: CaseDefinition, file: Mapping[str, Any]) -> dict[str, Any]:

@@ -451,6 +451,108 @@ household.closes_when(paid)
 `ventoux check` accepts it, with warnings, such as a value read before it is surely set
 (cases guide, "What `ventoux check` proves about a case").
 
+## Dates
+
+A `date` field holds a day on the calendar (cases guide and case-data guide, "Dates"). In Python,
+a date literal is a `datetime.date`, and it is written as `{"date": "2026-01-01"}`.
+
+`examples/builder/dates.py`:
+
+```python
+from datetime import date
+
+from ventoux import Case, Field, Outcome, and_
+
+claim = Case("claim", title="Insurance claim")
+
+policy_start = claim.field("policy_start", Field.date(), title="Policy start")
+incident = claim.field("incident_date", Field.date(), title="Date of the incident")
+
+assess = claim.task(
+    "assess",
+    title="Assess the claim",
+    roles=["adjuster"],
+    outcomes={
+        "accept": Outcome("Accept the claim", sets=[incident]),
+        "deny": Outcome("Deny the claim"),
+    },
+)
+
+claim.task(
+    "settle",
+    title="Settle the claim",
+    roles=["adjuster"],
+    requires=[assess],
+    # Two dates the case file holds, compared: the same answer on every replay (brief, D20).
+    when=and_(
+        assess.outcome == "accept",
+        incident >= policy_start,
+        incident < date(2027, 1, 1),
+    ),
+    outcomes={"settled": Outcome("Claim settled")},
+)
+```
+
+**The builder runs when you build, not when a case runs.** `date.today()` in a builder file is
+the day you ran it, written into the JSON as a fixed date: the next day, `--unchanged` fails
+(see "In CI: `--unchanged`"). A `datetime`, a moment, is refused: a date is a day, never a time.
+`incident < datetime(2027, 1, 1)` says:
+
+```text
+datetime.datetime(2027, 1, 1, 0, 0) is a moment, and a date compares with a day: write date(2027, 1, 1)
+```
+
+## Options
+
+An option is one of a system's list, checked when a person gives it (case-data guide, "Options").
+`Field.option("branches")` declares it; it compares only with a value of the same system.
+
+`examples/builder/options.py`:
+
+```python
+from ventoux import Case, Field, Outcome
+
+claim = Case("claim", title="Insurance claim")
+
+branch = claim.field("branch", Field.option("branches"), title="Branch handling the claim")
+
+claim.task(
+    "assess",
+    title="Assess the claim",
+    roles=["adjuster"],
+    outcomes={
+        "accept": Outcome("Accept the claim", sets=[branch]),
+        "deny": Outcome("Deny the claim"),
+    },
+)
+```
+
+## Attachments
+
+An attachment is the ID a document store issued for a file, checked when a person gives it
+(case-data guide, "Attachments"). `Field.attachment("documents")` declares it; like an option, it
+compares only with a value of the same store.
+
+`examples/builder/attachments.py`:
+
+```python
+from ventoux import Case, Field, Outcome
+
+claim = Case("claim", title="Insurance claim")
+
+receipt = claim.field("receipt", Field.attachment("documents"), title="The receipt")
+
+claim.task(
+    "assess",
+    title="Assess the claim",
+    roles=["adjuster"],
+    outcomes={
+        "accept": Outcome("Accept the claim", sets=[receipt]),
+        "deny": Outcome("Deny the claim"),
+    },
+)
+```
+
 ## Forgetting
 
 Whether a request may forget a case: `allowed`, `while_open` (the household claim) or `never`.
@@ -472,6 +574,270 @@ invoice.task(
     title="Settle the dispute",
     roles=["support-lead"],
     outcomes={"done": Outcome("Settled")},
+)
+```
+
+## Who is asked: `Assign`
+
+An assignment rule names who is asked when each entry opens (cases guide, "Assignment rules"):
+`Assign.opener()`, whoever opened the case, or `Assign.answered(review)`, whoever gave the
+review's latest answer. It goes on a task, `task(..., assign=...)`, or on an approval,
+`Approval(..., assign=...)`. Nothing else can be named: no identifier, no field (brief, D71).
+
+`examples/builder/assigned.py`:
+
+```python
+from ventoux import Approval, Assign, Case, Field, Outcome
+
+refund = Case("refund", title="Customer refund")
+
+order_id = refund.reference("order_id", system="orders", title="Order")
+approved = refund.field("approved_amount", Field.number(), title="Amount approved")
+
+# Asked of whoever opened the request: `"assign": {"to": "opener"}` in the JSON (brief, D71).
+confirm = refund.task(
+    "confirm",
+    title="Confirm the request's details",
+    roles=["support"],
+    outcomes={"confirmed": Outcome("Details confirmed")},
+    assign=Assign.opener(),
+)
+
+review = refund.task(
+    "review",
+    title="Review the refund request",
+    roles=["support"],
+    requires=[confirm],
+    outcomes={
+        "approve": Outcome("Approve the refund", sets=[approved]),
+        "reject": Outcome("Reject the refund"),
+    },
+)
+
+# A team lead picks who approves; their answer reaches nothing the payment reads.
+triage = refund.task(
+    "triage",
+    title="Take the refund for approval",
+    roles=["support-lead"],
+    requires=[review],
+    outcomes={"taken": Outcome("Taken")},
+)
+
+pay = refund.activity(
+    "pay",
+    "payments.refund@2",
+    title="Refund the customer",
+    inputs={"order_id": order_id, "amount": approved},
+    requires=[triage],
+    when=review.outcome == "approve",
+    # Asked of whoever took it: `"assign": {"to": "answered", "step": "triage"}`.
+    approval=Approval(
+        roles=["support-lead"],
+        reason="Refunds need a team lead",
+        assign=Assign.answered(triage),
+    ),
+)
+
+# Asked of whoever did the review.
+refund.task(
+    "follow_up",
+    title="Follow up with the customer",
+    roles=["support"],
+    requires=[pay],
+    outcomes={"done": Outcome("Done")},
+    assign=Assign.answered(review),
+)
+```
+
+`ventoux check` refuses a rule on an approval that can only pick someone it excludes:
+`Approval(..., assign=Assign.answered(review))` on `pay` is refused, since `pay` reads
+`review.outcome` (`ASSIGNS_EXCLUDED`).
+
+## Required steps: `required=True`
+
+A required step is work the case owes: it doesn't close by itself until the step's latest run is
+done (cases guide, "Required steps"). Any kind of step takes `required=True`. A required step has
+no `when`: it is owed in every case (brief, D72).
+
+`examples/builder/required.py`:
+
+```python
+from ventoux import Approval, Case, Field, Outcome
+
+refund = Case("refund", title="Customer refund")
+
+order_id = refund.reference("order_id", system="orders", title="Order")
+amount = refund.field("amount", Field.number(), title="Amount requested")
+approved = refund.field("approved_amount", Field.number(), title="Amount approved")
+
+review = refund.task(
+    "review",
+    title="Review the refund request",
+    roles=["support"],
+    outcomes={
+        "approve": Outcome("Approve the refund", sets=[approved]),
+        "reject": Outcome("Reject the refund"),
+    },
+)
+
+pay = refund.activity(
+    "pay",
+    "payments.refund@2",
+    title="Refund the customer",
+    inputs={"order_id": order_id, "amount": approved},
+    when=review.outcome == "approve",
+    approval=Approval(
+        when=approved > 100,
+        roles=["support-lead"],
+        reason="Refunds over 100 need a team lead",
+    ),
+)
+
+refund.sequence(review, pay)
+
+call_customer = refund.task(
+    "call_customer",
+    title="Call the customer about the declined refund",
+    roles=["support"],
+    requires=[pay],
+    when=pay.outcome == "declined",
+    outcomes={"called": Outcome("Customer called")},
+)
+
+# Owed in every case: the refund doesn't close by itself until support has confirmed the outcome
+# with the customer, whatever the review decided. `"required": true` in the JSON (brief, D72).
+refund.task(
+    "confirm",
+    title="Confirm the outcome with the customer",
+    roles=["support"],
+    outcomes={"confirmed": Outcome("Outcome confirmed")},
+    requires=[review],
+    automatic=False,
+    proposed_by=["support"],
+    required=True,
+)
+```
+
+## Repeated steps: `ForEach`
+
+A step repeated over a list runs once per item (cases guide, "Repeated steps: one run per item"):
+`for_each=ForEach(lines, key="sku")` on a task or an activity, where `lines` is the list field the
+case handed back and `sku` a text field of its items. A run reads its own item as
+`ForEach.text(...)` or `ForEach.number(...)`, written `each.<field>` in the JSON (brief, D73).
+
+`examples/builder/repeated.py`:
+
+```python
+from ventoux import Case, Field, ForEach, Outcome, literal
+
+order_return = Case("order-return", title="A returned order")
+
+order_id = order_return.reference("order_id", system="orders", title="Order")
+email = order_return.field("email", Field.string(), title="Customer email")
+lines = order_return.field(
+    "lines", Field.list(sku=Field.string(), amount=Field.number()), title="Returned lines"
+)
+
+# One run per line, each told apart by its sku: `"for_each": {"over": "lines", "key": "sku"}` in
+# the JSON (brief, D73).
+each_line = ForEach(lines, key="sku")
+
+order_return.task(
+    "inspect_line",
+    title="Inspect a returned line",
+    roles=["support"],
+    outcomes={"received": Outcome("Received"), "missing": Outcome("Missing")},
+    for_each=each_line,
+)
+
+order_return.activity(
+    "draft_line",
+    "letters.draft@2",
+    title="Draft a letter about one line",
+    inputs={"to_customer": email, "template": literal("line-returned")},
+    for_each=each_line,
+)
+```
+
+## Child cases: `child_case`
+
+A step that opens a whole case of its own (cases guide, "Child cases"):
+`claim.child_case("repair", repair, release=3, ...)` names the child with the release the claim
+pins, written `"case": "repair@3"` in the JSON, and the child joins the claim's package, under
+`cases/repair@3/`. The child says what it reports with `repair.reports(cost)`; the parent reads
+it as the step's outputs, `fixing.output("cost", Field.number())`, with where each value came
+from (brief, D74).
+
+`examples/builder/child.py`:
+
+```python
+from ventoux import Approval, Case, Field, Outcome
+
+# The cases guide's repair, a case of its own: a garage lead fixes the vehicle and says the cost.
+repair = Case("repair", title="Vehicle repair")
+
+repair.field("vehicle", Field.string(), title="Vehicle")
+repair.field("budget", Field.number(), title="Budget")
+cost = repair.field("cost", Field.number(), title="Cost")
+fixed = repair.milestone("fixed", title="Vehicle fixed")
+
+repair.task(
+    "fix",
+    title="Fix the vehicle",
+    roles=["support-lead"],
+    outcomes={"fixed": Outcome("Fixed", sets=[cost], reaches=[fixed])},
+)
+
+# What it says to the case that opened it, when it closes: `"reports": ["cost"]` (brief, D74).
+repair.reports(cost)
+
+# The claim that opens it, pinning its release 3: `"case": "repair@3"` in the JSON.
+claim = Case("claim", title="Insurance claim")
+
+order_id = claim.reference("order_id", system="orders", title="Order")
+vehicle = claim.field("vehicle", Field.string(), title="Vehicle")
+payout = claim.field("payout", Field.number(), title="Payout")
+assessed = claim.milestone("assessed", title="Claim assessed")
+
+claim.task(
+    "assess",
+    title="Assess the claim",
+    roles=["support"],
+    outcomes={"accept": Outcome("Accept the claim", sets=[payout], reaches=[assessed])},
+)
+
+fixing = claim.child_case(
+    "repair",
+    repair,
+    release=3,
+    title="Repair the vehicle",
+    requires=[assessed],
+    inputs={"vehicle": vehicle, "budget": payout},
+)
+
+# What the child reports is read as the step's outputs, with where each came from.
+claim.activity(
+    "pay_garage",
+    "payments.refund@2",
+    title="Pay the garage",
+    requires=[fixing],
+    inputs={"order_id": order_id, "amount": fixing.output("cost", Field.number())},
+    approval=Approval(roles=["support-lead"], reason="Every payout needs a team lead"),
+)
+
+# A claim whose repair opens only on a payout set within the last 30 days: a case step reads its
+# facts fresh, as a call does (brief, D18).
+recent = Case("recent-claim", title="A recent insurance claim")
+
+recent_payout = recent.field("payout", Field.number(), title="Payout")
+
+recent.child_case(
+    "repair",
+    repair,
+    release=3,
+    title="Repair the vehicle",
+    inputs={"budget": recent_payout},
+    max_age={"payout": "30d"},
 )
 ```
 

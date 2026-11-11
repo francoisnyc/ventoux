@@ -7,6 +7,7 @@ has surely happened by then. See docs/layers/10-case-validation.md (10d).
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from functools import reduce
 from typing import NamedTuple
@@ -79,13 +80,18 @@ class Reading:
     case: CaseDefinition
     contracts: Mapping[str, Contract]
     plans: Mapping[str, object]
+    # The child each case step opens, by step, of those that can be read (brief, D74).
+    children: Mapping[str, CaseDefinition] = field(default_factory=dict[str, CaseDefinition])
 
     def endings(self, name: str) -> frozenset[str]:
         """Every way the step may end: a task with one of its outcomes; an activity done or with
-        one its contract declares; a plan done or failed; a workflow done."""
+        one its contract declares; a plan done or failed; a child case done or closed with one of
+        its close reasons (brief, D74); a workflow done."""
         step = self.case.steps[name]
         if isinstance(step, TaskStep):
             return frozenset(step.outcomes)
+        if name in self.children:
+            return frozenset({DONE, *self.children[name].close_reasons})
         contract = self.contracts.get(name)
         if isinstance(step, ActivityStep) and isinstance(contract, ActivityContract):
             return frozenset({DONE, *contract.outcomes})
@@ -246,7 +252,8 @@ def reads(
     """Each value `expression` reads, with what is known where it reads it: inside an `if`, its
     first branch is read only once its condition held. `and` and `or` read every part
     (brief, D20), so a part guards nothing."""
-    if isinstance(expression, Decimal | str | bool | Item | Exists):
+    # A literal, a date one too, reads no field (brief, D66).
+    if isinstance(expression, Decimal | str | bool | date | Item | Exists):
         return []  # `exists` asks whether a value is set: it never fails for one that isn't
     if isinstance(expression, Var):
         return [Read(expression.var, known, always)]

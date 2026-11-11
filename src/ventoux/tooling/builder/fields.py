@@ -12,6 +12,7 @@ from typing import Any
 
 from ventoux.tooling.builder.expressions import (
     BoolExpr,
+    DateExpr,
     Expr,
     ListExpr,
     NumberExpr,
@@ -59,6 +60,23 @@ class Field:
     def reference(system: str) -> FieldType[ReferenceExpr]:
         """The ID of a record kept in `system`, never a copy of it (brief, D8)."""
         return FieldType({"type": "reference", "system": system}, ReferenceExpr)
+
+    @staticmethod
+    def option(system: str) -> FieldType[ReferenceExpr]:
+        """One of `system`'s list, checked when a person gives it, and read like a reference to
+        `system`: compared only with one of the same system (brief, D67)."""
+        return FieldType({"type": "option", "system": system}, ReferenceExpr)
+
+    @staticmethod
+    def attachment(store: str) -> FieldType[ReferenceExpr]:
+        """The ID `store` issued for a file, never the file, checked when a person gives it, and
+        read like a reference to `store`: compared only with one of the same store (brief, D68)."""
+        return FieldType({"type": "attachment", "store": store}, ReferenceExpr)
+
+    @staticmethod
+    def date() -> FieldType[DateExpr]:
+        """A day on the calendar, with no time and no time zone (brief, D66)."""
+        return FieldType({"type": "date"}, DateExpr)
 
     @staticmethod
     def list(**fields: FieldType[Any]) -> FieldType[ListExpr]:

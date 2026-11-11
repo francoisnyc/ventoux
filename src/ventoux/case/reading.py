@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 from ventoux.case.definition import (
+    ActivityStep,
     After,
     AnsweredTask,
     CallStep,
     CaseDefinition,
+    CaseStep,
     EventArrived,
     PlanStep,
     Reached,
@@ -31,9 +33,11 @@ from ventoux.case.sequence import requirements
 from ventoux.case.visibility import seen_by
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.expressions import (
+    AttachmentType,
     Expression,
     ExpressionInvalid,
     ListType,
+    OptionType,
     OutcomeType,
     ReferenceType,
     render,
@@ -560,15 +564,26 @@ def read_step(name: str, case: CaseDefinition, catalog: Catalog) -> EntryReading
     """A step: what it is, when it may start, who approves it, what it reaches and how old its
     facts may be (brief, D56)."""
     step = case.steps[name]
-    if not isinstance(step, TaskStep | CallStep | PlanStep | WaitStep):
+    if not isinstance(step, TaskStep | CallStep | PlanStep | CaseStep | WaitStep):
         # Fail closed: a kind of step the reader doesn't know is refused, never guessed.
         raise ReadingRefused(f"can't read {name}: {step!r} is no kind of step")
     sentences = [what_it_is(name, step, catalog), when_it_starts(name, step, case)]
+    if isinstance(step, TaskStep | ActivityStep) and step.for_each is not None:
+        # A run per item, as it runs (brief, D73).
+        over, key = step.for_each.over, step.for_each.key
+        sentences.append(f"It runs once for each item of {over}, told apart by its {key}.")
+    if step.required:  # owed in every case (brief, D72)
+        sentences.append(f"The case owes it: it doesn't close by itself until {name} is done.")
     fine: list[Clause] = []
     if isinstance(step, CallStep) and step.approval is not None:
         sentences.append(who_approves(name, step))
+        if step.approval.assign is not None:
+            # Who is asked, as the rule reads aloud (brief, D71).
+            sentences.append(f"Each approval is {step.approval.assign.aloud()}.")
         fine += approval_print(name, step)
     if isinstance(step, TaskStep):
+        if step.assign is not None:
+            sentences.append(f"Each run is {step.assign.aloud()}.")
         sentences += answered(name, step)
     if step.reaches:
         sentences.append(f"Done, it reaches {listed_and(list(step.reaches))}.")
@@ -594,6 +609,9 @@ def what_it_is(name: str, step: object, catalog: Catalog) -> str:
         return f"{name} calls {called_with(name, step.called, catalog)}{giving(name, step.inputs)}."
     if isinstance(step, PlanStep):
         return f"{name} runs the plan {step.plan}{giving(name, step.inputs)}."
+    if isinstance(step, CaseStep):
+        # A child case: what it does is read in its own section of the map (brief, D74).
+        return f"{name} opens the case {step.case}{giving(name, step.inputs)}."
     if isinstance(step, WaitStep):
         return f"{name} waits for {step.event}."
     raise ReadingRefused(f"can't read {name}: {step!r} is no kind of step")
@@ -616,7 +634,7 @@ def giving(name: str, inputs: Mapping[str, Expression]) -> str:
 
 
 def when_it_starts(
-    name: str, step: TaskStep | CallStep | PlanStep | WaitStep, case: CaseDefinition
+    name: str, step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep, case: CaseDefinition
 ) -> str:
     """`It starts by itself once review is done, if review.outcome = "approve".`"""
     required = [
@@ -727,11 +745,16 @@ def kind_of(name: str, declared: object) -> str:
     """A declared type, as people read it: `a number`, `a reference to orders`."""
     if isinstance(declared, ReferenceType):
         return f"a reference to {declared.system}"
+    if isinstance(declared, OptionType):  # one of the system's list, said so (brief, D67)
+        return f"an option of {declared.system}, checked when given"
+    if isinstance(declared, AttachmentType):  # a file its store keeps, said so (brief, D68)
+        return f"an attachment in {declared.store}, checked when given"
     if isinstance(declared, ListType):
         return f"a list of {listed_and(list(declared.fields))}"
     if isinstance(declared, OutcomeType):
         return f"one of {' or '.join(declared.outcomes)}"
-    kinds = {"number": "a number", "string": "a text", "boolean": "true or false"}
+    # A date as a day, never a moment or a format of some language (brief, D66).
+    kinds = {"number": "a number", "string": "a text", "boolean": "true or false", "date": "a date"}
     kind = getattr(declared, "type", None)
     if kind not in kinds:
         raise ReadingRefused(f"can't read {name}'s type: {declared!r} isn't a type Ventoux knows")
@@ -768,15 +791,26 @@ FORGETTING = {
 
 
 def read_closing(case: CaseDefinition) -> EntryReading:
-    """How a case closes, and whether it may be forgotten (brief, D10) (brief, D32)."""
+    """How a case closes, and whether it may be forgotten (brief, D10) (brief, D32), with what it
+    owes (brief, D72)."""
+    # What it owes, said beside how it closes by itself: it doesn't before (brief, D72).
+    owed = [name for name, step in case.steps.items() if step.required]
+    and_done = f" and {listed_and(owed)} {'is' if len(owed) == 1 else 'are'} done" if owed else ""
     if case.stays_open:
         closes = "It never closes by itself: a person closes it with a reason."
     elif case.closes_when:
         verb = "is" if len(case.closes_when) == 1 else "are"
-        closes = f"It closes once {listed_and(list(case.closes_when))} {verb} reached."
+        closes = f"It closes once {listed_and(list(case.closes_when))} {verb} reached{and_done}."
     else:
-        closes = "It closes when nothing is left to do."
-    return EntryReading("closing", f"{closes} {FORGETTING[case.forgetting]}")
+        closes = f"It closes when nothing is left to do{and_done}."
+    # What it reports, when a case step opens it, is all a parent ever reads of it (brief, D74).
+    reports = (
+        f" Opened as a child, it reports {listed_and(list(case.reports))} to the case that "
+        "opened it."
+        if case.reports
+        else ""
+    )
+    return EntryReading("closing", f"{closes}{reports} {FORGETTING[case.forgetting]}")
 
 
 def read_state(name: str, plan: Plan, catalog: Catalog) -> EntryReading:

@@ -16,9 +16,9 @@ team already operates, self-hosted or Temporal Cloud:
 - **The Ventoux engine is a Python library** inside a worker you deploy like any other.
 - **Your activities and workflows stay where they are** (Python or Java workers); cases call them.
 - **Operations are Temporal's:** the same UI, metrics, alerting and access control.
-- **What Ventoux adds:** one small API service with a reference inbox (the only way into the engine),
-  resolvers to show records from your systems, and a key provider (such as Vault or a cloud KMS)
-  for sensitive fields.
+- **What Ventoux adds:** client functions your own service calls, as the one identity allowed to
+  write for people (the trusted caller); resolvers to show records from your systems; and a key
+  provider (Vault) for sensitive fields. An API service and a reference inbox come after v1.0.
 
 ## Status
 

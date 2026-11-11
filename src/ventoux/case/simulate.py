@@ -13,9 +13,11 @@ from typing import Any
 
 from ventoux.case.admission import ProposalRefused, RetryRefused
 from ventoux.case.answers import AnswerRefused
-from ventoux.case.closing import CloseRefused, needs_attention, pending
+from ventoux.case.closing import CloseRefused, pending
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep
 from ventoux.case.memory import Activity, Driver, as_json, no_plans, outcome_of, wrapped
+from ventoux.case.owed import owed
+from ventoux.case.owing import attention, waiting_for
 from ventoux.case.reading import EVERY_RULE, PatternReading, Reading, read_patterns, read_rules
 from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
@@ -176,7 +178,7 @@ def simulate(story: Story, case: CaseDefinition, catalog: Catalog) -> Simulation
         tuple(patterns.values()),
         tuple(Group(at, tuple(lines)) for at, lines in player.groups),
         end_at,
-        tuple(end_of(player.state)),
+        tuple(end_of(case, player.state)),
     )
 
 
@@ -354,14 +356,16 @@ class Player:
             self.groups.append((label, list(lines)))
 
 
-def end_of(state: CaseState) -> list[str]:
-    """The case's status, then every kind of pending work, each on its line (brief, D10). With
-    none, it says so; pending work it can't name is an error, never left unsaid."""
+def end_of(case: CaseDefinition, state: CaseState) -> list[str]:
+    """The case's status, then every kind of pending work, each on its line (brief, D10), and
+    what it owes (brief, D72). With none, it says so; pending or owed work it can't name is an
+    error, never left unsaid."""
     running = [run.entry for run in state.runs if run.status in ("running", "retrying")]
+    waiting = waiting_for(case, state)
     parts = [
-        *([f"waiting for: {', '.join(state.waiting.values())}"] if state.waiting else []),
+        *([f"waiting for: {', '.join(waiting)}"] if waiting else []),
         *([f"running: {', '.join(running)}"] if running else []),
-        *(f"needs attention: {line}" for line in needs_attention(state)),
+        *(f"needs attention: {line}" for line in attention(case, state)),
         *([f"approved, waiting to start: {', '.join(state.given)}"] if state.given else []),
         *(
             [f"proposed, waiting to start: {', '.join(state.waiting_to_start)}"]
@@ -370,7 +374,7 @@ def end_of(state: CaseState) -> list[str]:
         ),
         *(f"timer: {timer}" for timer in set_timers(state)),
     ]
-    if not parts and pending(state):
+    if not parts and (pending(state) or owed(case, state)):
         # Fail closed: pending work the story can't name would be a silent gap in what it shows.
         raise RuntimeError("the case has pending work the story can't name")
     return [f"status: {state.phase}", *(parts or ["nothing pending"])]

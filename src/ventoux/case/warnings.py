@@ -5,6 +5,7 @@ See docs/layers/10-case-validation.md (10d) and docs/guides/cases.md, "What the 
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from ventoux.case.definition import (
@@ -21,6 +22,7 @@ from ventoux.case.definition import (
     WorkflowStep,
     anchor,
 )
+from ventoux.case.flow import as_listed
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
 from ventoux.case.reach import starters
 from ventoux.case.rules import said as moment_said
@@ -63,11 +65,13 @@ def warning_issues(
     plans: Mapping[str, Plan],
     said: Collection[str],
     missing: Collection[str],
+    children: Mapping[str, CaseDefinition] | None = None,
 ) -> list[Issue]:
     """10d's issues, given the paths an issue already names (`said`) and the steps that are
-    `missing` their contract or plan, or refused by an error: one cause, one issue (brief, D35).
-    Such a step gets none of these, and nor does what it would give."""
-    reading = Reading(case, contracts, plans)
+    `missing` their contract, plan or child, or refused by an error: one cause, one issue
+    (brief, D35). Such a step gets none of these, and nor does what it would give. A child case
+    may close with a reason, leaving what it reports unset (brief, D74)."""
+    reading = Reading(case, contracts, plans, children or {})
     unset = unset_reads(reading, said, missing)
     # An outcome that leaves an output another step reads is said by that read: the reading step
     # fails, and someone hears of it.
@@ -246,7 +250,8 @@ def told_apart(expression: Expression, field: str) -> set[str]:
     """The outcomes of `field` that `expression` tells from the others: those it compares the
     field with (`==`, `!=`, `in`). Comparing it with `done` tells every outcome from `done`, and so
     does reading it any other way, since the check never guesses: `done` then stands for all."""
-    if isinstance(expression, Decimal | str | bool | Item | Exists):
+    # A literal, a date one too, reads no field (brief, D66).
+    if isinstance(expression, Decimal | str | bool | date | Item | Exists):
         return set()  # `exists` asks whether the step ended, not how
     if isinstance(expression, Var):
         return {DONE} if expression.var == field else set()  # read as a value: all of them
@@ -580,7 +585,11 @@ def kept_from_starting_issues(
             continue
         if closing & set(step.reaches):
             continue
-        read = {field: sources.get(field, frozenset()) for field in fields_read(step.when)}
+        # A repeated step's item is read as its list, whose sources it carries (brief, D73).
+        read = {
+            field: sources.get(as_listed(case, name, field), frozenset())
+            for field in fields_read(step.when)
+        }
         untrusted = untrusted_of(read)
         if not untrusted:
             continue

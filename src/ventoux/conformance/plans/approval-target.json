@@ -1,0 +1,52 @@
+{
+  "plan": "approving",
+  "version": 1,
+  "display": {
+    "title": "Approve, then pay"
+  },
+  "fields": {
+    "order_id": {
+      "type": "reference",
+      "system": "orders"
+    },
+    "amount": {
+      "type": "number"
+    }
+  },
+  "initial": "approve_refund",
+  "states": {
+    "approve_refund": {
+      "approval": {
+        "of": "pay",
+        "roles": [
+          "support-lead"
+        ]
+      },
+      "on": {
+        "approve": "failed",
+        "reject": "failed"
+      }
+    },
+    "pay": {
+      "activity": "payments.refund@2",
+      "inputs": {
+        "order_id": {
+          "var": "order_id"
+        },
+        "amount": {
+          "var": "amount"
+        }
+      },
+      "on": {
+        "done": "paid",
+        "declined": "failed"
+      }
+    },
+    "paid": {
+      "final": "succeeded"
+    },
+    "failed": {
+      "final": "failed"
+    }
+  }
+}

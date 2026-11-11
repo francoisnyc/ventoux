@@ -15,7 +15,7 @@ See docs/layers/14-builder.md, choice 34.
 import importlib
 import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ventoux.core.catalog import Catalog
@@ -26,6 +26,27 @@ DEVELOPMENT = "ventoux.testing:CATALOG"  # the development catalog, by its name
 
 class Unconfigured(Exception):
     """A configuration that can't be read, or a catalog that can't be loaded: nothing runs."""
+
+
+@dataclass(frozen=True)
+class Identity:
+    """One identity a command may connect to Temporal as: its certificate and its key, as file
+    paths, never their contents (brief, D81)."""
+
+    cert: str  # the client certificate's file: `/etc/ventoux/operator.pem`
+    key: str  # its private key's file, readable by its owner only
+
+
+@dataclass(frozen=True)
+class Temporal:
+    """Where Temporal is and who a command connects as: `[tool.ventoux.temporal]` (brief, D81)."""
+
+    address: str  # Temporal's frontend: `ventoux-prod.a1b2c.tmprl.cloud:7233`
+    namespace: str  # `ventoux-prod.a1b2c`
+    server_ca: str | None = (
+        None  # the file of the CA that signed the server's certificate, if private
+    )
+    identities: dict[str, Identity] = field(default_factory=dict[str, Identity])  # by name
 
 
 @dataclass(frozen=True)
@@ -42,6 +63,10 @@ class Configuration:
     releases: str | None = None  # where `ventoux release` keeps its records (brief, D59)
     model: str | None = None  # the model the live provider asks; none named is refused (brief, D62)
     drafts: str | None = None  # where `ventoux draft` writes; none named is refused (brief, D63)
+    # Where Temporal is and who commands connect as; None: localhost, no TLS (brief, D81).
+    temporal: Temporal | None = None
+    keys: str | None = None  # `module:NAME`, the deployment's key provider (brief, D81)
+    audit: str | None = None  # `module:NAME`, the deployment's audit store (brief, D81)
 
 
 def configuration(start: Path) -> Configuration:
@@ -60,7 +85,8 @@ def read(path: Path) -> Configuration:
         data = tomllib.loads(path.read_text())
     except tomllib.TOMLDecodeError as error:
         raise Unconfigured(f"{path} isn't TOML: {error}") from None
-    said = data.get("tool", {}).get("ventoux", {})
+    said = dict(data.get("tool", {}).get("ventoux", {}))
+    temporal = temporal_of(path, said.pop("temporal")) if "temporal" in said else None
     for key in said:
         if key not in (
             "catalog",
@@ -70,6 +96,8 @@ def read(path: Path) -> Configuration:
             "by_hand",
             "model",
             "drafts",
+            "keys",
+            "audit",
         ):
             raise Unconfigured(f"{path}: [tool.ventoux] has no setting {key}")
     for key, value in said.items():
@@ -89,7 +117,51 @@ def read(path: Path) -> Configuration:
         model=said.get("model"),
         drafts=said.get("drafts"),
         by_hand=tuple(said.get("by_hand", ())),
+        temporal=temporal,
+        keys=said.get("keys"),
+        audit=said.get("audit"),
     )
+
+
+def temporal_of(path: Path, said: object) -> Temporal:
+    """`[tool.ventoux.temporal]` as the format says, or `Unconfigured` naming the key that isn't
+    (fail closed: never a default guessed for a production namespace) (brief, D81)."""
+    where = f"{path}: [tool.ventoux.temporal]"
+    if not isinstance(said, dict):
+        raise Unconfigured(f"{where} is a table of settings")
+    for key in said:
+        if key not in ("address", "namespace", "server_ca", "identities"):
+            raise Unconfigured(f"{where} has no setting {key}")
+    examples = {"address": '"localhost:7233"', "namespace": '"default"', "server_ca": '"ca.pem"'}
+    for key, example in examples.items():
+        if key in said and not isinstance(said[key], str):
+            raise Unconfigured(f"{where} {key} is a text, such as {example}")
+    for key in ("address", "namespace"):
+        if key not in said:
+            raise Unconfigured(f"{where} needs {key}, such as {examples[key]}")
+    identities = said.get("identities", {})
+    if not isinstance(identities, dict):
+        raise Unconfigured(f"{where} identities is a table, one per identity")
+    return Temporal(
+        said["address"],
+        said["namespace"],
+        said.get("server_ca"),
+        {name: identity_of(path, name, given) for name, given in identities.items()},
+    )
+
+
+def identity_of(path: Path, name: str, said: object) -> Identity:
+    """One identity's table: exactly a `cert` and a `key`, each a file's path."""
+    where = f"{path}: [tool.ventoux.temporal.identities.{name}]"
+    if not isinstance(said, dict):
+        raise Unconfigured(f"{where} is a table: cert and key, each a file's path")
+    for key in said:
+        if key not in ("cert", "key"):
+            raise Unconfigured(f"{where} has no setting {key}")
+    cert, key = said.get("cert"), said.get("key")
+    if not isinstance(cert, str) or not isinstance(key, str):
+        raise Unconfigured(f"{where} needs cert and key, each a file's path")
+    return Identity(cert, key)
 
 
 def deployment_catalog(flag: str | None, found: Configuration) -> Catalog:
@@ -113,19 +185,32 @@ def catalog_named(name: str, root: Path | None) -> Catalog:
     as any of its modules does; nothing from a definition is ever imported (CLAUDE.md)
     (brief, D58).
     """
+    found = named(name, root, "a catalog", DEVELOPMENT)
+    if not isinstance(found, Catalog):
+        raise Unconfigured(f"{name} is not a Catalog: name the deployment's catalog itself")
+    return found
+
+
+def named(name: str, root: Path | None, what: str, example: str) -> object:
+    """The object `name` (`module:NAME`) gives, imported from the project at `root`: the
+    platform team's code, named in its configuration, never read from a definition (brief, D59)."""
     module, colon, attribute = name.partition(":")
     if not colon or not module or not attribute:
-        raise Unconfigured(f'a catalog is named "module:NAME", such as "{DEVELOPMENT}": not {name}')
+        raise Unconfigured(f'{what} is named "module:NAME", such as "{example}": not {name}')
     if root is not None:
         sys.path.insert(0, str(root))  # the project's own modules, as its tests import them
     try:
         loaded = importlib.import_module(module)
-    except ImportError as error:
+    except ModuleNotFoundError as error:
         raise Unconfigured(f"{module} can't be imported: {error}") from None
+    except Exception as error:  # noqa: BLE001 (the platform team's code may raise anything)
+        # Said by its kind alone: its message may hold anything, a secret included.
+        raise Unconfigured(
+            f"{module} can't be imported: it raised {type(error).__name__}"
+        ) from None
     finally:
         if root is not None:
             sys.path.remove(str(root))
-    found = getattr(loaded, attribute, None)
-    if not isinstance(found, Catalog):
-        raise Unconfigured(f"{name} is not a Catalog: name the deployment's catalog itself")
-    return found
+    if not hasattr(loaded, attribute):
+        raise Unconfigured(f"{module} has no {attribute}")
+    return getattr(loaded, attribute)

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from ventoux.case.approvals import withdraw
+from ventoux.case.claims import keep_holders_who_can_answer
 from ventoux.case.definition import (
     ActivityStep,
     After,
@@ -22,6 +23,7 @@ from ventoux.case.definition import (
     CallStep,
     CaseDefinition,
     CaseInvalid,
+    CaseStep,
     EventArrived,
     PlanStep,
     Reached,
@@ -33,7 +35,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.engine import KNOWN
 from ventoux.case.freshness import seconds_in
-from ventoux.case.releases import Hash, Record, canonical, is_release
+from ventoux.case.releases import Hash, Record, Written, canonical, is_release
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, Migration, StepRun, Timer
 from ventoux.case.timers import named, utc
@@ -65,10 +67,23 @@ def migration_of(record: Record, mapping: dict[str, dict[str, str]], engine: int
         record.digest.method,
         record.digest.sha256,
         json.loads(record.written.case, parse_float=Decimal),
-        {ref: json.loads(text, parse_float=Decimal) for ref, text in record.written.plans.items()},
+        {ref: json.loads(text, parse_float=Decimal) for ref, text in all_plans(record.written)},
         mapping,
         engine,
+        {
+            ref: json.loads(child.case, parse_float=Decimal)
+            for ref, child in record.written.cases.items()
+        },
     )
+
+
+def all_plans(written: Written) -> list[tuple[str, str]]:
+    """Every plan's text in the package, its children's included, by reference: one reference is
+    one plan, so each is said once (brief, D74)."""
+    found = dict(written.plans)
+    for child in written.cases.values():
+        found |= dict(child.plans)
+    return sorted(found.items())
 
 
 def released(case: CaseDefinition, state: CaseState) -> str:
@@ -89,7 +104,9 @@ def target_of(case: CaseDefinition, migration: Migration) -> CaseDefinition | st
         target = parse_case(dict(migration.case))
     except CaseInvalid:
         return f"what was given as {label} doesn't give its digest"
-    if target.case != migration.name or not is_release(target, migration.plans, given):
+    if target.case != migration.name or not is_release(
+        target, migration.plans, given, migration.cases
+    ):
         return f"what was given as {label} doesn't give its digest"
     return target
 
@@ -208,6 +225,37 @@ def problems_of(
     return depending(case, target, catalog, state, migration)
 
 
+def renumbered(
+    case: CaseDefinition, target: CaseDefinition, state: CaseState, migration: Migration
+) -> list[str]:
+    """A repeated step whose items have numbers, which the target repeats over another list, by
+    another key, or not at all: its numbers are tied to its key, so its items would run again
+    under new names and new idempotency keys (brief, D17) (brief, D73)."""
+    problems = []
+    for name in state.items:
+        step, new = case.steps[name], renamed(migration, "steps", name)
+        repeats = step.for_each if isinstance(step, TaskStep | ActivityStep) else None
+        if repeats is None or new not in target.steps:
+            continue  # a step the target lacks is said where it lacks it
+        moved = target.steps[new]
+        then = moved.for_each if isinstance(moved, TaskStep | ActivityStep) else None
+        over = renamed(migration, "fields", repeats.over)
+        if then is not None and then.over == over and then.key == repeats.key:
+            continue
+        label = migration.label
+        if then is None:
+            changed = f"{label} doesn't repeat it"
+        elif then.over != over:
+            changed = f"{label} over {then.over} by {then.key}"
+        else:
+            changed = f"{label} by {then.key}"
+        problems.append(
+            f"{name} repeats over {repeats.over} by {repeats.key}, and {changed}: its items' "
+            "numbers can't follow a new key; keep the key, or migrate before it runs"
+        )
+    return problems
+
+
 def depending(
     case: CaseDefinition,
     target: CaseDefinition,
@@ -228,6 +276,7 @@ def depending(
             )
         elif run.status in UNTIL:
             problems += unfinished(case, target, migration, run, new)
+    problems += renumbered(case, target, state, migration)
     for milestone in state.milestones:
         if (new := renamed(migration, "milestones", milestone)) not in target.milestones:
             problems.append(
@@ -308,6 +357,15 @@ def unfinished(
             (
                 f"{run.entry} {state_of(run)} on {before.called}, and {label}'s {new} calls "
                 f"{after.called}: {when}"
+            )
+        ]
+    if isinstance(before, CaseStep) and isinstance(after, CaseStep) and before.case != after.case:
+        # Its child keeps its own release: the target opens the same one, or the run ends first
+        # (brief, D74).
+        return [
+            (
+                f"{run.entry} {state_of(run)} on {before.case}, and {label}'s {new} opens "
+                f"{after.case}: {when}"
             )
         ]
     if isinstance(before, PlanStep) and isinstance(after, PlanStep) and before.plan != after.plan:
@@ -473,9 +531,11 @@ def apply(
             state.history.append(f"lapsed {run.approved.entry}: {label} changed {run.step}")
             run.approved = None
     rename(case, target, state, migration)
+    keep_holders_who_can_answer(target, catalog, state)
     follow_timers(case, target, state, migration, at)
     state.release = label
     state.engine = migration.engine
+    state.cases = dict(migration.cases)  # the children the target pins (brief, D74)
     return target
 
 
@@ -514,11 +574,17 @@ def rename(
     state.refreshing = {key(name): run for name, run in state.refreshing.items()}
     for run in state.runs:
         run.step = renamed(migration, "steps", run.step)
+    # A repeated step's numbers follow its new name, as its runs do (brief, D53) (brief, D73).
+    state.items = {renamed(migration, "steps", name): keys for name, keys in state.items.items()}
     step = functools.partial(renamed, migration, "steps")
     state.approvals = {step(name): approval for name, approval in state.approvals.items()}
     state.given = {step(name): given for name, given in state.given.items()}
     state.asked = {step(name): count for name, count in state.asked.items()}
     state.proposers = {step(name): who for name, who in state.proposers.items()}
+    state.kept = {step(name): holder for name, holder in state.kept.items()}
+    # Whoever gave a task's latest answer is renamed with the task, so a rule asking them under
+    # its new name still finds them (brief, D53) (brief, D71).
+    state.answerers = {step(name): who for name, who in state.answerers.items()}
     state.waiting_to_start = [step(name) for name in state.waiting_to_start]
     state.proposed_by_rules = {
         step(name): dataclasses.replace(
@@ -550,7 +616,9 @@ def rename(
             continue
         waits = target.steps[run.step]
         if isinstance(waits, TaskStep):
-            state.waiting[run.entry] = f"{run.step} by {' or '.join(waits.roles)}"
+            # A repeated run keeps its number under its step's new name (brief, D73).
+            named = run.step if run.item is None else f"{run.step}.{run.item}"
+            state.waiting[run.entry] = f"{named} by {' or '.join(waits.roles)}"
         elif isinstance(waits, WaitStep):
             state.waiting[run.entry] = f"{waits.event} {sent_by(target.events[waits.event])}"
 

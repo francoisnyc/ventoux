@@ -12,6 +12,10 @@ from typing import Annotated, Any
 
 import pytest
 from pydantic import BaseModel
+from test_child_cases import claim as repair_claim
+from test_child_cases import repair
+from test_repeated import order_return  # the guide's returned order, its lines repeated
+from test_required import refund_confirmed  # the guide's refund with a required step
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_timers import chased
@@ -35,6 +39,8 @@ from ventoux.testing import (
     Outcome,
     ProposalRefused,
     RetryRefused,
+    assign,
+    claim,
     close,
     finish,
     later,
@@ -119,7 +125,7 @@ def changed(change: str) -> dict[str, Any]:
     [
         (
             "kind",
-            "steps.pay.kind: a step is a task, an activity, a plan, a workflow or a wait, and this one is 'script'",
+            "steps.pay.kind: a step is a task, an activity, a plan, a case, a workflow or a wait, and this one is 'script'",
         ),
         ("sequence", "sequence: pya is not a step"),
         ("requires", "steps.pay.requires: reviwe is neither a milestone nor a step"),
@@ -693,12 +699,18 @@ def test_the_guides_examples_run_as_written() -> None:
         "refund": guide_json(0),
         "refund_with_rework": guide_refund_with_rework(),
         "retry": retry,
+        "claim": claim,  # "Who is asked", whose other examples test_claims.py checks
+        "assign": assign,  # "Assigning", whose other examples test_assigning.py checks
         "PEOPLE": OPERATORS,
         "refund_with_plan": guide_refund_with_plan(),
         "refund_order": refund_order(),
         "refund_with_chase": chased(),  # "Rules on time", whose blocks test_timers.py checks
         "read_rules": read_rules,  # "Reading rules", whose readings test_reading.py checks
         "parse_case": parse_case,
+        "refund_confirmed": refund_confirmed(),  # "Required steps", checked in test_required.py
+        "order_return": order_return(),  # "Repeated steps", checked in test_repeated.py
+        "claim_with_repair": repair_claim(),  # "Child cases", checked in test_child_cases.py
+        "repair": repair(),
     }
     for code in blocks("python"):
         exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7
@@ -1541,6 +1553,37 @@ def test_closes_when_closes_the_case_once_its_milestones_are_reached() -> None:
         "closed: paid reached",
     ]
     assert run.closed
+
+
+def test_closes_when_waits_for_every_one_of_its_milestones() -> None:
+    # `closes_when` names two milestones. With `paid` alone reached the case stays open, and
+    # its survey, which requires `paid`, is asked only then: so nothing new is held back as if
+    # the case were closing. It closes once `surveyed` is reached too (brief, D10, D34).
+    definition = refund(closes_when=["paid", "surveyed"])
+    definition["milestones"] = {
+        "paid": {"display": {"title": "Refund paid"}},
+        "surveyed": {"display": {"title": "Customer surveyed"}},
+    }
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["steps"]["survey"] = {
+        "kind": "task",
+        "display": {"title": "Ask the customer for feedback"},
+        "roles": ["support"],
+        "requires": ["paid"],
+        "outcomes": {"sent": {"display": {"title": "Survey sent"}, "reaches": ["surveyed"]}},
+    }
+    paid = run_case(definition, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
+    assert "reached paid" in paid.history
+    assert paid.status == "open"
+    assert paid.waiting_for == ["survey by support"]
+    both = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, ("survey", "sent", "ana")],
+        people=PEOPLE,
+    )
+    assert both.history[-1] == "closed: paid and surveyed reached"
+    assert both.closed
 
 
 def test_a_closing_case_is_not_closed_or_retried_again() -> None:

@@ -1,6 +1,7 @@
 """The renderer: an expression on one line, FEEL-style, for people to read."""
 
 import json
+from datetime import date
 from decimal import Decimal
 
 from ventoux.core.expressions.model import (
@@ -42,6 +43,8 @@ def render(expression: Expression) -> str:
         return json.dumps(expression, ensure_ascii=False)
     if isinstance(expression, Decimal):
         return str(expression)
+    if isinstance(expression, date):
+        return f'date("{expression.isoformat()}")'  # FEEL's literal; never its `today()`
     if isinstance(expression, Var):
         return expression.var
     if isinstance(expression, Exists):

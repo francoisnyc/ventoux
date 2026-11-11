@@ -6,6 +6,7 @@ A source is a text, `origin:name`. See docs/layers/04-provenance.md.
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from ventoux.core.expressions import (
@@ -29,9 +30,11 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.expressions.model import Comparison
 
-# The origins a value can come from: a system, or a person's answer, both trusted; or something a
-# developer declared untrusted, such as `untrusted:llm` (brief, D12).
-TRUSTED_ORIGINS = ("system:", "person:")
+# The origins a value can come from: a system, or a person's answer, both trusted; the route it
+# came back by from a child case, `case:repair`, trusted too, since the value's other sources
+# decide its trust (brief, D74); or something a developer declared untrusted, such as
+# `untrusted:llm` (brief, D12).
+TRUSTED_ORIGINS = ("system:", "person:", "case:")
 UNTRUSTED_ORIGIN = "untrusted:"
 # A plan field with no declared source: the case gives it, and the plan can't see its origin. Only
 # the static check uses it; the runtime check sees the real sources (docs/layers/04-provenance.md).
@@ -55,7 +58,8 @@ def is_label(text: str) -> bool:
 
 
 def is_trusted(source: str) -> bool:
-    """Whether `source` is one the engine trusts: from a system, a person, or the case."""
+    """Whether `source` is one the engine trusts: from a system, a person, or the case, or the
+    route a child case's report came by."""
     return source == CASE or source.startswith(TRUSTED_ORIGINS)
 
 
@@ -95,7 +99,8 @@ def provenance(expression: Expression, sources: Mapping[str, frozenset[str]]) ->
 
 def fields_read(expression: Expression) -> list[str]:
     """The fields `expression` reads, in order, conditions included."""
-    if isinstance(expression, Decimal | str | bool):
+    # A literal, a date one too, reads no field (brief, D66).
+    if isinstance(expression, Decimal | str | bool | date):
         return []  # a literal reads nothing
     if isinstance(expression, Var):
         return [expression.var]

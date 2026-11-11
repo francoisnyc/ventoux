@@ -7,14 +7,17 @@ lists, and are read back as sets.
 """
 
 import dataclasses
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+from ventoux.case.audit import Act, AuditRecord, Decision, Fact
 from ventoux.case.engine import known
 from ventoux.case.state import (
     CaseState,
     ChangeRequest,
     GivenApproval,
+    Holder,
     Migration,
     Moment,
     Obtained,
@@ -25,6 +28,9 @@ from ventoux.case.state import (
     Timer,
 )
 from ventoux.core.before_activity import Steering
+from ventoux.core.dates import given_day
+from ventoux.core.expressions import DateType, FieldType
+from ventoux.core.sensitive import Sensitive, plain
 
 
 def state_as_data(state: CaseState) -> dict[str, Any]:
@@ -52,9 +58,12 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
                 "started": run.started,
                 "stop_requested": run.stop_requested,
                 "held_retry": run.held_retry,
+                "item": run.item,  # a repeated run's item number; None for any other (brief, D73)
             }
             for run in state.runs
         ],
+        # Each repeated step's number for each key it has seen (brief, D73).
+        "items": {step: dict(keys) for step, keys in state.items.items()},
         "approvals": {
             step: {
                 "entry": open.entry,
@@ -68,6 +77,14 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "given": {step: given_as_data(given) for step, given in state.given.items()},
         "asked": dict(state.asked),
         "withdrawn": dict(state.withdrawn),
+        # Who holds each held open entry, and each withdrawn approval's holder kept for its
+        # step's next entry (brief, D69).
+        "holders": {entry: holder_as_data(held) for entry, held in state.holders.items()},
+        "kept": {step: holder_as_data(held) for step, held in state.kept.items()},
+        # Whom an assignment rule may ask: each task's latest answerer, and the opener, each with
+        # their stated roles (brief, D71).
+        "answerers": {step: holder_as_data(held) for step, held in state.answerers.items()},
+        "opener": None if state.opener is None else holder_as_data(state.opener),
         "proposers": dict(state.proposers),
         "waiting_to_start": list(state.waiting_to_start),
         "proposed_by_rules": {
@@ -78,6 +95,11 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "opened_by": state.opened_by,
         "phase": state.phase,
         "closed_because": state.closed_because,
+        "forget_taken": state.forget_taken,
+        "closed_as": state.closed_as,  # the close reason a person used, or None (brief, D74)
+        "closed_by": state.closed_by,  # who used it, or None (brief, D74)
+        "cases": dict(state.cases),  # the children its release pins, as stored data (brief, D74)
+        "excluded": dict(state.excluded),  # who approves nothing, as a parent said (brief, D74)
         "flags": list(state.flags),
         "history": list(state.history),
         "firings": [
@@ -114,6 +136,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "release": state.release,  # the release it opened on; None for a draft (brief, D51)
         # Each change request pending, in the order proposed: it crosses as it is, a sensitive
         # field's new value sealed (brief, D31) (brief, D52).
+        "checking": held_answers(state),
         "changes": {
             entry: {
                 "entry": request.entry,
@@ -132,7 +155,55 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
             for entry, request in state.changes.items()
         },
         "requested": state.requested,
+        # Each audit record not yet exported, in order, its values as the state holds them,
+        # sensitive ones wrapped (brief, D27) (brief, D76).
+        "audit": [record_as_data(each) for each in state.audit],
+        # Always empty between events, like `moments` (brief, D76).
+        "deciding": [decision_as_data(each) for each in state.deciding],
+        # How many records it has made, and why its export failed, if it has (brief, D77).
+        "recorded": state.recorded,
+        "export_failed": state.export_failed,
+        "export_service": state.export_service,
     }
+
+
+def record_as_data(record: AuditRecord) -> dict[str, Any]:
+    act = record.act
+    return {
+        "number": record.number,
+        "at": record.at,
+        "release": record.release,
+        "engine": record.engine,
+        "act": {
+            "kind": act.kind,
+            "by": act.by,
+            "roles": list(act.roles),
+            "entry": act.entry,
+            "outcome": act.outcome,
+            "values": dict(act.values),
+        },
+        "decisions": [decision_as_data(each) for each in record.decisions],
+        "lines": list(record.lines),
+    }
+
+
+def decision_as_data(decision: Decision) -> dict[str, Any]:
+    return {
+        "kind": decision.kind,
+        "step": decision.step,
+        "entry": decision.entry,
+        "rule": decision.rule,
+        "read": [fact_as_data(fact) for fact in decision.read],
+        "reason": decision.reason,
+        "wrote": None if decision.wrote is None else fact_as_data(decision.wrote),
+        "target": decision.target,
+        "by": decision.by,
+        "outcome": decision.outcome,
+    }
+
+
+def fact_as_data(fact: Fact) -> dict[str, Any]:
+    return {"field": fact.field, "sources": list(fact.sources), "value": fact.value}
 
 
 def rule_start_as_data(asked: RuleStart) -> dict[str, Any]:
@@ -166,6 +237,15 @@ def steering_from_data(data: dict[str, Any]) -> Steering:
     return Steering(data["said"], frozenset(data["sources"]))
 
 
+def holder_as_data(holder: Holder) -> dict[str, Any]:
+    # Roles in a set have no order: sorted, so the same state is always the same data.
+    return {"by": holder.by, "roles": sorted(holder.roles), "at": holder.at}
+
+
+def holder_from_data(data: dict[str, Any]) -> Holder:
+    return Holder(data["by"], frozenset(data["roles"]), at=whole(data["at"]))
+
+
 def given_as_data(given: GivenApproval) -> dict[str, Any]:
     return {
         "entry": given.entry,
@@ -183,11 +263,14 @@ def given_from_data(data: dict[str, Any]) -> GivenApproval:
     )
 
 
-def state_from_data(data: dict[str, Any]) -> CaseState:
-    """The state `state_as_data` wrote, read back as it was."""
+def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> CaseState:
+    """The state `state_as_data` wrote, read back as it was; each value by its declared type in
+    `types`, so a date, which crosses as text, is a day again (brief, D66)."""
     return CaseState(
         case=data["case"],
-        values=dict(data["values"]),
+        values={
+            name: read_back(name, value, types.get(name)) for name, value in data["values"].items()
+        },
         sources={name: frozenset(sources) for name, sources in data["sources"].items()},
         # A state carried by a run from before layer 9d has no times: its facts' ages are unknown,
         # so a step needing one fresh stops (docs/layers/09-case-data.md, 9d).
@@ -215,9 +298,13 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
                 stop_requested=run.get("stop_requested", ""),
                 # None in a state from before the checkpoint: no retry's flag said so.
                 held_retry=run.get("held_retry", ""),
+                # None in a state from before 18b: no step was repeated.
+                item=run.get("item"),
             )
             for run in data["runs"]
         ],
+        # None in a state from before 18b (brief, D73).
+        items={step: dict(keys) for step, keys in data.get("items", {}).items()},
         approvals={
             # Neither in a state from before 11h2: every approval was one person's.
             step: OpenApproval(
@@ -232,6 +319,14 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         given={step: given_from_data(given) for step, given in data["given"].items()},
         asked=dict(data["asked"]),
         withdrawn=dict(data["withdrawn"]),
+        # None in a state from before layer 17a.
+        holders={entry: holder_from_data(held) for entry, held in data.get("holders", {}).items()},
+        kept={step: holder_from_data(held) for step, held in data.get("kept", {}).items()},
+        # None in a state from before layer 17c: a rule then finds nobody (brief, D71).
+        answerers={
+            step: holder_from_data(held) for step, held in data.get("answerers", {}).items()
+        },
+        opener=None if data.get("opener") is None else holder_from_data(data["opener"]),
         proposers=dict(data["proposers"]),
         # None in a state from before layer 11b: no proposal waited for a fact.
         waiting_to_start=list(data.get("waiting_to_start", [])),
@@ -246,6 +341,13 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         opened_by=data["opened_by"],
         phase=data["phase"],
         closed_because=data["closed_because"],
+        # False in a state carried from before the fix: it then decides as it did.
+        forget_taken=data.get("forget_taken", False),
+        # None in a state from before layer 18c: no close reason was kept, and no child pinned.
+        closed_as=data.get("closed_as"),
+        closed_by=data.get("closed_by"),
+        cases=dict(data.get("cases", {})),
+        excluded=dict(data.get("excluded", {})),
         flags=list(data["flags"]),
         history=list(data["history"]),
         # None in a state from before layer 11a: no rule had fired.
@@ -283,7 +385,63 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
             for entry, request in data.get("changes", {}).items()
         },
         requested=whole(data.get("requested", 0)),
+        # None in a state from before 19a: no case made records.
+        audit=[record_from_data(each, types) for each in data.get("audit", [])],
+        deciding=[decision_from_data(each, types) for each in data.get("deciding", [])],
+        # None in a state from before 19b: 19a numbered every record it holds from 1, none yet
+        # written, so their count is how many it made.
+        recorded=whole(data.get("recorded", len(data.get("audit", [])))),
+        export_failed=data.get("export_failed", ""),
+        export_service=data.get("export_service", "the store"),  # carried from 19c
     )
+
+
+def record_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> AuditRecord:
+    """A record `record_as_data` wrote, read back as it was. An opening's and an answer's values
+    are the case file's fields, read back by their types; a completion's are what the activity
+    gave, as it gave them."""
+    act = data["act"]
+    values: dict[str, object] = dict(act["values"])
+    if act["kind"] != "completed":
+        values = {name: read_back(name, value, types.get(name)) for name, value in values.items()}
+    return AuditRecord(
+        number=whole(data["number"]),
+        at=whole(data["at"]),
+        release=data["release"],
+        engine=known(whole(data["engine"])),
+        act=Act(
+            act["kind"],
+            by=act["by"],
+            roles=tuple(act["roles"]),
+            entry=act["entry"],
+            outcome=act["outcome"],
+            values=values,
+        ),
+        decisions=[decision_from_data(each, types) for each in data["decisions"]],
+        lines=list(data["lines"]),
+    )
+
+
+def decision_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Decision:
+    return Decision(
+        data["kind"],
+        step=data["step"],
+        entry=data["entry"],
+        rule=data["rule"],
+        read=tuple(fact_from_data(fact, types) for fact in data["read"]),
+        reason=data["reason"],
+        wrote=None if data["wrote"] is None else fact_from_data(data["wrote"], types),
+        target=data["target"],
+        # Carried from 19b: a decision carried before has neither, and had neither.
+        by=data.get("by"),
+        outcome=data.get("outcome"),
+    )
+
+
+def fact_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Fact:
+    """A fact read back as it was: its value by its field's declared type."""
+    value = read_back(data["field"], data["value"], types.get(data["field"]))
+    return Fact(data["field"], tuple(data["sources"]), value)
 
 
 def migration_from_data(data: dict[str, Any]) -> Migration:
@@ -311,6 +469,29 @@ def firing_from_data(data: dict[str, Any]) -> RuleFiring:
         # None in a state from before the fix of the untrusted moment: nothing steered a moment.
         tuple(steering_from_data(steering) for steering in data.get("steered", [])),
     )
+
+
+def held_answers(state: CaseState) -> dict[str, object]:
+    """No held answer: a case continues as new only when nothing runs, and an answer is held only
+    while its check runs (brief, D67). One here would be lost on the way, so it is refused."""
+    if state.checking:
+        raise ValueError(
+            f"{', '.join(state.checking)} is being checked: a case never continues as new while "
+            "an answer is held"
+        )
+    return {}
+
+
+def read_back(name: str, value: object, declared: FieldType | None) -> object:
+    """A carried value as the case file held it: a date's text read into its day, inside a
+    sensitive value's wrapper too (brief, D31) (brief, D66). A date that isn't a day is refused,
+    never kept as text or as nothing: the state was damaged on the way."""
+    if not isinstance(declared, DateType):
+        return value
+    day = given_day(plain(value))
+    if day is None:
+        raise ValueError(f"a carried date is written YYYY-MM-DD, and {name} isn't")
+    return Sensitive(day) if isinstance(value, Sensitive) else day
 
 
 def whole(number: object) -> int:

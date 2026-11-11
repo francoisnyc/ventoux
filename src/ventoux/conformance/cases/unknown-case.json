@@ -1,0 +1,102 @@
+{
+  "case": "claim",
+  "display": {
+    "title": "Insurance claim"
+  },
+  "fields": {
+    "order_id": {
+      "type": "reference",
+      "system": "orders",
+      "display": {
+        "title": "Order"
+      }
+    },
+    "vehicle": {
+      "type": "string",
+      "display": {
+        "title": "Vehicle"
+      }
+    },
+    "payout": {
+      "type": "number",
+      "display": {
+        "title": "Payout"
+      }
+    }
+  },
+  "milestones": {
+    "assessed": {
+      "display": {
+        "title": "Claim assessed"
+      }
+    }
+  },
+  "steps": {
+    "assess": {
+      "kind": "task",
+      "display": {
+        "title": "Assess the claim"
+      },
+      "roles": [
+        "support"
+      ],
+      "outcomes": {
+        "accept": {
+          "display": {
+            "title": "Accept the claim"
+          },
+          "sets": [
+            "payout"
+          ],
+          "reaches": [
+            "assessed"
+          ]
+        }
+      }
+    },
+    "repair": {
+      "kind": "case",
+      "display": {
+        "title": "Repair the vehicle"
+      },
+      "case": "repair@3",
+      "requires": [
+        "assessed"
+      ],
+      "inputs": {
+        "vehicle": {
+          "var": "vehicle"
+        },
+        "budget": {
+          "var": "payout"
+        }
+      }
+    },
+    "pay_garage": {
+      "kind": "activity",
+      "display": {
+        "title": "Pay the garage"
+      },
+      "activity": "payments.refund@2",
+      "requires": [
+        "repair"
+      ],
+      "inputs": {
+        "order_id": {
+          "var": "order_id"
+        },
+        "amount": {
+          "var": "repair.cost"
+        }
+      },
+      "approval": {
+        "roles": [
+          "support-lead"
+        ],
+        "display": {
+          "reason": "Every payout needs a team lead"
+        }
+      }
+    }
+  }
+}

@@ -6,12 +6,10 @@ See docs/guides/activities.md.
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from typing import Any
 
-from pydantic import BaseModel, GetJsonSchemaHandler
-from pydantic_core import CoreSchema
+from pydantic import BaseModel
 
-from ventoux.core.expressions import FieldType, ListType, ReferenceType
+from ventoux.core.expressions import AttachmentType, FieldType, ListType, ReferenceType
 
 
 @dataclass(frozen=True)
@@ -19,17 +17,6 @@ class Reference:
     """An input takes a reference to a record in `system`: `Annotated[str, reference("crm")]`."""
 
     system: str  # the registered system whose records it names, such as `crm`
-
-    # Pydantic: on an object inside `Annotated[...]`, `__get_pydantic_json_schema__` is called when
-    # the model's JSON Schema is made, and may add to the field's schema.
-    def __get_pydantic_json_schema__(
-        self, core_schema: CoreSchema, handler: GetJsonSchemaHandler
-    ) -> dict[str, Any]:
-        # The system goes into the published schema, which the contract hash covers: declaring or
-        # changing one changes the contract. A field with none adds nothing (brief, D30).
-        schema: dict[str, Any] = handler(core_schema)
-        schema["x-reference"] = self.system
-        return schema
 
 
 def reference(system: str) -> Reference:
@@ -56,6 +43,11 @@ def unregistered(fields: Mapping[str, FieldType], systems: Collection[str]) -> l
         if isinstance(declared, ReferenceType) and declared.system not in systems:
             problems.append(
                 f"{name} is a reference to {declared.system}, which is not a registered system"
+            )
+        elif isinstance(declared, AttachmentType) and declared.store not in systems:
+            # A store is a system first: a typo in its name is caught as a reference's is (brief, D68).
+            problems.append(
+                f"{name} is an attachment in {declared.store}, which is not a registered system"
             )
         elif isinstance(declared, ListType):
             # A list's records may hold references too: `documents.document_id`.

@@ -50,10 +50,45 @@ def imported_modules(source: str) -> list[str]:
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             modules += [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
+        elif isinstance(node, ast.ImportFrom) and not is_the_date_alone(node):
             # A relative import keeps its dots (`..temporal`, or `..` alone), so it can be reported.
             modules.append("." * node.level + (node.module or ""))
     return modules
+
+
+def is_the_date_alone(node: ast.ImportFrom) -> bool:
+    """Whether `node` is exactly `from datetime import date`: the one thing a pure layer may take
+    from `datetime`, a day as a value (brief, D66). Not renamed, so `date.today` can be seen."""
+    return (
+        node.level == 0
+        and node.module == "datetime"
+        and [(alias.name, alias.asname) for alias in node.names] == [("date", None)]
+    )
+
+
+# What reads a clock through a date or a moment, by name: `date.today()`, `datetime.now()`,
+# `date.fromtimestamp(t)` (which turns a moment into a day, in the machine's zone), and
+# `astimezone()` (which, given no zone, takes the machine's) (brief, D66).
+CLOCK_READS = {"today", "now", "utcnow", "fromtimestamp", "astimezone"}
+
+
+def clock_reads(source: str) -> list[str]:
+    """The clock-reading names `source` uses, as an attribute (`date.today`) or through `getattr`
+    with the name written out (`getattr(date, "today")`)."""
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Attribute) and node.attr in CLOCK_READS:
+            found.append(node.attr)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value in CLOCK_READS
+        ):
+            found.append(str(node.args[1].value))
+    return found
 
 
 def forbidden_calls(source: str) -> list[str]:
@@ -141,6 +176,49 @@ def test_pure_layers_may_not_import_a_side_door(layer: str, source: str) -> None
     assert forbidden_imports(layer, source) != []
 
 
+# A day is a value, so a pure layer may name it, and only it: `from datetime import date`. The
+# rest of `datetime` stays forbidden, a moment and a time zone included (brief, D66).
+def test_a_pure_layer_may_import_the_date_alone() -> None:
+    assert forbidden_imports("core", "from datetime import date\n") == []
+    assert forbidden_imports("case", "from datetime import date\n") == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import datetime\n",
+        "from datetime import datetime\n",  # a moment
+        "from datetime import date, timezone\n",  # the date, and something else beside it
+        "from datetime import date as day\n",  # renamed: `day.today()` would hide the clock
+        "from datetime import *\n",
+    ],
+)
+def test_anything_else_from_datetime_is_forbidden(source: str) -> None:
+    assert forbidden_imports("core", source) != []
+
+
+# The date carries a clock of its own, `date.today()`: the names that read one are forbidden in a
+# pure layer, as attributes and through `getattr` (brief, D66).
+@pytest.mark.parametrize(
+    ("source", "name"),
+    [
+        ("date.today()\n", "today"),
+        ("date.today\n", "today"),  # kept to call later
+        ("x.now()\n", "now"),
+        ("x.utcnow()\n", "utcnow"),
+        ("date.fromtimestamp(0)\n", "fromtimestamp"),
+        ("moment.astimezone()\n", "astimezone"),
+        ("getattr(date, 'today')()\n", "today"),
+    ],
+)
+def test_pure_layers_may_not_reach_a_clock_through_the_date(source: str, name: str) -> None:
+    assert clock_reads(source) == [name]
+
+
+def test_a_date_as_a_value_reads_no_clock() -> None:
+    assert clock_reads("date(2026, 10, 31) < day\nday.isoformat()\n") == []
+
+
 def test_pure_layers_may_not_open_a_file() -> None:
     assert forbidden_calls("with open('plan.json') as f:\n    f.read()\n") == ["open"]
 
@@ -214,11 +292,16 @@ def test_pure_layers_import_nothing_forbidden(layer: str) -> None:
             for path in files
             for name in forbidden_names(path.read_text())
         ]
+        + [
+            f"{path.relative_to(SRC)} reads a clock: .{name}"
+            for path in files
+            for name in clock_reads(path.read_text())
+        ]
     )
     assert violations == [], (
         f"ventoux.{layer} must run inside a Temporal workflow and in a plain test, and Temporal's "
         "replay needs the same decisions every time: so it reads no clock, no randomness and no "
-        f"I/O, and may not import {sorted(FORBIDDEN[layer])}, call {sorted(FORBIDDEN_CALLS)} or "
+        f"I/O, and may not import {sorted(FORBIDDEN[layer])} (from datetime, only `date`), read {sorted(CLOCK_READS)}, call {sorted(FORBIDDEN_CALLS)} or "
         f"use {sorted(FORBIDDEN_NAMES)}; and every import must name its layer (no relative "
         "imports). See docs/layers/00-repository.md, 01-catalog.md, 05-interpreter.md and "
         "06-temporal.md."

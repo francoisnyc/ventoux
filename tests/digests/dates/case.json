@@ -1,0 +1,107 @@
+{
+  "case": "claim",
+  "display": {
+    "title": "Insurance claim"
+  },
+  "fields": {
+    "policy_start": {
+      "type": "date",
+      "display": {
+        "title": "Policy start"
+      }
+    },
+    "incident_date": {
+      "type": "date",
+      "display": {
+        "title": "Date of the incident"
+      }
+    }
+  },
+  "steps": {
+    "assess": {
+      "kind": "task",
+      "display": {
+        "title": "Assess the claim"
+      },
+      "roles": [
+        "adjuster"
+      ],
+      "outcomes": {
+        "accept": {
+          "display": {
+            "title": "Accept the claim"
+          },
+          "sets": [
+            "incident_date"
+          ]
+        },
+        "deny": {
+          "display": {
+            "title": "Deny the claim"
+          }
+        }
+      }
+    },
+    "settle": {
+      "kind": "task",
+      "display": {
+        "title": "Settle the claim"
+      },
+      "roles": [
+        "adjuster"
+      ],
+      "requires": [
+        "assess"
+      ],
+      "when": {
+        "and": [
+          {
+            ">=": [
+              {
+                "var": "incident_date"
+              },
+              {
+                "var": "policy_start"
+              }
+            ]
+          },
+          {
+            "<": [
+              {
+                "var": "reported.on"
+              },
+              {
+                "date": "2027-01-01"
+              }
+            ]
+          }
+        ]
+      },
+      "outcomes": {
+        "settled": {
+          "display": {
+            "title": "Claim settled"
+          }
+        }
+      }
+    }
+  },
+  "events": {
+    "reported": {
+      "display": {
+        "title": "The customer reports the claim"
+      },
+      "sent_by": {
+        "system": "portal"
+      },
+      "payload": {
+        "on": {
+          "type": "date",
+          "display": {
+            "title": "Reported on"
+          }
+        }
+      }
+    }
+  }
+}

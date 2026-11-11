@@ -17,6 +17,7 @@ from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflow
 # apart; modules passed through are imported once and shared. `core` is deterministic (the
 # boundary test holds it to that), so it is shared.
 with workflow.unsafe.imports_passed_through():
+    from ventoux.case.recording import plan_decisions
     from ventoux.core.before_activity import Steering
     from ventoux.core.catalog import Catalog
     from ventoux.core.history import Refused
@@ -33,6 +34,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.core.provenance import sourced
     from ventoux.core.sensitive import Sensitive
     from ventoux.temporal.activities import OUTCOME
+    from ventoux.temporal.carried import decision_as_data
     from ventoux.temporal.options import activity_options
 
 
@@ -84,6 +86,9 @@ class RunReport:
     # the case to flag as it flags a step's run (brief, D10), never hidden (brief, D28):
     # `payments.refund@2 completed after the close was requested`.
     after_stop: list[str] = field(default_factory=list[str])
+    # What the run decided, as audit decisions, each as data: its case records them with the
+    # plan step's end (brief, D77). A report recorded before 19b has none.
+    decisions: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
 
 
 @dataclass
@@ -173,15 +178,23 @@ class PlanWorkflow:
     @workflow.query(name="report")
     def report(self) -> RunReport:
         """How the run is going: its history so far, and the wait open for an answer, if any."""
+        decided = [decision_as_data(each) for each in plan_decisions(self.record.history)]
         if self.cancelled:
             history = [str(event) for event in self.record.history]
-            return RunReport("cancelled", self.stop_reason, history, after_stop=self.after_stop)
+            return RunReport(
+                "cancelled",
+                self.stop_reason,
+                history,
+                after_stop=self.after_stop,
+                decisions=decided,
+            )
         status = self.record.status or ("waiting" if self.waiting else None)
         return RunReport(
             status,
             self.record.reason,
             [str(event) for event in self.record.history],
             self.open if self.waiting else None,
+            decisions=decided,
         )
 
     async def run(self, start: PlanStart) -> RunReport:

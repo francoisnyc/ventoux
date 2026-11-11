@@ -9,10 +9,10 @@ replay is done, off the event loop and within a bound, as a worker's activity th
 
 from collections.abc import Sequence
 
-from activity_threads import activity_threads
 from temporalio.client import WorkflowHistory
 from temporalio.converter import DataConverter
 from temporalio.worker import Replayer
+from worker_threads import worker_threads
 
 from ventoux.temporal.sandbox import SANDBOX
 
@@ -22,7 +22,7 @@ async def replay_history(
 ) -> None:
     """Replay `history` against `workflows`, as a worker would after a restart, with the converter
     that recorded it. A replay that fails raises; its threads are shut down either way."""
-    async with activity_threads() as threads:
+    async with worker_threads() as threads:
         replayer = Replayer(
             workflows=workflows,
             data_converter=converter,

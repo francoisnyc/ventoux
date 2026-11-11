@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.enums.v1 import EventType
@@ -45,6 +44,7 @@ from test_temporal_case import (
     runs_of,
     unapproved_refund_order,
 )
+from worker_threads import worker_threads
 
 from ventoux.case.releases import Hash, Record
 from ventoux.case.state import CaseState
@@ -104,7 +104,7 @@ def test_an_unknown_engine_version_waits_for_its_code() -> None:
     # retries until code that knows it is deployed: the case waits, never decided as an older
     # version, never failed for good (brief, D17, D51).
     async def scenario(client: Client) -> tuple[list[str], bool]:
-        carried = state_as_data(CaseState("refund-1/run-1")) | {"engine": 3}
+        carried = state_as_data(CaseState("refund-1/run-1")) | {"engine": 4}
         case = await client.start_workflow(
             DevelopmentCases.run,
             CaseStart(REFUND, {}, None, carried),
@@ -172,13 +172,14 @@ def test_a_case_opens_on_its_release(tmp_path: Path) -> None:
         return now, await case.fetch_history()
 
     now, history = on_temporal(scenario)
-    assert (now.release, now.engine) == ("refund 1", 2)
+    assert (now.release, now.engine) == ("refund 1", 3)
     assert now.history[:2] == [
-        "opened on refund 1, engine 2",
+        "opened on refund 1, engine 3",
         "opened by system:opener, with amount and order_id",
     ]
-    # Version 2 is a patch marker, written once at the opening (brief, D51) (brief, D52).
-    assert markers_of(history) == ["ventoux-engine-2"]
+    # Version 3 is a patch marker, written once at the opening: asked newest first, the first
+    # yes ends the asking (brief, D51) (brief, D77).
+    assert markers_of(history) == ["ventoux-engine-3"]
 
 
 def test_a_draft_is_as_before() -> None:
@@ -188,10 +189,10 @@ def test_a_draft_is_as_before() -> None:
         return now, await case.fetch_history()
 
     now, history = on_temporal(scenario)
-    assert (now.release, now.engine) == ("draft", 2)
+    assert (now.release, now.engine) == ("draft", 3)
     assert now.history[0] == "opened by system:opener, with amount and order_id"
-    # The engine decides a draft too: its version's marker is its one difference (brief, D52).
-    assert markers_of(history) == ["ventoux-engine-2"]
+    # The engine decides a draft too: its version's marker is its one difference (brief, D77).
+    assert markers_of(history) == ["ventoux-engine-3"]
 
 
 def test_a_start_that_isnt_its_release_is_refused(tmp_path: Path) -> None:
@@ -260,7 +261,7 @@ def test_the_release_and_engine_cross_continue_as_new(tmp_path: Path) -> None:
         cases=EveryEventCases,
     )
     assert waited == "approve_refund#1"
-    assert (ended.status, ended.release, ended.engine) == ("closed", "refund 1", 2)
+    assert (ended.status, ended.release, ended.engine) == ("closed", "refund 1", 3)
     assert "settle#1 done" in ended.history
 
 
@@ -422,7 +423,7 @@ def test_the_guides_release_example_runs_as_written(tmp_path: Path) -> None:
 
     now = on_temporal(scenario)
     assert now.history[: len(shown)] == shown
-    assert (now.release, now.engine) == ("refund 1", 2)
+    assert (now.release, now.engine) == ("refund 1", 3)
 
 
 # --- From the tutor review: a continued run that can't read its start waits for its code ---
@@ -454,7 +455,7 @@ def test_a_continued_run_whose_digest_changed_waits_for_its_code(tmp_path: Path)
     async def scenario() -> tuple[list[str], bool, CaseReport]:
         async with (
             time_skipping(development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
         ):
             client = environment.client
 

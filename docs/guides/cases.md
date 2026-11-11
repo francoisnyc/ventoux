@@ -345,6 +345,12 @@ A step waiting for an event from outside is listed the same way, with who sends 
 A timer that is set keeps the case open too, but waits on nobody: it is listed in `timers`, not
 `waiting_for` ("Rules on time", below).
 
+A required step that hasn't run is listed too, with who may start it: `confirm, required,
+proposed by support` ("Required steps", at the end of this guide).
+
+Who is asked to answer each open entry, and who holds it, is in "Who is asked: claiming and
+assigning tasks", at the end of this guide.
+
 ## When a system says no
 
 A business failure is an answer, not an error (brief, D17). `payments.refund@2` declares the
@@ -467,7 +473,8 @@ as a payment, the new run's new key could make them happen twice (brief, D17, D2
 
 ## Closing a case
 
-A case closes by itself when nothing is left to do (brief, D10). If it declares `closes_when`
+A case closes by itself when nothing is left to do (brief, D10), and every required step is done
+("Required steps"). If it declares `closes_when`
 and closes that way without reaching it (a failed payment skipped, say), its last line says
 which it didn't reach: `closed: nothing left to do; paid not reached`. Two definition keys change
 that:
@@ -553,6 +560,10 @@ apply; then again when it is approved, against the case as it is then. An edit i
 
 - of a field the case doesn't declare, such as an outcome or a step's output, which record what
   happened: `pay.outcome is not a field of refund: only a declared field is edited`;
+- of an option or an attachment (case-data guide, "Options" and "Attachments"), which only a
+  person's answer gives, where its system checks it: `branch is an option of branches, given only
+  by a person's answer, where branches checks it: an edit is never checked, so give it in the
+  answer to the task that sets it`;
 - of a field that holds no value yet: `approved_amount holds no value yet: an edit changes a
   value, never gives the first`;
 - with a value of another type, as an answer's form is: `approved_amount is a number, and the
@@ -1860,15 +1871,19 @@ guide), and the code behind each contract:
 from concurrent.futures import ThreadPoolExecutor
 
 from ventoux.temporal.worker import case_worker
+from ventoux.tooling.audit import FileAudit
 
 with ThreadPoolExecutor() as activity_executor:
     worker = case_worker(client, "refunds", RefundCases, RefundPlans,
-                         {"payments.refund@2": refund, ...}, activity_executor=activity_executor)
+                         {"payments.refund@2": refund, ...}, activity_executor=activity_executor,
+                         audit=FileAudit("audit/"))
     await worker.run()
 ```
 
 The executor is yours, as with a plan worker (the plans guide): the `with` block shuts its threads
-down once the worker has stopped.
+down once the worker has stopped. `audit` is where the cases' records are written, apart from
+Temporal; `FileAudit` is for development, and the audit guide (`docs/guides/audit.md`) says what
+goes there and what a production store is.
 
 The client opens a case with its first values, answers it, and reads how it is going. The case's
 ID is the case: `refund-A-1001` names it for as long as it lives, and opening a second case with
@@ -1977,13 +1992,13 @@ case = await start_case(
     id="refund-A-1002", task_queue="refunds",
 )
 now = await report(case)
-assert (now.release, now.engine) == ("refund 1", 2)
+assert (now.release, now.engine) == ("refund 1", 3)
 ```
 
 Its history begins with the release and the engine version that decide it:
 
 ```
-opened on refund 1, engine 2
+opened on refund 1, engine 3
 opened by system:opener, with amount and order_id
 ```
 
@@ -2288,7 +2303,7 @@ Anything else is not a value: reading it is an error.
 | `ENGINE_INPUT` | error | a step gives the input the engine fills: the idempotency key | `idempotency_key is filled by the engine, never by a definition: remove it` |
 | `UNKNOWN_ROLE` | error | a role nobody registered: it counts for nothing when the case runs | `supprt is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, platform, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
 | `UNKNOWN_SOURCE` | error | a field is declared untrusted with a label nobody registered | `untrusted:custmer has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
-| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, kyc, orders, policies, portal; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are branches, crm, documents, kyc, orders, policies, portal; use one of them, or ask the platform team to register it` |
 | `EXPRESSION_INVALID` | error | an expression reads something that isn't a value, mixes types, or names an outcome that can't happen | as above |
 | `APPROVAL_REQUIRED` | error | a high-risk step has no approval | `payments.refund@2 is high risk, and pay has no approval: add one` |
 | `APPROVAL_ROLE` | error | a role on an approval may not approve the step's risk | `adjuster may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |
@@ -2480,8 +2495,11 @@ The format is published as JSON Schema, generated from the models the engine par
 front end in another language or a model drafting a definition (layer 15) can read what a case
 and a plan look like without reading Python (brief, D4, D60):
 
-- `schema/case.schema.json`: a `case.json`.
-- `schema/plan.schema.json`: a plan's file under `plans/`.
+- `case.schema.json`: a `case.json`.
+- `plan.schema.json`: a plan's file under `plans/`.
+
+Both are in the package, `ventoux/schema/` (`src/ventoux/schema/` in the repository), so an
+installed Ventoux holds the schemas it was built with (brief, D82).
 
 Both are draft 2020-12. Each names the format it describes in its `$id`, by the engine version
 that parses it (brief, D51): `https://ventoux.dev/schema/engine-2/case.schema.json` is the format
@@ -2509,3 +2527,541 @@ shapes is refused by both (`tests/test_schema.py`); if the two ever disagree, th
 least well-formed. Output that matches it is still a draft: read by the parser, checked by
 `ventoux check` against the deployment's catalog, reviewed in a pull request. The builder never
 runs on model output (brief, D58).
+
+## Who is asked: claiming and assigning tasks
+
+A task's `roles` say who **may** answer it. Its **assignee** says who is **asked** to. These are
+two separate things. The roles are a check, made on every answer. The assignee only decides
+whose list the task is on. An open task, or an open approval, that nobody holds is in its roles'
+**queue**: everyone with one of its roles sees it. Once someone holds it, it is on that person's
+list and nobody else's.
+
+**An assignment never lets anyone answer what they couldn't answer before.** Being asked grants
+nothing. Every check an answer passes, it still passes (D9, D11, D30, D47). So a claim or an
+assignment is refused at once when the engine can already tell the person couldn't answer the
+entry:
+
+```
+ana may not claim pay.approval#1: ana set approved_amount, which pay uses, so cannot approve it
+```
+
+### Claiming, giving back, assigning
+
+There are three acts. Each is a message from the Ventoux API, carrying the person and their
+roles, like an answer (D22). Each is a line in the case's history:
+
+```python
+run = run_case(
+    refund,
+    file={"order_id": "ord-1", "amount": 250},
+    answers=[claim("review#1", "ana")],
+    people=PEOPLE,
+)
+assert run.waiting_for == ["review by support"]
+assert run.assignees == {"review#1": "ana"}
+```
+
+```
+started review#1: waiting for approve or reject by support
+ana claimed review#1 as support
+```
+
+- **Claim:** a person with one of the entry's roles takes an entry nobody holds. A claim by
+  someone without the role is refused: `omar may not claim review#1: review#1 is answered by
+  support, and omar has operations`. So is a claim of an entry someone already holds: `ana
+  holds review#1; ask someone who assigns to reassign it`.
+- **Give back:** the holder returns the entry to its queue: `give_back("review#1", "ana")`.
+  Only the holder may give an entry back.
+- **Assign, reassign, return to the queue:** someone whose role assigns moves an entry, whoever
+  holds it ("Assigning", below).
+
+**A held entry is answered by its holder.** While Ana holds `review#1`, an answer from Sam is
+refused, even though he has `support`: `ana holds review#1: ask ana to give it back, or someone
+who assigns to reassign it`. This is how an assignment narrows who may answer. It can only
+narrow, never widen.
+
+**An approval needing several people can't be held.** With `count: 2` (D47), one entry needs two
+people, so nobody holds it: it stays in its queue, and a claim is refused saying so: `pay.approval#1
+needs 2 people, so nobody can hold it`.
+
+**The engine never looks a person up** (D22). It learns someone's roles only when they act. If
+Ana loses `support` while she holds the review, the engine doesn't know. Her answer is then
+refused for lack of the role, the entry stays hers, and the case says so. A support-lead
+reassigns it.
+
+### Assigning, reassigning, returning to the queue
+
+A claim takes work for yourself; an **assigner** moves work between people. Assigning is a role
+the platform team registers, like operating or editing (D26, D52):
+`register_role("support-lead", approves="high", assigns=True)`. No case names its assigners. Someone whose role assigns may move any open task or approval of the
+case, held or not, in one of three ways:
+
+- **assign** an entry nobody holds to someone: `assign("review#1", "sam", by="lee")`;
+- **reassign** a held entry to someone else, without its holder: the same call, while Ana holds it;
+- **return it to its queue**, without its holder: `unassign("review#1", by="lee")`.
+
+So an entry whose holder has left can always be freed. Ana claims the review and goes on leave;
+Lee, who leads the team, gives it to Sam:
+
+```python
+run = run_case(
+    refund,
+    file={"order_id": "ord-1", "amount": 250},
+    answers=[claim("review#1", "ana"), assign("review#1", "sam", by="lee")],
+    people=PEOPLE,
+)
+assert run.assignees == {"review#1": "sam"}
+```
+
+```
+ana claimed review#1 as support
+lee assigned review#1 to sam as support-lead, from ana
+sam answered review#1 approve as support, setting approved_amount
+```
+
+or returns it to its queue for whoever comes first:
+
+```
+lee returned review#1 to its queue as support-lead, from ana
+```
+
+**The assigner moves work; they don't answer it.** Lee can't answer the review (it needs
+`support`) and may still give it to Sam. What she needs is a role that assigns. Anyone else is
+refused: `ana may not assign review#1: assigning is done by support-lead, and ana has support`.
+
+**The assignee is checked as a claim is.** Being assigned grants nothing, so the person named
+must be able to answer the entry. The Ventoux API states their roles with the assignment, as it
+states the assigner's (D22), and the engine records both. An assignment to someone who couldn't
+answer is refused in the words their answer would be: `lee may not assign review#1 to omar:
+review#1 is answered by support, and omar has operations`. So is an assignment to the entry's
+current holder, which would change nothing, and an assignment of an approval needing several
+people, which nobody holds.
+
+**Nobody chooses their own judge.** Whoever may not approve a step may not assign its approval
+either. Sam set `approved_amount`, so he can never approve `pay`; if he could hand `pay`'s
+approval to the colleague he expects to approve it, he would be choosing who judges his own
+decision. So, even though Sam's `support-lead` role assigns:
+
+```
+sam may not assign pay.approval#1: sam set approved_amount, which pay uses, so cannot approve it
+```
+
+He may still assign any other entry, the review included.
+
+### When an entry is asked again
+
+An open approval is withdrawn when a value its step reads changes, and asked again as a new
+entry (D25). The new entry keeps the old one's holder, saying so, as long as the holder could
+still answer it. If the new values exclude them (they set one of them, for example), the new
+entry goes back to its queue, saying why. Say Sam holds `pay.approval#1`, the review is sent
+back, and this time Sam, who has `support` too, answers it:
+
+```
+withdrew pay.approval#1: review started again
+sam answered review#2 approve as support, setting approved_amount
+review#2 done
+asked pay.approval#2: approval of pay by support-lead
+pay.approval#2 back in its queue: sam set approved_amount, which pay uses, so cannot approve it
+```
+
+A migration to a new release keeps each holder who could answer their entry there. If the new
+release names other roles, the entry goes back to its queue, saying why: `review#1 back in its
+queue: review#1 is answered by fraud, and ana has support`.
+
+Answering a task again, a stop or a close ends the entry, and with it the assignment. A closed
+case's tasks are cancelled, and their holders see why (D10).
+
+### Assignment rules
+
+The definition can name who is asked when each entry opens, with `assign`, on a task step or on
+an approval. A follow-up that goes to whoever did the review:
+
+```json
+"follow_up": {
+  "kind": "task",
+  "display": {"title": "Follow up with the customer"},
+  "roles": ["support"],
+  "outcomes": {"done": {"display": {"title": "Done"}}},
+  "requires": ["review"],
+  "assign": {"to": "answered", "step": "review"}
+}
+```
+
+Read aloud: *each follow-up is asked of whoever answered the review.* When `follow_up#1` opens,
+the engine finds that Ana answered the review, checks that Ana could answer the follow-up, as a
+claim is checked (D69), and makes her its holder:
+
+```
+started follow_up#1: waiting for done by support
+follow_up#1 assigned to ana by its rule
+```
+
+**A rule picks only people the case already knows,** each named by the trusted caller (D19, D22):
+
+- `{"to": "opener"}`: the person who opened the case;
+- `{"to": "answered", "step": "review"}`: whoever last answered that task.
+
+Nobody's identifier is typed into a definition, and no field's value picks anyone, so untrusted
+data never routes work: a customer's email can't send their refund to a friend.
+
+**A rule never stops a case.** If it finds nobody (a system opened the case, or the review hasn't
+been answered), or the person it finds couldn't answer the entry, the entry is in its queue,
+saying why: `follow_up#1 in its queue: its rule found nobody: review hasn't been answered`.
+
+**An approval's rule** is written inside the approval, `"approval": {"roles": [...], "assign":
+{...}}`. When an approval is asked again (D25), a holder kept from the old entry (D69) stays; the
+rule picks only when nobody is kept. An approval needing several people (`count` above 1) can't
+have a rule, since nobody holds it: `ventoux check` refuses it (`ASSIGNS_SEVERAL`).
+
+**`ventoux check` refuses a rule that can only pick people who can never answer.** On an approval
+this can be proven from the definition: the exclusions come from provenance (D11). `pay`'s
+approval asked of whoever answered the review, whose answer sets what `pay` sends, or of the
+opener, who approves nothing. `pay`'s `when` reads `review.outcome`, so whoever answered the
+review is excluded from approving it in every run:
+
+```
+ASSIGNS_EXCLUDED  steps.pay.approval.assign: whoever answered review is excluded from approving
+                  pay in every run, since pay reads review.outcome; leave the approval to its
+                  queue, or ask whoever answered another task
+```
+
+On a task it can't be: whether the reviewer also has the follow-up's role is a staffing fact the
+engine never looks up (D22), so a mismatch is found when the entry opens, and it goes to its
+queue. A rule naming a task that may not have been answered when the entry opens is a warning
+(`MAY_ASSIGN_NOBODY`): it can be right, but it may find nobody.
+
+**In the diff and the plain forms.** The case map reads the rule aloud ("Each run is asked of
+whoever answered review."; for an approval, "Each approval is asked of …"). Since a held entry is answered only by its holder, an added `assign`
+narrows who may answer, so the semantic diff reads it as stricter; a removed one as looser; a
+changed one as a doubt, so looser (D55). The builder writes it `assign=Assign.answered(review)`
+or `Assign.opener()` (builder guide, "Who is asked"), and the JSON Schema publishes its shape.
+
+### What the report shows
+
+`assignees` maps each open entry someone holds to its holder. An entry in its queue is absent.
+`waiting_for` doesn't change: it says *what* the case waits for (`review by support`), the same
+to everyone, naming nobody (D24). The history tells every claim, give-back, assignment and
+reassignment in order, naming people, roles and entries, never a value.
+
+## Required steps
+
+A case closes by itself when nothing is left to do (brief, D10): no task open, nothing running,
+nothing failed. That says nothing about work that never started. Say every refund ends with
+support confirming the outcome with the customer, whatever the review decided, once they have
+spoken to them. Proposed by a person, the step is not pending work until someone proposes it, so
+a rejected refund would close at once, with nobody told. `closes_when` doesn't help, since it only
+closes a case early, and `stays_open` keeps every refund open until a person closes it by hand.
+
+Mark the step **required**:
+
+```json
+"confirm": {
+  "kind": "task",
+  "display": {"title": "Confirm the outcome with the customer"},
+  "roles": ["support"],
+  "outcomes": {"confirmed": {"display": {"title": "Outcome confirmed"}}},
+  "requires": ["review"],
+  "automatic": false,
+  "proposed_by": ["support"],
+  "required": true
+}
+```
+
+Now **nothing left to do** also means that every required step's latest run is done. Until it
+is, the case stays open, and `waiting_for` says what it still owes, and who may start it:
+
+```python
+rejected = run_case(refund_confirmed, file={"order_id": "ord-1", "amount": 250},
+                    answers=[("review", "reject", "ana")], people=PEOPLE)
+assert rejected.waiting_for == ["confirm, required, proposed by support"]
+assert not rejected.closed
+
+confirmed = run_case(refund_confirmed, file={"order_id": "ord-1", "amount": 250},
+                     answers=[("review", "reject", "ana"), propose("confirm", "ana"),
+                              ("confirm", "confirmed", "ana")], people=PEOPLE)
+assert confirmed.closed
+```
+
+A requirement holds back only the case closing **by itself**:
+
+- **`closes_when` waits for it too.** With every milestone reached and a required step not done,
+  the case doesn't close, as for a failed run (brief, D26); nothing new starts but the required
+  step, and the case closes once it is done.
+- **A person still closes the case** with a declared close reason, as ever: a requirement never
+  traps a case. The last line says what was owed: `closed: duplicate, by ana; confirm not done`.
+- **A run a rule stopped,** or a rejected one, isn't done (brief, D40): the step is owed still,
+  and the case waits for it to run again. Until a requirement it waits for is met, and once
+  nothing else is pending, `waiting_for` says so: `confirm, required, after pay`. A step only a
+  rule starts reads `confirm, required, started by a rule`.
+- **An owed step that can no longer start needs attention.** Say `confirm` requires `pay`, and
+  Sam rejects the payment's approval: `pay` isn't repeatable, so it never runs again, and
+  `confirm` can never start. The case doesn't pretend to wait: `needs_attention` says `confirm:
+  required, and it can't start: confirm requires pay, which hasn't completed: close the case
+  with a reason`, and only a person's close ends it. The same holds for an owed step that has run
+  and isn't repeatable, and, while `closes_when` holds the close, for one whose requirement
+  nothing is on its way to meet, since nothing else starts then. A requirement is on its way if
+  its run is under way, if it is a milestone a step under way will reach (an open review that
+  reaches `reviewed`), or if it is owed itself and can still start, since the held close lets an
+  owed step start.
+- **A failed run** needs attention, as any other (brief, D17): an operator retries it, or closes
+  the case. Skipping a failed run of a required step is refused, since a skip would end the
+  case's obligation without anyone doing it: `confirm is required, so its run is never skipped:
+  retry it, or close the case with a reason`.
+- **A required step has no `when`.** It is owed in every case; a step owed only sometimes is
+  started by a rule, or proposed, and isn't required.
+
+**`ventoux check` proves each required step can still be done.** It refuses a required step
+nothing can ever start, as it refuses any step that can never run: `confirm can never run: it
+requires reported, which no step or rule reaches: reach reported from a step or a rule, or remove
+the requirement`.
+
+It warns, with `REQUIRED_MAY_STRAND`, about a required step that may be left owed with nothing
+able to start it: a warning, since the rule may never fire, and the approval may be given. Once
+per step, the first of:
+
+- a rule may stop it, or its approval may be rejected, and it can't run again: `a rule may stop
+  confirm, and it is required, so it might never run again: make it repeatable and proposed_by a
+  role, or start it from a rule`;
+- a step it requires may end that way: `confirm requires pay, whose approval may be rejected, and
+  which might never run again; confirm is required, so it might never start: make pay repeatable
+  and proposed_by a role, or start it from a rule`;
+- a step it requires may not be done when a `closes_when` milestone is reached, after which
+  nothing but the owed step starts: `confirm requires check, which may not be done when logged
+  is reached, and nothing but confirm starts then; confirm is required, so it might never start:
+  make what reaches logged require check, or remove logged from closes_when`. A requirement that
+  is required itself, or that starts by itself at the opening (requiring nothing, with no
+  condition) and can't end undone, is on its way or done by then, and isn't warned about.
+
+The case map says what is owed, on the step (`The case owes it: it doesn't close by itself
+until confirm is done.`) and in how the case closes (`It closes when nothing is left to do and
+confirm is done.`). The diff says a change of `required` and leaves its verdict to a person,
+`not proven` either way, as for `closes_when` and `stays_open`: turned on, the case does more
+before it closes by itself, but it also takes what the other version refuses, such as a proposal
+of the owed step after a rejected review, which a closed case refuses.
+
+"Can run again" is read from the definition: the step is repeatable, and a role proposes it or a
+rule starts it. "Done before the milestone" is proven only when every step that reaches it
+requires the step, directly or through what it requires, and no rule reaches it; anything less
+is warned about.
+
+## Repeated steps: one run per item
+
+A **repeated step** runs once for each item of a list in the case file, each run given its own
+item. Here a customer returns an order line by line: support inspects each line, and a letter is
+drafted for each, for a person to review:
+
+```json
+"fields": {
+  "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}},
+  "email": {"type": "string", "display": {"title": "Customer email"}},
+  "lines": {"type": "list", "display": {"title": "Returned lines"},
+            "fields": {"sku": {"type": "string"}, "amount": {"type": "number"}}}
+},
+"steps": {
+  "inspect_line": {
+    "kind": "task",
+    "display": {"title": "Inspect a returned line"},
+    "roles": ["support"],
+    "for_each": {"over": "lines", "key": "sku"},
+    "outcomes": {"received": {"display": {"title": "Received"}},
+                 "missing": {"display": {"title": "Missing"}}}
+  },
+  "draft_line": {
+    "kind": "activity",
+    "display": {"title": "Draft a letter about one line"},
+    "activity": "letters.draft@2",
+    "for_each": {"over": "lines", "key": "sku"},
+    "inputs": {"to_customer": {"var": "email"}, "template": "line-returned"}
+  }
+}
+```
+
+**A list is given at the opening,** at most 100 items. Each item is a record holding exactly the
+list's declared fields, each of its type; anything else is refused, saying the type, never the
+value. An event never carries a list, and a rule never sets one. Every value in the list comes
+from whoever gave it, with their sources: a list the customer typed leaves every line
+`untrusted:customer`.
+
+**Each run reads its own item** as `each.<field>`, such as `each.amount`. (`item` is what `sum`
+and `count` call their own element, so a repeated step's item has its own word; `each` is never
+the name of a field, step, milestone or event.)
+
+**Each run is named by a number, never by its position or its value.** The engine gives each key
+(the field `key` names, here `sku`) a number the first time it sees it: A12 is item 1 and B7 item
+2, so the drafts are `draft_line.1#1` and `draft_line.2#1`. The name goes into the run's
+idempotency key (brief, D17), so reordering the list never gives one line's letter another line's
+key; and no history line quotes a value (brief, D30). A list whose items repeat a key, or lack
+one, fails the step, which needs attention: nothing guesses which line is which.
+
+```python
+lines = [{"sku": "A12", "amount": 40}, {"sku": "B7", "amount": 25}]
+run = run_case(order_return, file={"order_id": "ord-1", "email": "ana@example.com",
+               "lines": lines}, answers=[], people=PEOPLE)
+drafts = [line for line in run.history if line.startswith("scheduled draft_line")]
+assert [line.split(":")[0] for line in drafts] == [
+    "scheduled draft_line.1#1", "scheduled draft_line.2#1"]
+assert [line.split(", key ")[1] for line in drafts] == [
+    "memory/draft_line.1#1", "memory/draft_line.2#1"]
+```
+
+A repeated step **starts by itself**, a run for each item: nobody proposes it, it isn't
+repeatable, and no rule starts it, since a proposal or a start names a step, never an item. A
+rule's stop stops every open run of it; an operator retries one failed run by its entry
+(`draft_line.1#1`).
+
+Reading a repeated step from elsewhere:
+
+- **`requires: ["inspect_line"]`** is met once every item's latest run is done; with no items, at
+  once, and the history says so.
+- **`inspect_line.outcome`** and its outputs are refused: with several runs there is no one
+  outcome.
+- **A required repeated step** owes a done run for every item (see "Required steps").
+
+A repeated step may have a `when`, read for each run with its item: `{">": [{"var":
+"each.amount"}, 30]}` drafts only the lines over 30. On a list the customer typed, that keeps some
+lines from being drafted on untrusted data, which is allowed but never silent (brief, D48):
+`ventoux check` warns (`KEPT_FROM_STARTING`), and as the case closes the history names each line
+kept, by number: `draft_line.2 not started: its condition reads each.amount, from
+untrusted:customer, and is false`.
+
+**For now** (brief, D48) (brief, D73), each a door for later:
+
+- a repeated step has no approval, so a high-risk contract such as `payments.refund@2` is never
+  repeated: `payments.refund@2 is high risk, and draft_line is repeated, so it can have no
+  approval: repeat a low-risk step, or pay once`;
+- an edit never changes a list a step repeats over (see "Changing an open case"): `lines is the
+  list inspect_line repeats over, so it is never edited: close the case and open it again with
+  the list corrected`;
+- a repeated step reaches no milestone, sets no field from its answer, needs no fact fresh, and
+  is asked of its queue: each assumes one run per step;
+- a list is given only at the opening: never by a person's form, and never sensitive;
+- items that share a key fail the step, and its retry is refused, since the list never changes:
+  close the case.
+- a migration whose target repeats a step over another list or by another key is refused once
+  the step has runs: its items' numbers can't follow a new key.
+
+`ventoux check` refuses `for_each` over a field that isn't a list (`steps.draft_line.for_each:
+order_id is a reference, not a list: a step repeats over a list field`), a key that isn't a text
+field of the list's items, and a repeated step that is a plan, a workflow or a wait.
+
+## Child cases
+
+A **child case** is a whole case started from a step of another: its own case file, people and
+closing, and when it closes, a report to its parent. Use one where work has a life of its own:
+a claim sends the vehicle to a garage, whose repair is assigned, chased and closed by other
+people, over weeks. Here the claim's `repair` step opens a `repair` case once the claim is
+assessed, and `pay_garage` pays what the repair cost:
+
+```json
+"repair": {
+  "kind": "case",
+  "display": {"title": "Repair the vehicle"},
+  "case": "repair@3",
+  "requires": ["assessed"],
+  "inputs": {"vehicle": {"var": "vehicle"}, "budget": {"var": "payout"}}
+},
+"pay_garage": {
+  "kind": "activity",
+  "display": {"title": "Pay the garage"},
+  "activity": "payments.refund@2",
+  "requires": ["repair"],
+  "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "repair.cost"}},
+  "approval": {"roles": ["support-lead"], "display": {"reason": "Every payout needs a team lead"}}
+}
+```
+
+**A child case is named with its release,** `repair@3`, as a plan is. The release is the
+claim's: `repair 3` is in the claim's package, so in its digest, and the claim's diff shows a
+change to it. Activating the claim checks that `repair 3` is activated in the environment, not
+retired, with the digest the claim's package gives it, on the claim's queue, every problem said at
+once (`claim 1 pins repair 3, which production never activated`; see the releases guide, "A case
+in an environment"). The child opens on `repair 3` whichever repair release is active, so
+activating `repair 4` breaks no claim; and `repair 3` isn't retired while a claim release still
+in use pins it (`repair 3 not retired: claim 1, active in production, pins it`). The child asks
+the registry again as it opens; one refused all the same fails the step, needing attention:
+`repair#1: repair@3 refused its opening: claim-7/repair#1 can't open on repair 3: repair 3 is
+retired in production`. A new garage process reaches claims by releasing the claim too, never on
+its own.
+
+**What the child is given.** Its `inputs` are the child's opening fields, read from the parent's
+case file, each with its sources, as a plan step's are (brief, D28): a budget an adjuster set is
+still that adjuster's in the child, so the child's own checks judge where it really came from.
+The child is opened by its parent case, recorded as such, never by a person. Who may not approve
+crosses too: the person who opened the claim, and the person who proposed the step, approve
+nothing in the repair (brief, D25). A child case has no `approval` of its own; its steps carry
+theirs. A sensitive value is given only to a field the child keeps sensitive too, and
+the check refuses anything else: a view can hide more than its source, never less.
+
+**One subject, one key.** The child is sealed under its parent's key (brief, D31): a sensitive
+input crosses sealed, never opened. Forgetting the claim forgets its repair with the same request,
+and a repair is never forgotten alone: `repair#1 is a child of claim-7: forget claim-7, which
+forgets it too`. The family keeps its records as strictly as any of its cases: a claim whose
+repair says `forgetting: never` is never forgotten.
+
+**What comes back.** The child's definition says what its report carries, in `reports`:
+
+```json
+"reports": ["cost"]
+```
+
+When the child closes, the step is done, and the parent reads the report as the step's outputs:
+`repair.outcome` (`done`, or the reason a person closed the repair with) and `repair.cost`; the
+milestones the repair reached are in the step's history line. Each value keeps the sources it had
+in the child and gains `case:repair`, saying where it came from. A close reason is the person's
+who chose it, as a task's answer is: `person:lee, case:repair`, so lee approves nothing that
+outcome decides. Nothing else crosses back, and a child never writes into its parent's case file:
+the parent decides what a report changes, with its own steps and rules.
+
+In a test, `cases` gives the child definitions by name and release, as `plans` gives plans, and
+`case_answers` gives each case step's child its own script, as `answers` does:
+
+```python
+run = run_case(
+    claim_with_repair,
+    file={"order_id": "ord-1", "vehicle": "veh-9"},
+    answers=[("assess", "accept", "ana", {"payout": 900})],
+    cases={"repair@3": repair},
+    case_answers={"repair": [("fix", "fixed", "lee", {"cost": 640})]},
+    people=PEOPLE,
+)
+assert run.reached("repair")
+```
+
+```
+started repair#1: case repair@3 (vehicle from system:opener; budget from person:ana), run memory/repair#1
+repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost
+asked pay_garage.approval#1: approval of pay_garage by support-lead
+```
+
+A child whose script isn't finished keeps the step running, and the parent open: its
+`waiting_for` has one line for it, `repair#1: case repair, open`. The child's own tasks are the
+child's, listed in its own report, since those who see the claim may not see the repair. A
+reported field the child never set (a repair closed as a duplicate has no cost) is absent, and
+whatever reads it fails, so branch on `repair.outcome` first; `ventoux check` warns where a reader
+may find it unset.
+
+**While the child runs,** it is the child's:
+
+- **A child that needs attention** is retried by its own operators, there; the parent waits. Only
+  a failure to *start* the child (its release refused as it opens, inputs refused) is the
+  parent's step failing, retried in the parent. A retry never starts a second child once one has run.
+- **When the parent closes, or a rule stops the step,** the child is closed too, saying why
+  (`closed by its parent: duplicate, by ana`): its tasks are cancelled, its running activities
+  finish, and the parent closes once the child has ended. A close never waits for a person.
+- **A parent that migrates** leaves its child on its own release: the target must start the same
+  `repair@3` from that step, or the migration waits for the child to end.
+- **A parent that continues as new** doesn't wait for its child: the report reaches the parent's
+  latest run.
+- **A child that ends without reporting** (terminated from outside, failed, timed out) fails the
+  step, never waited for in silence: `repair#1: repair@3 ended without reporting: it was
+  terminated: look at the child, then retry or close`. On Temporal the run that started the
+  child hears it at once; a later run asks each open child as it starts, and every day.
+
+**One level only.** A child case's definition has no case step of its own (a deliberate limit,
+brief, D48): one close then reaches everything it must, and no case starts itself. `ventoux check`
+refuses it (`steps.repair.case: repair@3 has a case step, order_parts: a child case opens no
+case of its own`), and refuses an input the child doesn't take at its opening, or of another type.
+It reads the child's input policies with the sources the claim gives its opening: a vehicle the
+customer typed, given to a repair that drafts a letter to it, is refused at the claim's input
+(`steps.repair.inputs.vehicle: repair@3, in its step tell: letters.draft@2 takes to_customer only
+from a system or a person, …`), before any case opens.

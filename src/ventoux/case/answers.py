@@ -81,24 +81,7 @@ def judge_approval(
     # An approver judges what they see: approve or reject, never values hidden from them
     # (brief, D30).
     refuse_unless(unseen(case, catalog, answer, name, step))
-    # The person who opened the case approves none of its steps (brief, D11).
-    if answer.by == state.opened_by:
-        raise AnswerRefused(f"{answer.by} opened the case, so cannot approve its steps")
-    # Nor does the person who proposed this run: their proposal decides that it runs (brief, D25).
-    if answer.by == state.proposers.get(name):
-        raise AnswerRefused(f"{answer.by} proposed {name}, so cannot approve it")
-    # Nor does anyone whose answer the condition of the rule that started it read: it decided
-    # that the step runs (brief, D11) (brief, D39). Kept with the run, since a rule remembers
-    # nothing: a value changed since still excludes them.
-    asked = state.proposed_by_rules.get(name)
-    if asked is not None and answer.by in asked.read_from:
-        raise AnswerRefused(decided_by(answer.by, asked.read_from[answer.by], asked))
-    # A retried run is the same run: whoever its first start excluded still can't approve it,
-    # though the proposal behind it is spent (brief, D26).
-    latest = latest_run(state, name)
-    if latest is not None and latest.status == "retrying" and answer.by in latest.excluded:
-        raise AnswerRefused(latest.excluded[answer.by])
-    refuse_unless(someone_else(case, state.sources, answer.by, name, step))
+    refuse_unless(why_excluded(case, state, name, step, answer.by))
     # Last: one person answers an entry once, so `count` approvals are `count` people's
     # (brief, D47).
     approved = state.approvals[name].approved
@@ -109,6 +92,36 @@ def judge_approval(
             f"{answer.by} has already approved {entry}: it needs {more} more {people}"
         )
     return approver
+
+
+def why_excluded(
+    case: CaseDefinition, state: CaseState, name: str, step: CallStep, by: str
+) -> str | None:
+    """Why `by` is a party to the decision that the step `name` runs, so may not approve it:
+    "someone else" (brief, D11). None: they are someone else. Only who they are counts here,
+    never their roles: an assigner is judged by these alone (brief, D70)."""
+    # The person who opened the case approves none of its steps (brief, D11).
+    if by == state.opened_by:
+        return f"{by} opened the case, so cannot approve its steps"
+    # Nor, in a child case, does anyone its parent excluded: who opened the parent, who proposed
+    # the step that opened the child (brief, D25) (brief, D74).
+    if by in state.excluded:
+        return state.excluded[by]
+    # Nor does the person who proposed this run: their proposal decides that it runs (brief, D25).
+    if by == state.proposers.get(name):
+        return f"{by} proposed {name}, so cannot approve it"
+    # Nor does anyone whose answer the condition of the rule that started it read: it decided
+    # that the step runs (brief, D11) (brief, D39). Kept with the run, since a rule remembers
+    # nothing: a value changed since still excludes them.
+    asked = state.proposed_by_rules.get(name)
+    if asked is not None and by in asked.read_from:
+        return decided_by(by, asked.read_from[by], asked)
+    # A retried run is the same run: whoever its first start excluded still can't approve it,
+    # though the proposal behind it is spent (brief, D26).
+    latest = latest_run(state, name)
+    if latest is not None and latest.status == "retrying" and by in latest.excluded:
+        return latest.excluded[by]
+    return someone_else(case, state.sources, by, name, step)
 
 
 def someone_else(

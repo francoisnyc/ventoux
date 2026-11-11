@@ -8,6 +8,7 @@ See docs/layers/05-interpreter.md.
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from pydantic import ValidationError
@@ -17,11 +18,10 @@ from ventoux.core.expressions import (
     Expression,
     ExpressionError,
     FieldType,
-    ReferenceType,
     Var,
     evaluate,
 )
-from ventoux.core.expressions.check import a_type
+from ventoux.core.expressions.check import a_type, system_of
 from ventoux.core.policy import refusal
 from ventoux.core.provenance import NoSources, provenance
 from ventoux.core.references import references
@@ -153,7 +153,8 @@ def given_as_reference(
     says what it gives: `order_id, a reference to orders`, `a computed value`."""
     # Only a field read as it is: a computed value has no system, whatever it looks like.
     if not isinstance(expression, Var):
-        if isinstance(expression, Decimal | str | bool):
+        # A literal, a date one too, reads no field (brief, D66).
+        if isinstance(expression, Decimal | str | bool | date):
             return None, "a value written in the definition"
         return None, "a computed value"
     declared = types.get(expression.var)
@@ -161,4 +162,6 @@ def given_as_reference(
         # An outcome or an output (`assess.outcome`, `pay.refund_id`): never a reference.
         return None, f"{expression.var}, which is not a reference"
     said = f"{expression.var}, {a_type(declared)}"
-    return (declared.system if isinstance(declared, ReferenceType) else None), said
+    # An option and an attachment are references to their system, and checked ones
+    # (brief, D67) (brief, D68).
+    return system_of(declared), said

@@ -10,7 +10,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHistory
 from temporalio.testing import WorkflowEnvironment
@@ -28,6 +27,7 @@ from test_temporal_case import (
 )
 from test_timers import CLOSABLE, PEOPLE, chased
 from test_timers import SMALL as SMALL_IN_MEMORY
+from worker_threads import worker_threads
 
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import (
@@ -47,6 +47,7 @@ from ventoux.testing import (
     START,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
     fixture_converter,
     later,
@@ -167,11 +168,11 @@ def test_a_timer_that_fell_due_during_the_switch_fires_at_once_stamped_with_its_
 def test_a_timer_crosses_in_the_carried_state() -> None:
     state = run_in_memory(chased(), file=SMALL_IN_MEMORY, answers=[], people=PEOPLE).state
     assert state.timers  # one is set
-    assert state_from_data(state_as_data(state)) == state
+    assert state_from_data(state_as_data(state), {}) == state
     # A state carried from before 11f has no timers: none could be set then.
     before = state_as_data(state)
     del before["timers"]
-    assert state_from_data(before).timers == []
+    assert state_from_data(before, {}).timers == []
 
 
 def test_a_case_whose_timer_fired_replays() -> None:
@@ -227,7 +228,7 @@ def test_a_timer_already_due_and_an_answer_in_one_workflow_task_fire_timer_first
             form = {"approved_amount": Decimal(40)}
             await answer(case, "review#1", "approve", "ana", ["support"], form)
             async with (
-                activity_threads() as threads,
+                worker_threads() as threads,
                 case_worker(
                     client,
                     QUEUE,
@@ -235,6 +236,7 @@ def test_a_timer_already_due_and_an_answer_in_one_workflow_task_fire_timer_first
                     DevelopmentPlans,
                     FAKES,
                     activity_executor=threads,
+                    audit=development_audit(),
                 ),
             ):
                 answered = "ana answered review#1 approve as support, setting approved_amount"

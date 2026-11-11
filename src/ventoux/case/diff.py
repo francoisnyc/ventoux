@@ -8,6 +8,7 @@ from one. Pure: no clock, no I/O, the same list in the same order every time.
 See docs/layers/13-diff.md (13a) and docs/guides/releases.md, "What changed: the diff".
 """
 
+import dataclasses
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
@@ -25,17 +26,19 @@ from ventoux.case.changes import (
     merged,
     shown,
 )
-from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
+from ventoux.case.definition import Assign, CallStep, CaseDefinition, TaskStep
 from ventoux.case.guards import (
     Versions,
     age_change,
     approval_change,
     approval_condition_change,
+    assign_change,
     close_reason_change,
     count_change,
     forgetting_change,
     plan_approvals,
     plan_approvers_change,
+    required_change,
     roles_change,
     step_condition_change,
     step_guards,
@@ -54,7 +57,8 @@ from ventoux.case.releases import (
 from ventoux.case.visibility import roles_named, seen_by
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract
-from ventoux.core.expressions.model import Node
+from ventoux.core.contract_schema import contract_schema
+from ventoux.core.expressions.model import Declared, Node
 from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan
 from ventoux.core.policy import Policy, UnknownPolicy, compared
@@ -116,9 +120,29 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
         )
         if reference in before.plans and reference in after.plans:
             changes += plan_approvals(reference, versions)
+    changes += child_changes(before, after, catalog)
     found = [change for change in changes if isinstance(change, Change)]
     rewritten = tuple(line for line in changes if isinstance(line, Rewritten))
     return Diff(after.name, tuple(found), reworded(before, after, found), rewritten)
+
+
+def child_changes(before: Package, after: Package, catalog: Catalog) -> list[Change | Rewritten]:
+    """What changes in each child the two versions pin: read by the child's own diff, each change
+    named under its reference, with its verdict, since what a child does is what its parent's
+    cases do. A child only one version pins is said whole, never judged (brief, D55) (brief, D74).
+    """
+    found: list[Change | Rewritten] = []
+    for reference in merged(list(before.cases), list(after.cases)):
+        path = f"cases.{reference}"
+        if reference not in after.cases:
+            found.append(Change(path, "not proven", "removed", entry="removed"))
+        elif reference not in before.cases:
+            found.append(Change(path, "not proven", "added", entry="added"))
+        else:
+            inside = diff(before.cases[reference], after.cases[reference], catalog)
+            found += [dataclasses.replace(c, path=f"{path}.{c.path}") for c in inside.changes]
+            found += [dataclasses.replace(r, path=f"{path}.{r.path}") for r in inside.rewritten]
+    return found
 
 
 # --- Walking the two versions --------------------------------------------------------------------
@@ -135,10 +159,14 @@ def leaves(before: object, after: object, path: str) -> list[Leaf]:
     if retyped and isinstance(before, BaseModel) and "type" in type(before).model_fields:
         where = joined(path, "type")  # a field's type, written `"type": "number"`
         return [Leaf(where, cast(Any, before).type, getattr(after, "type", MISSING))]
+    # An expression is shown whole; a declared type, though written like one, is walked into, so
+    # a reference or an option moved to another system names its `system` (brief, D67).
     if (
         isinstance(before, BaseModel)
         and type(before) is type(after)
-        and not isinstance(before, Node)
+        and (not isinstance(before, Node) or isinstance(before, Declared))
+        # A rule is judged whole: who it asks, before and after (brief, D71).
+        and not isinstance(before, Assign)
     ):
         assert isinstance(after, BaseModel)
         found: list[Leaf] = []
@@ -232,6 +260,8 @@ CONTRACTS = (
 APPROVAL = ("steps", "*", "approval")
 APPROVAL_COUNT = ("steps", "*", "approval", "count")
 APPROVAL_WHEN = ("steps", "*", "approval", "when")
+ASSIGN = ("steps", "*", "assign")
+APPROVAL_ASSIGN = ("steps", "*", "approval", "assign")
 APPROVERS = ("steps", "*", "approval", "roles")
 REQUIRES = ("steps", "*", "requires")
 CLOSE_REASON = ("close_reasons", "*")
@@ -245,6 +275,7 @@ def under_max_age(path: str) -> bool:
 
 
 STEP_WHEN = ("steps", "*", "when")
+STEP_REQUIRED = ("steps", "*", "required")
 SWITCHES = ("automatic", "repeatable")
 
 
@@ -293,6 +324,8 @@ def judged(
         others = found if peers is None else peers
         if under_max_age(leaf.path):
             continue  # said by `step_guards`, which compares each fact's age as a duration
+        elif at(leaf.path, ASSIGN) or at(leaf.path, APPROVAL_ASSIGN):
+            yield assign_change(leaf)  # who is asked, and so who alone may answer
         elif at(leaf.path, CLOSE_REASON) and not renamed(leaf, others):
             yield close_reason_change(leaf)  # a way to close added or removed
         elif leaf.before is MISSING or leaf.after is MISSING:
@@ -313,6 +346,8 @@ def judged(
             yield step_condition_change(leaf)
         elif (switch := switched(leaf.path)) is not None:
             yield switch_change(leaf, switch)
+        elif at(leaf.path, STEP_REQUIRED):
+            yield required_change(leaf)
         elif (comparison := roles_compared(leaf.path)) is not None:
             yield roles_change(leaf, versions, comparison)
         elif at(leaf.path, PLAN_APPROVERS):
@@ -442,8 +477,9 @@ def promised(contract: Contract) -> dict[str, object]:
     promise = contract.model_dump(
         mode="json", exclude={"display", "input", "output", "name", "version"}
     )
-    promise["input"] = without_policies(contract.input.model_json_schema())
-    promise["output"] = without(contract.output.model_json_schema(), "x-source")
+    # The models as Ventoux writes them, as the hash does: never pydantic's (brief, D83).
+    promise["input"] = without_policies(contract_schema(contract.input))
+    promise["output"] = without(contract_schema(contract.output), "x-source")
     return promise
 
 

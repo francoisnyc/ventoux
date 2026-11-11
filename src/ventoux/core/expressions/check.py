@@ -1,15 +1,18 @@
 """The check: an expression's type against the declared fields, before anything runs."""
 
 from collections.abc import Mapping
+from datetime import date
 from decimal import Decimal
 
 from ventoux.core.expressions.model import (
     Add,
     And,
+    AttachmentType,
     BooleanType,
     Cat,
     Comparison,
     Count,
+    DateType,
     Div,
     Exists,
     Expression,
@@ -23,6 +26,7 @@ from ventoux.core.expressions.model import (
     Node,
     Not,
     NumberType,
+    OptionType,
     Or,
     OutcomeType,
     ReferenceType,
@@ -61,6 +65,8 @@ def type_of(
         return StringType()
     if isinstance(expression, Decimal):
         return NumberType()
+    if isinstance(expression, date):
+        return DateType()
     if isinstance(expression, Var):
         if expression.var not in fields:
             raise refused(path, f"{expression.var} is not a declared field")
@@ -75,10 +81,10 @@ def type_of(
         return BooleanType()
     if isinstance(expression, In):
         found = type_of(expression.args[0], fields, inside(path, "in[0]"), element)
-        if not isinstance(found, NumberType | StringType | BooleanType | OutcomeType):
+        if not isinstance(found, NumberType | StringType | BooleanType | OutcomeType | DateType):
             raise refused(
                 inside(path, "in[0]"),
-                "`in` looks for a number, a string, a boolean or an outcome, "
+                "`in` looks for a number, a string, a boolean, an outcome or a date, "
                 f"and this is {a_type(found)}",
             )
         for position, literal in enumerate(expression.args[1]):
@@ -104,11 +110,7 @@ def type_of(
             for a, step in zip(expression.args, steps, strict=True)
         ]
         if operator not in ("==", "!="):
-            for step, found in zip(steps, types, strict=True):
-                if not isinstance(found, NumberType):
-                    raise refused(
-                        step, f"`{operator}` compares numbers, and this is {a_type(found)}"
-                    )
+            ordering_problem(operator, steps, types)
             return BooleanType()
         for argument, step, other, other_argument in zip(
             expression.args, steps, reversed(types), reversed(expression.args), strict=True
@@ -124,7 +126,7 @@ def type_of(
                     )
                 return BooleanType()
         # Otherwise the same type on both sides: a reference only to the same system (brief, D16).
-        if types[0] != types[1]:
+        if types[0] != types[1] and not same_system(types[0], types[1]):
             raise refused(
                 steps[1],
                 f"`{operator}` compares values of the same type, "
@@ -181,8 +183,8 @@ def type_of(
             fields,
             element,
             path,
-            "takes a number, a boolean or a reference",
-            (NumberType, BooleanType, ReferenceType),
+            "takes a number, a boolean, a reference, an option, an attachment or a date",
+            (NumberType, BooleanType, ReferenceType, OptionType, AttachmentType, DateType),
         )
         return StringType()
     if isinstance(expression, If):
@@ -236,6 +238,35 @@ def type_of(
     raise refused(path, f"can't check {expression!r}")
 
 
+def same_system(a: FieldType, b: FieldType) -> bool:
+    """Whether `a` and `b` are a reference and an option, or a reference and an attachment, of one
+    system, which compare: each is a reference to its system, and a checked one (brief, D67)
+    (brief, D68). An option and an attachment never do: one is checked against a list, the other
+    against what a store issued."""
+    references = [t for t in (a, b) if isinstance(t, ReferenceType)]
+    checked = [t for t in (a, b) if isinstance(t, OptionType | AttachmentType)]
+    return len(references) == 1 and len(checked) == 1 and system_of(a) == system_of(b)
+
+
+def system_of(declared: FieldType) -> str | None:
+    """The system a reference, an option or an attachment names; None for any other type."""
+    if isinstance(declared, ReferenceType | OptionType):
+        return declared.system
+    if isinstance(declared, AttachmentType):
+        return declared.store
+    return None
+
+
+def ordering_problem(operator: str, steps: list[str], types: list[FieldType]) -> None:
+    """Refuse an ordering unless it compares two numbers or two dates (brief, D20) (brief, D66)."""
+    orders = f"`{operator}` compares two numbers or two dates"
+    for step, found in zip(steps, types, strict=True):
+        if not isinstance(found, NumberType | DateType):
+            raise refused(step, f"{orders}, and this is {a_type(found)}")
+    if type(types[0]) is not type(types[1]):
+        raise refused(steps[1], f"{orders}, and this is {a_type(types[1])}, not {a_type(types[0])}")
+
+
 def each_argument(
     operator: str,
     arguments: tuple[Expression, ...],
@@ -268,6 +299,10 @@ def a_type(found: FieldType) -> str:
     """A type as a message says it: `a number`, `an outcome`, `a reference to orders`."""
     if isinstance(found, ReferenceType):
         return f"a reference to {found.system}"
+    if isinstance(found, OptionType):
+        return f"an option of {found.system}"
+    if isinstance(found, AttachmentType):
+        return f"an attachment in {found.store}"
     article = "an" if found.type[0] in "aeiou" else "a"
     return f"{article} {found.type}"
 

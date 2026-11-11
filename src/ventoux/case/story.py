@@ -11,7 +11,7 @@ from typing import Annotated, Any
 
 from pydantic import AfterValidator, Field, ValidationError, model_validator
 
-from ventoux.case.definition import Shape, problem
+from ventoux.case.definition import Shape, line, problem
 
 # When a story's case opens, day 0 00:00: 1 January 2026, 00:00 UTC, in seconds since the epoch,
 # as for the tests (`ventoux.testing.START`), so the timers' due times read as real dates.
@@ -206,4 +206,4 @@ def parse_story(data: object) -> Story:
     try:
         return Story.model_validate(data)
     except ValidationError as error:
-        raise StoryInvalid("\n".join(problem(e) for e in error.errors())) from None
+        raise StoryInvalid("\n".join(line(*problem(e)) for e in error.errors())) from None

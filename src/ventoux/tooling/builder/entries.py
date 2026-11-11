@@ -8,11 +8,12 @@ See docs/layers/14-builder.md.
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from ventoux.tooling.builder.expressions import (
     BoolExpr,
     Expr,
+    ListExpr,
     NumberExpr,
     OutcomeExpr,
     ReferenceExpr,
@@ -137,6 +138,49 @@ class Outcome:
 
 
 @dataclass(frozen=True)
+class Assign:
+    """Who is asked when each entry opens: the person who opened the case, or whoever gave a
+    task's latest answer. Written `Assign.opener()` or `Assign.answered(review)` (brief, D71)."""
+
+    to: Literal["opener", "answered"]
+    step: Task | None = None  # for `answered`: the task whose latest answerer is asked
+
+    @staticmethod
+    def opener() -> "Assign":
+        """Asked of whoever opened the case."""
+        return Assign("opener")
+
+    @staticmethod
+    def answered(task: Task) -> "Assign":
+        """Asked of whoever gave `task`'s latest answer."""
+        return Assign("answered", task)
+
+
+@dataclass(frozen=True)
+class ForEach:
+    """A step run once per item of a list field, each item told apart by its `key`, a text field
+    of the list's items (brief, D73). The run's item is read as `each.<field>`: `each.text("sku")`,
+    `each.number("amount")`."""
+
+    over: ListExpr  # the list field, as the case's `field` hands it back
+    key: str  # the text field of each item that tells it from the others
+
+    def text(self, name: str) -> TextExpr:
+        """The run's item's text field `name`."""
+        return TextExpr({"var": f"each.{name}"})
+
+    def number(self, name: str) -> NumberExpr:
+        """The run's item's number field `name`."""
+        return NumberExpr({"var": f"each.{name}"})
+
+    def written(self) -> dict[str, str]:
+        """As the JSON writes it: `{"over": "lines", "key": "sku"}`."""
+        over = self.over.data
+        assert isinstance(over, dict)  # a field reads as `{"var": <name>}`
+        return {"over": str(over["var"]), "key": self.key}
+
+
+@dataclass(frozen=True)
 class Approval:
     """A step's approval: who approves, how many, when it is needed, and why (brief, D11)."""
 
@@ -144,6 +188,7 @@ class Approval:
     reason: str  # what an approver reads
     when: Expr[bool] | None = None  # None: every run needs it
     count: int | None = None  # how many distinct people must approve; left out, 1 (brief, D47)
+    assign: Assign | None = None  # who is asked when it is asked; None: its queue (brief, D71)
 
 
 def four_eyes(roles: Sequence[str], reason: str, when: Expr[bool] | None = None) -> Approval:

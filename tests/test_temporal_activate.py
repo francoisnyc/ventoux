@@ -16,20 +16,25 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
-from activity_threads import activity_threads
 from dev_server import cli_binary, cli_folder, dev_server
+from production_stand_ins import production_audit, production_converter
 from temporalio import workflow
 from temporalio.client import Client
 from temporalio.runtime import Runtime, TelemetryConfig
 from temporalio.worker import Worker
 from test_temporal_case import LARGE, reported
 from test_temporal_registry import ProductionCases, refund_timed
+from worker_threads import worker_threads
 
 from ventoux.case.memory import Activity
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow, start_case
 from ventoux.temporal.manifests import environment_worker
 from ventoux.temporal.registry import create_environment, pollers, registry_worker
-from ventoux.testing import CATALOG, FAKES, DevelopmentPlans, development_converter
+from ventoux.testing import (
+    CATALOG,
+    FAKES,
+    DevelopmentPlans,
+)
 from ventoux.tooling.cli import main
 from ventoux.tooling.releases import FolderStore, release
 
@@ -46,7 +51,7 @@ def on_dev_server[T](scenario: Callable[[Client, str], Awaitable[T]], create: bo
         # Started by the harness, with its own deadline: a cold disk can outlast the SDK's 5 s
         # (12e, choice 81).
         binary = await cli_binary(cli_folder())
-        server = dev_server(binary, data_converter=development_converter())
+        server = dev_server(binary, data_converter=production_converter())
         async with server as environment, registry_worker(environment.client):
             if create:
                 await create_environment(environment.client, "production")
@@ -86,7 +91,7 @@ async def started(
 ) -> AsyncIterator[Worker]:
     """A production case worker on refunds, its manifest published, running in the block; its
     activity threads shut down after it stops (fix-worker-executors)."""
-    async with activity_threads() as threads:
+    async with worker_threads() as threads:
         worker = await environment_worker(
             client,
             QUEUE,
@@ -96,6 +101,7 @@ async def started(
             build,
             identity,
             activity_executor=threads,
+            audit=production_audit(),
         )
         async with worker:
             yield worker
@@ -106,7 +112,7 @@ async def second_client(address: str) -> Client:
     runtime, so a second worker on refunds, as from a second machine, needs its own."""
     return await Client.connect(
         address,
-        data_converter=development_converter(),
+        data_converter=production_converter(),
         runtime=Runtime(telemetry=TelemetryConfig()),
     )
 

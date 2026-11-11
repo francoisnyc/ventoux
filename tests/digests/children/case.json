@@ -1,0 +1,110 @@
+{
+  "case": "claim",
+  "display": {
+    "title": "Insurance claim"
+  },
+  "fields": {
+    "vehicle": {
+      "type": "string",
+      "display": {
+        "title": "Vehicle"
+      }
+    },
+    "payout": {
+      "type": "number",
+      "display": {
+        "title": "Payout"
+      }
+    }
+  },
+  "milestones": {
+    "assessed": {
+      "display": {
+        "title": "Claim assessed"
+      }
+    },
+    "repaired": {
+      "display": {
+        "title": "Vehicle repaired"
+      }
+    }
+  },
+  "steps": {
+    "assess": {
+      "kind": "task",
+      "display": {
+        "title": "Assess the claim"
+      },
+      "roles": [
+        "support"
+      ],
+      "outcomes": {
+        "accept": {
+          "display": {
+            "title": "Accept"
+          },
+          "sets": [
+            "payout"
+          ],
+          "reaches": [
+            "assessed"
+          ]
+        }
+      }
+    },
+    "repair": {
+      "kind": "case",
+      "display": {
+        "title": "Repair the vehicle",
+        "description": "A garage repairs it"
+      },
+      "case": "repair@3",
+      "requires": [
+        "assessed"
+      ],
+      "when": {
+        ">": [
+          {
+            "var": "payout"
+          },
+          0
+        ]
+      },
+      "automatic": false,
+      "proposed_by": [
+        "support"
+      ],
+      "repeatable": true,
+      "reaches": [
+        "repaired"
+      ],
+      "inputs": {
+        "vehicle": {
+          "var": "vehicle"
+        },
+        "budget": {
+          "var": "payout"
+        }
+      },
+      "max_age": {
+        "payout": "30d"
+      }
+    },
+    "inspect": {
+      "kind": "case",
+      "display": {
+        "title": "Inspect the repair"
+      },
+      "case": "repair@3",
+      "requires": [
+        "repaired"
+      ],
+      "required": true,
+      "inputs": {
+        "budget": {
+          "var": "repair.cost"
+        }
+      }
+    }
+  }
+}

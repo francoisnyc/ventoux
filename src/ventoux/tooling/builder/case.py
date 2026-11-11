@@ -14,7 +14,9 @@ from typing import Any, Literal
 from ventoux.tooling.builder.common import called_from, display, field_name, given
 from ventoux.tooling.builder.entries import (
     Approval,
+    Assign,
     Event,
+    ForEach,
     Milestone,
     Moment,
     Outcome,
@@ -58,6 +60,8 @@ class Case:
         self.stays_open = stays_open  # True: it never closes by itself; a person closes it
         self.forgetting = forgetting
         self.plans: dict[str, Plan] = {}  # the plans its plan steps run, by reference
+        self.cases: dict[str, Case] = {}  # the child cases its case steps open, by reference
+        self.reported: list[str] = []  # `reports`: what it reports when it closes as a child
         # Where each entry was written, by its path (`steps.pay`), `""` the case itself: where
         # `ventoux check` says a problem (brief, D59).
         self.where: dict[str, str] = {"": called_from()}
@@ -111,7 +115,7 @@ class Case:
         return Milestone(name)
 
     # Steps. Every kind takes the same keywords for when it may start (`requires`, `when`,
-    # `automatic`, `proposed_by`, `repeatable`) and what it reaches, written after its own keys.
+    # `automatic`, `proposed_by`, `repeatable`, `required`) and what it reaches, written after its own keys.
 
     def task(
         self,
@@ -125,12 +129,21 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
+        assign: Assign | None = None,
+        for_each: ForEach | None = None,
     ) -> Task:
-        """A task for a person holding one of `roles`, answered with one of `outcomes`."""
+        """A task for a person holding one of `roles`, answered with one of `outcomes`; asked of
+        whom `assign` picks when each run opens (brief, D71); run once per item of a list with
+        `for_each` (brief, D73)."""
         entry: Data = {"kind": "task", "display": display(title, description), "roles": list(roles)}
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        if for_each is not None:
+            entry["for_each"] = for_each.written()
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry["outcomes"] = {key: answer(outcome) for key, outcome in outcomes.items()}
+        if assign is not None:
+            entry["assign"] = assigned(assign)
         self.add(name, entry)
         return Task(name)
 
@@ -146,16 +159,20 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
         approval: Approval | None = None,
         max_age: Mapping[str, str] | None = None,
+        for_each: ForEach | None = None,
     ) -> Step:
         """A call to `activity` (`payments.refund@2`), a contract in the catalog, with `inputs`
-        read from the case file."""
+        read from the case file; run once per item of a list with `for_each` (brief, D73)."""
         entry: Data = {"kind": "activity", "display": display(title, description)}
         entry["activity"] = activity
+        if for_each is not None:
+            entry["for_each"] = for_each.written()
         entry |= calling(inputs)
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry |= guarded(approval, max_age)
         self.add(name, entry)
         return Step(name)
@@ -172,6 +189,7 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
         approval: Approval | None = None,
         max_age: Mapping[str, str] | None = None,
@@ -181,7 +199,7 @@ class Case:
         entry: Data = {"kind": "workflow", "display": display(title, description)}
         entry["workflow"] = workflow
         entry |= calling(inputs)
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry |= guarded(approval, max_age)
         self.add(name, entry)
         return Step(name)
@@ -197,11 +215,12 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
     ) -> Step:
         """A step that waits for `event`'s next arrival (brief, D41)."""
         entry: Data = {"kind": "wait", "display": display(title, description), "event": event.name}
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         self.add(name, entry)
         return Step(name)
 
@@ -217,6 +236,7 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
         max_age: Mapping[str, str] | None = None,
     ) -> Step:
@@ -225,11 +245,56 @@ class Case:
         entry: Data = {"kind": "plan", "display": display(title, description)}
         entry["plan"] = plan.reference
         entry |= calling(inputs)
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry |= guarded(None, max_age)
         self.add(name, entry)
         self.plans[plan.reference] = plan
         return Step(name)
+
+    def child_case(
+        self,
+        name: str,
+        child: "Case",
+        release: int,
+        title: str,
+        inputs: Mapping[str, Expr[Any]] | None = None,
+        description: str | None = None,
+        requires: Sequence[Step | Milestone] = (),
+        when: Expr[bool] | None = None,
+        automatic: bool | None = None,
+        proposed_by: Sequence[str] | None = None,
+        repeatable: bool | None = None,
+        required: bool | None = None,
+        reaches: Sequence[Milestone] | None = None,
+        max_age: Mapping[str, str] | None = None,
+    ) -> Step:
+        """`child`, opened as a whole case from one step, its opening given from the case file;
+        `release` is the child's release this case pins, written `repair@3` (brief, D74). It joins
+        the case's package, under `cases/`. What it reports is read as the step's outputs:
+        `repair.output("cost", Field.number())`."""
+        entry: Data = {"kind": "case", "display": display(title, description)}
+        entry["case"] = reference = f"{child.name}@{release}"
+        entry |= calling(inputs)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
+        entry |= guarded(None, max_age)
+        self.add(name, entry)
+        self.cases[reference] = child
+        return Step(name)
+
+    def reports(self, *fields: Expr[Any]) -> None:
+        """What the case reports when it closes as a child: these fields of its own, read by its
+        parent as the case step's outputs (brief, D74). Said once."""
+        if self.reported:
+            raise ValueError(f"{self.name} already reports {', '.join(self.reported)}")
+        names: list[str] = []
+        for field in fields:
+            data = field.data
+            if not (isinstance(data, dict) and set(data) == {"var"} and data["var"] in self.fields):
+                # Fail closed: a report lists the case's own fields, never a computed value.
+                raise ValueError(f"{self.name} reports its own fields only, and {field} is not one")
+            names.append(data["var"])
+        self.reported = names
+        self.where["reports"] = called_from()
 
     def sequence(self, *steps: Step) -> None:
         """`steps` run in this order, each starting by itself when the one before is done."""
@@ -369,6 +434,8 @@ class Case:
             data["stays_open"] = self.stays_open
         if self.forgetting is not None:
             data["forgetting"] = self.forgetting
+        if self.reported:
+            data["reports"] = list(self.reported)
         return data
 
 
@@ -379,6 +446,7 @@ def starting(
     proposed_by: Sequence[str] | None,
     repeatable: bool | None,
     reaches: Sequence[Milestone] | None,
+    required: bool | None = None,
 ) -> Data:
     """When a step may start, and what it reaches when it completes."""
     data: Data = {}
@@ -394,6 +462,9 @@ def starting(
         data["repeatable"] = repeatable
     if reaches is not None:
         data["reaches"] = [milestone.name for milestone in reaches]
+    if required is not None:
+        # True: the case owes it before closing by itself (brief, D72).
+        data["required"] = required
     return data
 
 
@@ -424,6 +495,14 @@ def answer(outcome: Outcome) -> Data:
     return data
 
 
+def assigned(rule: Assign) -> Data:
+    """A rule's JSON: `{"to": "opener"}`, or `{"to": "answered", "step": "review"}`."""
+    data: Data = {"to": rule.to}
+    if rule.step is not None:
+        data["step"] = rule.step.name
+    return data
+
+
 def approved_by(approval: Approval) -> Data:
     """An approval's JSON: when, who, how many, and the reason people read."""
     data: Data = {}
@@ -433,6 +512,8 @@ def approved_by(approval: Approval) -> Data:
     if approval.count is not None:
         data["count"] = approval.count  # how many distinct people (brief, D47)
     data["display"] = {"reason": approval.reason}
+    if approval.assign is not None:
+        data["assign"] = assigned(approval.assign)  # who is asked (brief, D71)
     return data
 
 

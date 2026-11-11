@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ventoux.case.audit import AuditRecord, Decision
 from ventoux.case.engine import ENGINE
 from ventoux.core.before_activity import Steering
 from ventoux.core.provenance import Sourced
@@ -33,6 +34,15 @@ class GivenApproval:
     def approvers(self) -> tuple[str, ...]:
         """Everyone who gave it, in the order they approved."""
         return (self.by, *self.also)
+
+
+@dataclass(frozen=True)
+class Holder:
+    """Who holds an open entry, as they claimed it: the one asked to answer it (brief, D69)."""
+
+    by: str  # the person
+    roles: frozenset[str]  # their roles, as stated with the claim (brief, D22)
+    at: int = field(kw_only=True)  # when they claimed it, in seconds since the epoch
 
 
 @dataclass
@@ -67,6 +77,9 @@ class StepRun:
     # An operator's retry made while every `closes_when` milestone was reached, which the close
     # waits for (brief, D34), as its flag says it: `omar's retry, after paid was reached`.
     held_retry: str = ""
+    # For a repeated step, the number its item's key was given, the first time the engine saw it:
+    # `draft_line.1#1` (brief, D73). None for a step that runs once.
+    item: int | None = None
 
 
 @dataclass
@@ -162,6 +175,9 @@ class Migration:
     # a name it doesn't say keeps its name (brief, D53).
     mapping: Mapping[str, Mapping[str, str]]
     engine: int  # the engine version it moves the case to, never back (brief, D51)
+    # The child cases it pins, as stored data, by reference; `plans` holds their plans too, since
+    # one reference is one plan (brief, D74).
+    cases: Mapping[str, object] = field(default_factory=dict[str, object])
 
     @property
     def label(self) -> str:
@@ -215,6 +231,10 @@ class CaseState:
     refreshing: dict[str, str] = field(default_factory=dict[str, str])
     runs: list[StepRun] = field(default_factory=list[StepRun])  # every step run, in order
     approvals: dict[str, OpenApproval] = field(default_factory=dict[str, OpenApproval])  # by step
+    # For each repeated step, the number each item's key was given, the first time it was seen:
+    # its runs are named by it, never by position or value, and a number is never given again
+    # (brief, D73).
+    items: dict[str, dict[str, int]] = field(default_factory=dict[str, dict[str, int]])
     given: dict[str, GivenApproval] = field(default_factory=dict[str, GivenApproval])  # by step
     asked: dict[str, int] = field(default_factory=dict[str, int])  # approvals asked, by step
     withdrawn: dict[str, str] = field(default_factory=dict[str, str])  # entry: why
@@ -231,10 +251,38 @@ class CaseState:
     arrived: dict[str, int] = field(default_factory=dict[str, int])
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
+    # Who holds each held open entry, by entry: the one asked to answer it; an entry absent is
+    # in its roles' queue (brief, D69).
+    holders: dict[str, Holder] = field(default_factory=dict[str, Holder])
+    # Who held each step's approval when it was withdrawn, until its next entry is asked, which
+    # keeps them if they could still answer it (brief, D25) (brief, D69).
+    kept: dict[str, Holder] = field(default_factory=dict[str, Holder])
+    # Who gave each task's latest answer, with the roles they answered with, by step: whom a rule
+    # asks with `answered` (brief, D71).
+    answerers: dict[str, Holder] = field(default_factory=dict[str, Holder])
+    # The person who opened the case, with the roles the trusted caller stated with the opening:
+    # whom a rule asking the opener asks, judged with those roles (brief, D71). None: a system
+    # opened it, or it opened before layer 17c.
+    opener: Holder | None = None
     opened_by: str | None = None  # the person who opened the case, if a person did
     # open; closing: nothing new starts, running activities finish; closed (brief, D10).
     phase: Literal["open", "closing", "closed"] = "open"
     closed_because: str = ""  # why it is closing, as the closed line will say
+    # Whether it took an approved request to forget it: its key may go once it has ended, even
+    # if it was closing for a reason of its own (brief, D32).
+    forget_taken: bool = False
+    # The close reason a person closed it with, or None: it closed by itself. A child's report
+    # gives it to its parent as the step's outcome (brief, D74).
+    closed_as: str | None = None
+    # Who closed it with that reason: their choice decided the outcome a parent reads (brief, D11)
+    # (brief, D74).
+    closed_by: str | None = None
+    # The child cases its release pins, as stored data, by reference (`repair@3`): given when it
+    # opens, as a case's start holds its plans, so the engine reads what each reports (brief, D74).
+    cases: dict[str, object] = field(default_factory=dict[str, object])
+    # Who approves nothing in this case, and why, as a child's parent gave it: its opener and the
+    # case step's proposer (brief, D25) (brief, D74). Empty for a case no parent opened.
+    excluded: dict[str, str] = field(default_factory=dict[str, str])
     flags: list[str] = field(default_factory=list[str])  # what a person should look at
     history: list[str] = field(default_factory=list[str])  # what happened, one line each
     firings: list[RuleFiring] = field(default_factory=list[RuleFiring])  # every rule's, in order
@@ -257,9 +305,27 @@ class CaseState:
     # Each change request proposed and not yet answered, by entry, in the order proposed: not
     # pending work, so it keeps no case open (brief, D52).
     changes: dict[str, ChangeRequest] = field(default_factory=dict[str, ChangeRequest])
+    # Each answer held while its options are checked, by its entry; never carried, since a case
+    # doesn't continue as new while a check runs (brief, D67).
+    checking: dict[str, "HeldAnswer"] = field(default_factory=dict[str, "HeldAnswer"])
     requested: int = (
         0  # how many change requests the case has numbered: the next is `case.change#2`
     )
+    # Each act it decided from engine version 3, as an audit record, in order; numbered from 1
+    # (brief, D76).
+    audit: list[AuditRecord] = field(default_factory=list[AuditRecord])
+    # What the engine decided in the decision being made, waiting to be recorded: always empty
+    # between events, like `moments` (brief, D76).
+    deciding: list[Decision] = field(default_factory=list[Decision])
+    # How many records the case has made, never lowered: the next is numbered after it, though
+    # written records have left `audit` (brief, D77).
+    recorded: int = 0
+    # Why the audit export failed, until an operator retries it; empty while it hasn't
+    # (brief, D77).
+    export_failed: str = ""
+    # What an operator looks at before retrying it: `the store`, or `the key service` when the
+    # export couldn't seal (brief, D78).
+    export_service: str = "the store"
 
 
 @dataclass(frozen=True)
@@ -278,6 +344,31 @@ class Opened:
     # The release it opens on, as people name it (`refund 1`), once the driver has checked it is
     # that release's package; None: a draft (brief, D51).
     release: str | None = field(kw_only=True, default=None)
+    # The opener's roles, as the trusted caller states them; none for a system, or for a case
+    # opened before layer 17c (brief, D22) (brief, D71).
+    roles: frozenset[str] = field(kw_only=True, default=frozenset())
+    # A child case's parent and the step run that opened it (`memory`, `repair#1`), or None: a
+    # person or a system opened it (brief, D74).
+    parent: tuple[str, str] | None = field(kw_only=True, default=None)
+    # Each value's sources, as its parent gives them, or None: each comes from its opener
+    # (brief, D12) (brief, D74).
+    sources: Mapping[str, frozenset[str]] | None = field(kw_only=True, default=None)
+    # The child cases its release pins, as stored data, by reference (brief, D74).
+    cases: Mapping[str, object] = field(kw_only=True, default_factory=dict[str, object])
+    # Who approves nothing in a child, and why, as its parent says (brief, D25) (brief, D74).
+    excluded: Mapping[str, str] = field(kw_only=True, default_factory=dict[str, str])
+
+
+@dataclass
+class HeldAnswer:
+    """An answer setting an option or an attachment, held until every check it waits for is
+    back, whatever each says: only then is it taken or refused (brief, D67) (brief, D68)."""
+
+    answered: "Answered"  # the answer, as it was given
+    role: str  # the role it was judged to answer as
+    waiting: list[str]  # the checked fields whose check isn't back yet, in the form's order
+    # Each checked field whose check came back without vouching, and the history line saying why.
+    problems: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)
@@ -317,6 +408,8 @@ class Completed:
     output: Mapping[str, object]
     outcome: str = "done"
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # What a plan step's plan decided, recorded with the step's end (brief, D77); else nothing.
+    ran: tuple[Decision, ...] = field(default=(), kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -326,6 +419,8 @@ class Failed:
     entry: str
     reason: str
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # What a plan step's plan decided, recorded with the step's end (brief, D77); else nothing.
+    ran: tuple[Decision, ...] = field(default=(), kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -357,6 +452,50 @@ class PlanCancelled:
     # Each activity in it that finished or failed after the close was requested, which the case
     # flags: `payments.refund@2 completed after the close was requested` (brief, D10).
     after_stop: tuple[str, ...] = ()
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # What its plan decided, recorded with the step's end (brief, D77).
+    ran: tuple[Decision, ...] = field(default=(), kw_only=True)
+
+
+@dataclass(frozen=True)
+class CaseEnded:
+    """A case step's child closed: how, what it reached, and what it reports, each value with its
+    sources in the child (brief, D74)."""
+
+    entry: str  # the step run, such as `repair#1`
+    outcome: str  # `done`, or the close reason a person closed it with
+    closed_by: str | None  # the person who chose that reason; None: it closed by itself
+    closed: str  # how its closed line says it: `nothing left to do`, `duplicate, by lee`
+    reached: tuple[str, ...]  # its milestones, in the order reached
+    report: Mapping[str, Sourced]  # each field its `reports` lists that is set at its close
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class ChildRang:
+    """A doorbell: a signal saying a child case ended. A signal says nothing of who sent it, so
+    it carries only the entry, and the parent reads the report itself (brief, D75)."""
+
+    entry: str  # the step run whose child it names, such as `repair#1`
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class ChildNotEnded:
+    """What reading a child found, when it isn't a report: the child's case still open, or its
+    workflow ended without reporting (terminated, failed, timed out) (brief, D75)."""
+
+    entry: str  # the step run, such as `repair#1`
+    how: str  # `open`; or how its workflow ended: `it was terminated`, `it failed`, `it timed out`
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class ClosedByParent:
+    """A child case's parent closes it: it is closing, or a rule stopped the step that opened it.
+    The child begins closing as a person's close does (brief, D40) (brief, D74)."""
+
+    reason: str  # why, as its parent says: `duplicate, by ana`, `stopped by withdraw#1`
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
@@ -432,6 +571,70 @@ class TimerDue:
     at: int = field(kw_only=True)  # its due time, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class Claimed:
+    """A person takes an open entry from its queue, to be the one asked to answer it (brief, D69)."""
+
+    entry: str  # the entry claimed: `review#1` or `pay.approval#1`
+    by: str  # who claims it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the claim (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class GivenBack:
+    """The holder of an open entry gives it back to its queue (brief, D69)."""
+
+    entry: str  # the entry given back
+    by: str  # who gives it back, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with it (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class Assigned:
+    """Someone whose role assigns gives an open entry to a person, whoever holds it now
+    (brief, D70)."""
+
+    entry: str  # the entry assigned
+    to: str  # who is asked to answer it, as the trusted caller states (brief, D19)
+    to_roles: frozenset[str]  # their roles, stated with the assignment (brief, D22)
+    by: str  # who assigns it
+    roles: frozenset[str]  # the assigner's roles, stated with it
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class Unassigned:
+    """Someone whose role assigns returns a held entry to its queue, without its holder
+    (brief, D70)."""
+
+    entry: str  # the entry returned
+    by: str  # who returns it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with it (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class ExportFailed:
+    """The case's audit export failed after its retries: its records wait, and an operator looks
+    at the store (brief, D17) (brief, D77)."""
+
+    reason: str  # why, in words that never quote a value (brief, D30)
+    # What failed, for the operator to look at: `the store`, or `the key service` (brief, D78).
+    service: str = "the store"
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class ExportRetried:
+    """An operator retries the case's failed audit export (brief, D26) (brief, D77)."""
+
+    by: str  # who retried it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the retry (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -441,12 +644,22 @@ type Event = (
     | Retried
     | CloseAsked
     | PlanCancelled
+    | CaseEnded
+    | ChildRang
+    | ChildNotEnded
+    | ClosedByParent
     | WorkflowCancelled
     | Shown
     | ForgetApproved
     | ChangeProposed
     | Sent
     | TimerDue
+    | Claimed
+    | GivenBack
+    | Assigned
+    | Unassigned
+    | ExportFailed
+    | ExportRetried
 )
 
 
@@ -490,6 +703,39 @@ class StartPlan:
     steered: tuple[Steering, ...] = ()
 
 
+@dataclass(frozen=True)
+class OpenCase:
+    """Open a case step's child (brief, D74): its definition, its opening with where each value
+    came from, the run's name in its keys, and who may approve nothing in it."""
+
+    entry: str  # the step run, such as `repair#1`
+    case: str  # its reference, such as `repair@3`
+    definition: object  # the child's definition, as stored data
+    fields: dict[str, Sourced]  # its opening, read from the parent's case file
+    run: str  # names the child, and its keys: `memory/repair#1`
+    # Each person who approves nothing in the child, and why: the parent's opener and the step's
+    # proposer cross into it (brief, D25).
+    excluded: dict[str, str]
+
+
+@dataclass(frozen=True)
+class CloseCase:
+    """Close a case step's child, because its parent is closing or a rule stops the step; the
+    parent waits for it to end (brief, D40) (brief, D74)."""
+
+    entry: str  # the step run, such as `repair#1`
+    reason: str  # why, naming only who asked: `duplicate, by ana`, `stopped by withdraw#1`
+
+
+@dataclass(frozen=True)
+class ReadChild:
+    """Read how a case step's child ended, from the child's own run: what the parent decides on,
+    never what a doorbell said (brief, D75)."""
+
+    entry: str  # the step run, such as `repair#1`
+    run: str  # the child's workflow ID: `claim-7/repair#1`
+
+
 # Why a child is stopped when its case closes: the reason a plan's stop signal gives by default,
 # so a history recorded before 11c, whose signal gave none, replays the same (brief, D40).
 CLOSING = "the case is closing"
@@ -523,4 +769,14 @@ class UseRelease:
     migration: Migration
 
 
-type Command = Schedule | StartWorkflow | StartPlan | StopPlan | CancelWorkflow | UseRelease
+type Command = (
+    Schedule
+    | StartWorkflow
+    | StartPlan
+    | OpenCase
+    | StopPlan
+    | CloseCase
+    | ReadChild
+    | CancelWorkflow
+    | UseRelease
+)

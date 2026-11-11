@@ -1,0 +1,594 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-11-07T19:13:10.536Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "ventoux.registry"
+        },
+        "taskQueue": {
+          "name": "ventoux-registry"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJyZWdpc3RyeSI6IHsiZW52aXJvbm1lbnQiOiAicHJvZHVjdGlvbiIsICJkZXZlbG9wbWVudCI6IGZhbHNlLCAibWFuaWZlc3RzIjoge30sICJhY3RpdmUiOiB7fSwgImFjdGl2YXRlZCI6IHt9LCAicmV0aXJlZCI6IFtdLCAib3BlbiI6IHt9LCAiYmluZGluZ3MiOiB7fSwgImxvZyI6IFtdfX0="
+            }
+          ]
+        },
+        "workflowExecutionTimeout": "315360000s",
+        "workflowRunTimeout": "315360000s",
+        "workflowTaskTimeout": "10s",
+        "originalExecutionRunId": "7d0c4798-e828-4274-b5ed-a72e43533151",
+        "identity": "375@vm",
+        "firstExecutionRunId": "7d0c4798-e828-4274-b5ed-a72e43533151",
+        "attempt": 1,
+        "firstWorkflowTaskBackoff": "0s",
+        "priority": {}
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-11-07T19:13:10.536Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "ventoux-registry"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-11-07T19:13:10.537Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "375@vm",
+        "historySizeBytes": "421"
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-11-07T19:13:10.558Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "375@vm",
+        "binaryChecksum": "e6c4156d1560af388446be4824ca9a86",
+        "sdkMetadata": {
+          "coreUsedFlags": [
+            1,
+            2,
+            3
+          ],
+          "sdkName": "temporal-python",
+          "sdkVersion": "1.34.0"
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "5",
+      "eventTime": "2026-11-07T19:13:10.558Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "ventoux-registry"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 2
+      }
+    },
+    {
+      "eventId": "6",
+      "eventTime": "2026-11-07T19:13:10.558Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "5",
+        "identity": "375@vm",
+        "historySizeBytes": "598"
+      }
+    },
+    {
+      "eventId": "7",
+      "eventTime": "2026-11-07T19:13:10.565Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "5",
+        "identity": "375@vm",
+        "binaryChecksum": "e6c4156d1560af388446be4824ca9a86",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "8",
+      "eventTime": "2026-11-07T19:13:10.565Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED",
+      "workflowExecutionUpdateAcceptedEventAttributes": {
+        "protocolInstanceId": "fca68d19-dc08-4a30-b4f2-1dc72808105e",
+        "acceptedRequestMessageId": "fca68d19-dc08-4a30-b4f2-1dc72808105e/request",
+        "acceptedRequestSequencingEventId": "5",
+        "acceptedRequest": {
+          "meta": {
+            "updateId": "fca68d19-dc08-4a30-b4f2-1dc72808105e",
+            "identity": "375@vm"
+          },
+          "input": {
+            "name": "publish",
+            "args": {
+              "payloads": [
+                {
+                  "metadata": {
+                    "encoding": "anNvbi9wbGFpbg=="
+                  },
+                  "data": "eyJlbnZpcm9ubWVudCI6ICJwcm9kdWN0aW9uIiwgInRhc2tfcXVldWUiOiAicmVmdW5kcyIsICJidWlsZCI6ICI0ZjJhOWMxIiwgImlkZW50aXR5IjogInJlZnVuZHMtYSIsICJzZXJ2ZXMiOiB7ImJyYW5jaGVzLmhvbGRzQDEiOiB7Im1ldGhvZCI6IDEsICJzaGEyNTYiOiAiNGU4Y2E1NTM4MWI4NDZlYmM4ZWEwMmJkY2NkYTEzYWJmNWY2YTgzMmU4ZGI1NDg1MzZjNGM4NDVmNWYwN2I1NyJ9LCAiZG9jdW1lbnRzLmlzc3VlZEAxIjogeyJtZXRob2QiOiAxLCAic2hhMjU2IjogImIzYWViNDg1NjE2NDJhMzQ3MjU2NzU0YjhiNzJkNWYzNDZiOTFkN2JhZWRhOTBjYTE4NzEwZDViYTM4YjAxM2IifSwgImxldHRlcnMuZHJhZnRAMiI6IHsibWV0aG9kIjogMSwgInNoYTI1NiI6ICIyYWE5MGM5M2I2YzQyMjU3NmU0ZmRmYjg1ZjYwOTBmOWE1MDQwNTlkYTkyMjBhZmQ4NzliZmE3NzZlMjFkNWZlIn0sICJsZXR0ZXJzLmRyYWZ0QDMiOiB7Im1ldGhvZCI6IDEsICJzaGEyNTYiOiAiNTQyYTdhYjAyMzAwZGJiZjNmNTY5M2VmNGU5ODczYzEwMzEzOWJiZTQ2ZmZhZjY4MGMxMTlmMGJlY2U3OTVkMiJ9LCAib3JkZXJzLmxvb2t1cEAxIjogeyJtZXRob2QiOiAxLCAic2hhMjU2IjogImMzMTk3Y2YwNzJkMWRiZWFiNzQ0YWJkMTcyMDdjNjgwMDRhNDE4NGM0M2JiZjkzY2Q5NTRlN2NlYWY5MGM2MzEifSwgInBheW1lbnRzLnJlZnVuZEAyIjogeyJtZXRob2QiOiAxLCAic2hhMjU2IjogImIyZjMyNWUxNzFjNjdiMjdlY2Y0MTdiOWI3NDU2YTJmN2JjYmI1OWVhYTIyODFkNWJhMzRjNGY1ODAzNDA4MDEifX0sICJ3b3JrZmxvd3MiOiBbInZlbnRvdXguY2FzZSIsICJ2ZW50b3V4LnBsYW4iXSwgImNhc2UiOiAidmVudG91eC5jYXNlIiwgImJpbmRzIjogeyJreWMuY2hlY2tAMSI6IHsid29ya2Zsb3ciOiAiS3ljQ2hlY2siLCAidGFza19xdWV1ZSI6ICJreWMifX19"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventId": "9",
+      "eventTime": "2026-11-07T19:13:10.565Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_COMPLETED",
+      "workflowExecutionUpdateCompletedEventAttributes": {
+        "meta": {
+          "updateId": "fca68d19-dc08-4a30-b4f2-1dc72808105e",
+          "identity": "375@vm"
+        },
+        "outcome": {
+          "success": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "eyJkb25lIjogdHJ1ZSwgInNhaWQiOiBbInJlZnVuZHMtYSBzZXJ2ZXMgcmVmdW5kcyBpbiBwcm9kdWN0aW9uIl19"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "eventId": "10",
+      "eventTime": "2026-11-07T19:13:10.822Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "ventoux-registry"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "11",
+      "eventTime": "2026-11-07T19:13:10.822Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "10",
+        "identity": "375@vm",
+        "historySizeBytes": "2050"
+      }
+    },
+    {
+      "eventId": "12",
+      "eventTime": "2026-11-07T19:13:10.826Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "10",
+        "identity": "375@vm",
+        "binaryChecksum": "e6c4156d1560af388446be4824ca9a86",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "13",
+      "eventTime": "2026-11-07T19:13:10.826Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED",
+      "workflowExecutionUpdateAcceptedEventAttributes": {
+        "protocolInstanceId": "08755518-5974-4de2-b93a-b1725f4a442c",
+        "acceptedRequestMessageId": "08755518-5974-4de2-b93a-b1725f4a442c/request",
+        "acceptedRequestSequencingEventId": "10",
+        "acceptedRequest": {
+          "meta": {
+            "updateId": "08755518-5974-4de2-b93a-b1725f4a442c",
+            "identity": "375@vm"
+          },
+          "input": {
+            "name": "activate",
+            "args": {
+              "payloads": [
+                {
+                  "metadata": {
+                    "encoding": "anNvbi9wbGFpbg=="
+                  },
+                  "data": "eyJyZWxlYXNlZCI6IHsibmFtZSI6ICJjbGFpbSIsICJyZWxlYXNlIjogMSwgImRpZ2VzdCI6IHsibWV0aG9kIjogMSwgInNoYTI1NiI6ICI4OGVmMDNjY2ZkMGNhZGUyNWFjN2Y4ZWI5NDIzZDE3OGYyMzg0MWYwNWVkZmM5OWJhNzI3MDQyMjRkYTc4MWEyIn19LCAiY29udHJhY3RzIjoge30sICJ0YXNrX3F1ZXVlIjogInJlZnVuZHMiLCAicG9sbGVycyI6IHsicmVmdW5kcyI6IFsicmVmdW5kcy1hIl19LCAiYnkiOiAicGlhIn0="
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventId": "14",
+      "eventTime": "2026-11-07T19:13:10.826Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_COMPLETED",
+      "workflowExecutionUpdateCompletedEventAttributes": {
+        "meta": {
+          "updateId": "08755518-5974-4de2-b93a-b1725f4a442c",
+          "identity": "375@vm"
+        },
+        "outcome": {
+          "success": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "eyJkb25lIjogdHJ1ZSwgInNhaWQiOiBbInBpYSBhY3RpdmF0ZWQgY2xhaW0gMSBpbiBwcm9kdWN0aW9uIl19"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "eventId": "15",
+      "eventTime": "2026-11-07T19:13:11.005Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "ventoux-registry"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "16",
+      "eventTime": "2026-11-07T19:13:11.005Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "15",
+        "identity": "375@vm",
+        "historySizeBytes": "2808"
+      }
+    },
+    {
+      "eventId": "17",
+      "eventTime": "2026-11-07T19:13:11.009Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "15",
+        "identity": "375@vm",
+        "binaryChecksum": "e6c4156d1560af388446be4824ca9a86",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "18",
+      "eventTime": "2026-11-07T19:13:11.009Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED",
+      "workflowExecutionUpdateAcceptedEventAttributes": {
+        "protocolInstanceId": "dd05221d-e67f-43b0-ad0f-9710095ed5a9",
+        "acceptedRequestMessageId": "dd05221d-e67f-43b0-ad0f-9710095ed5a9/request",
+        "acceptedRequestSequencingEventId": "15",
+        "acceptedRequest": {
+          "meta": {
+            "updateId": "dd05221d-e67f-43b0-ad0f-9710095ed5a9",
+            "identity": "375@vm"
+          },
+          "input": {
+            "name": "opened",
+            "args": {
+              "payloads": [
+                {
+                  "metadata": {
+                    "encoding": "anNvbi9wbGFpbg=="
+                  },
+                  "data": "eyJjYXNlIjogImNsYWltLTMiLCAidGFza19xdWV1ZSI6ICJyZWZ1bmRzIiwgInJlbGVhc2VkIjogeyJuYW1lIjogImNsYWltIiwgInJlbGVhc2UiOiAxLCAiZGlnZXN0IjogeyJtZXRob2QiOiAxLCAic2hhMjU2IjogIjg4ZWYwM2NjZmQwY2FkZTI1YWM3ZjhlYjk0MjNkMTc4ZjIzODQxZjA1ZWRmYzk5YmE3MjcwNDIyNGRhNzgxYTIifX19"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventId": "19",
+      "eventTime": "2026-11-07T19:13:11.009Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_COMPLETED",
+      "workflowExecutionUpdateCompletedEventAttributes": {
+        "meta": {
+          "updateId": "dd05221d-e67f-43b0-ad0f-9710095ed5a9",
+          "identity": "375@vm"
+        },
+        "outcome": {
+          "success": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "eyJkb25lIjogdHJ1ZSwgInNhaWQiOiBbImNsYWltLTMgaXMgb3BlbiBvbiBjbGFpbSAxIGluIHByb2R1Y3Rpb24iXX0="
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "eventId": "20",
+      "eventTime": "2026-11-07T19:13:11.069Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "ventoux-registry"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "21",
+      "eventTime": "2026-11-07T19:13:11.069Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "20",
+        "identity": "375@vm",
+        "historySizeBytes": "3515"
+      }
+    },
+    {
+      "eventId": "22",
+      "eventTime": "2026-11-07T19:13:11.073Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "20",
+        "identity": "375@vm",
+        "binaryChecksum": "e6c4156d1560af388446be4824ca9a86",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "23",
+      "eventTime": "2026-11-07T19:13:11.073Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED",
+      "workflowExecutionUpdateAcceptedEventAttributes": {
+        "protocolInstanceId": "3f31583c-5a54-4639-9d52-f2f8ef93f967",
+        "acceptedRequestMessageId": "3f31583c-5a54-4639-9d52-f2f8ef93f967/request",
+        "acceptedRequestSequencingEventId": "20",
+        "acceptedRequest": {
+          "meta": {
+            "updateId": "3f31583c-5a54-4639-9d52-f2f8ef93f967",
+            "identity": "375@vm"
+          },
+          "input": {
+            "name": "activate",
+            "args": {
+              "payloads": [
+                {
+                  "metadata": {
+                    "encoding": "anNvbi9wbGFpbg=="
+                  },
+                  "data": "eyJyZWxlYXNlZCI6IHsibmFtZSI6ICJjbGFpbSIsICJyZWxlYXNlIjogMiwgImRpZ2VzdCI6IHsibWV0aG9kIjogMSwgInNoYTI1NiI6ICI4OGVmMDNjY2ZkMGNhZGUyNWFjN2Y4ZWI5NDIzZDE3OGYyMzg0MWYwNWVkZmM5OWJhNzI3MDQyMjRkYTc4MWEyIn19LCAiY29udHJhY3RzIjoge30sICJ0YXNrX3F1ZXVlIjogInJlZnVuZHMiLCAicG9sbGVycyI6IHsicmVmdW5kcyI6IFsicmVmdW5kcy1hIl19LCAiYnkiOiAicGlhIn0="
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventId": "24",
+      "eventTime": "2026-11-07T19:13:11.073Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_COMPLETED",
+      "workflowExecutionUpdateCompletedEventAttributes": {
+        "meta": {
+          "updateId": "3f31583c-5a54-4639-9d52-f2f8ef93f967",
+          "identity": "375@vm"
+        },
+        "outcome": {
+          "success": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "eyJkb25lIjogdHJ1ZSwgInNhaWQiOiBbInBpYSBhY3RpdmF0ZWQgY2xhaW0gMiBpbiBwcm9kdWN0aW9uLCBhZnRlciBjbGFpbSAxIl19"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "eventId": "25",
+      "eventTime": "2026-11-07T19:13:11.081Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "ventoux-registry"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "26",
+      "eventTime": "2026-11-07T19:13:11.081Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "25",
+        "identity": "375@vm",
+        "historySizeBytes": "4284"
+      }
+    },
+    {
+      "eventId": "27",
+      "eventTime": "2026-11-07T19:13:11.084Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "25",
+        "identity": "375@vm",
+        "binaryChecksum": "e6c4156d1560af388446be4824ca9a86",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "28",
+      "eventTime": "2026-11-07T19:13:11.084Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED",
+      "workflowExecutionUpdateAcceptedEventAttributes": {
+        "protocolInstanceId": "334e4141-92f7-4e7b-94db-1656796b1bba",
+        "acceptedRequestMessageId": "334e4141-92f7-4e7b-94db-1656796b1bba/request",
+        "acceptedRequestSequencingEventId": "25",
+        "acceptedRequest": {
+          "meta": {
+            "updateId": "334e4141-92f7-4e7b-94db-1656796b1bba",
+            "identity": "375@vm"
+          },
+          "input": {
+            "name": "closed",
+            "args": {
+              "payloads": [
+                {
+                  "metadata": {
+                    "encoding": "anNvbi9wbGFpbg=="
+                  },
+                  "data": "ImNsYWltLTMi"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventId": "29",
+      "eventTime": "2026-11-07T19:13:11.084Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_COMPLETED",
+      "workflowExecutionUpdateCompletedEventAttributes": {
+        "meta": {
+          "updateId": "334e4141-92f7-4e7b-94db-1656796b1bba",
+          "identity": "375@vm"
+        },
+        "outcome": {
+          "success": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "eyJkb25lIjogdHJ1ZSwgInNhaWQiOiBbImNsYWltLTMgY2xvc2VkIG9uIGNsYWltIDEiXX0="
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "eventId": "30",
+      "eventTime": "2026-11-07T19:13:11.090Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "ventoux-registry"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "31",
+      "eventTime": "2026-11-07T19:13:11.091Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "30",
+        "identity": "375@vm",
+        "historySizeBytes": "4788"
+      }
+    },
+    {
+      "eventId": "32",
+      "eventTime": "2026-11-07T19:13:11.094Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "30",
+        "identity": "375@vm",
+        "binaryChecksum": "e6c4156d1560af388446be4824ca9a86",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "33",
+      "eventTime": "2026-11-07T19:13:11.094Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED",
+      "workflowExecutionUpdateAcceptedEventAttributes": {
+        "protocolInstanceId": "34098b4d-a30f-4aac-9d86-6a1967d20bb5",
+        "acceptedRequestMessageId": "34098b4d-a30f-4aac-9d86-6a1967d20bb5/request",
+        "acceptedRequestSequencingEventId": "30",
+        "acceptedRequest": {
+          "meta": {
+            "updateId": "34098b4d-a30f-4aac-9d86-6a1967d20bb5",
+            "identity": "375@vm"
+          },
+          "input": {
+            "name": "retire",
+            "args": {
+              "payloads": [
+                {
+                  "metadata": {
+                    "encoding": "anNvbi9wbGFpbg=="
+                  },
+                  "data": "eyJhc2tlZCI6IHsicmVsZWFzZWQiOiB7Im5hbWUiOiAiY2xhaW0iLCAicmVsZWFzZSI6IDEsICJkaWdlc3QiOiB7Im1ldGhvZCI6IDEsICJzaGEyNTYiOiAiODhlZjAzY2NmZDBjYWRlMjVhYzdmOGViOTQyM2QxNzhmMjM4NDFmMDVlZGZjOTliYTcyNzA0MjI0ZGE3ODFhMiJ9fSwgImJ5IjogInBpYSJ9fQ=="
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "eventId": "34",
+      "eventTime": "2026-11-07T19:13:11.094Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_COMPLETED",
+      "workflowExecutionUpdateCompletedEventAttributes": {
+        "meta": {
+          "updateId": "34098b4d-a30f-4aac-9d86-6a1967d20bb5",
+          "identity": "375@vm"
+        },
+        "outcome": {
+          "success": {
+            "payloads": [
+              {
+                "metadata": {
+                  "encoding": "anNvbi9wbGFpbg=="
+                },
+                "data": "eyJkb25lIjogdHJ1ZSwgInNhaWQiOiBbInBpYSByZXRpcmVkIGNsYWltIDEgaW4gcHJvZHVjdGlvbiJdfQ=="
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
