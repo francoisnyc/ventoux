@@ -1581,6 +1581,9 @@ text is kept.*
 - **Amended 2026-10-22, by D48** (the text above stands; this adds to it): the known limit above is
   recorded as a deliberate limit, and is wider than milestones: `visible_to` narrows who sees a
   value, never what the case did (D30, as amended).
+- **Amended 2026-11-11, by D88** (the text above stands; this adds to it): the rule for a field
+  set from a field fewer roles may see holds at a child's opening field too, and a child reports
+  no field that narrows who sees it.
 
 ### D43. A run carries what steered it, and passes it on
 
@@ -3198,6 +3201,9 @@ child asking as it opens. Until then a case step on Temporal fails, needing atte
   let go.
 - **Amended 2026-11-11, by D86** (the text above stands; this adds a deliberate limit): a case
   step may not be steered by untrusted data; a person decides first.
+- **Amended 2026-11-11, by D88** (the text above stands; this adds to it): a value enters a
+  child only into a field no more roles may see than its source, and a report carries no field
+  that narrows who sees it (a deliberate limit), as for sensitive values.
 
 ### D75. Child cases on Temporal: a child workflow abandoned to itself, a doorbell, a report read
 
@@ -3338,6 +3344,9 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   written, and forgetting it then destroys the key; while a case holds, each act sent to it waits
   as a signal in its run's history; a plan whose workflow itself fails returns no report, so its
   events stay in its own history.
+- **Amended 2026-11-11, by D88** (the text above stands; this adds to it): a value given to a
+  plan step is recorded with who may see it, from the case fields it came from, and `read_audit`
+  filters on that, whatever name the plan gives it.
 
 ### D78. The production key provider: Vault's transit engine, a mark that outlives the key
 
@@ -3689,6 +3698,37 @@ decision D; findings 1b.1, 1b.7, 1b.8). Adds to D11, D28, D39 and D74, whose tex
 - **Set aside:** excluding whoever reached a required milestone (it would exclude everyone who
   moved a case forward, and D39 left it as one decision covering moments too); and explaining
   the difference in the guide alone (nothing would tell an author which they wrote).
+
+### D88. A value hidden by `visible_to` stays hidden across a child, a report and a plan's record
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision E; findings 1b.5, 1c.4). Adds to D30, D42, D74 and D77, whose text is kept.*
+
+- **The bug it fixes.** A view hides more than its source, never less. In one case that holds:
+  a field set from a field fewer roles may see is refused when the definition is read (D42). At
+  three joins it didn't: a parent's hidden value given to a child's field was read by every role
+  that sees the child; a child's hidden field came back in its report to every role that sees
+  the parent's step; and a hidden value given to a plan step was written to the audit store
+  under the plan's input name, which `read_audit` showed to every role, and to none.
+- **Into a child: only into a field no more roles may see.** A child's opening field is given a
+  value only if every role that may see that field may see each case field the value comes from.
+  `ventoux check` on the parent refuses otherwise, naming both fields, as D42 does for `set` and
+  D74 for sensitive values.
+- **Out of a child: a report carries no field that narrows who sees it** (a deliberate limit,
+  D48). A child's `reports` listing one is refused when the package is read. A step output that
+  carries its own visibility is set aside.
+- **Into a plan: the record says who may see it.** Giving a hidden value to a plan step is
+  allowed. The value is recorded with who may see it: the roles common to the case fields it
+  came from. `read_audit` filters on that, as the case view does (D30, D77), whatever the plan
+  names its input.
+- **The runtime depends on nothing validation did** (D34), and fails closed at each join. A case
+  step given a value into a field more roles may see fails before the child opens, naming the
+  two fields and never the value, and waits for a person (D17). A reported field that narrows who
+  sees it is treated as absent, the history saying why: whatever reads it fails, as for a
+  reported field the child never set (D74). The plan's record needs nothing more.
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3.
+- **Known limit, kept:** what a plan's activities give after reading a hidden input is as visible
+  as their step's outputs are, as in one case (D42, as amended by D48).
 
 ## Concepts
 
