@@ -418,6 +418,8 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-24, by D55** (the text above stands; this adds to it): the semantic diff
   reads "someone else" from the definition: which tasks' answers can reach a step's inputs or
   `when`, so a release that stops a step reading a field says who may now approve it, as looser.
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): "someone else" is
+  carried across a plan step and a case step, in both directions.
 
 ### D12. A small vocabulary of sources
 
@@ -876,6 +878,9 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-22, by D51** (the text above stands; this adds to it): a case opened on a
   release runs the plans of its release, carried in its start; the plans the deployment supplies
   serve drafts.
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): a plan step also
+  carries in whoever's answer its `when` read, and its outcome carries out whoever's answer
+  inside the plan decided it.
 
 ### D29. Outputs carry their contract's sources; workflow steps are bound children
 
@@ -1387,6 +1392,9 @@ text is kept.*
 - **Amended 2026-10-22, by D49** (the text above stands; this narrows it): a plan's own
   transitions are no longer left open. A transition whose condition reads untrusted data stops the
   plan, and the plan step needs attention.
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): the person whose
+  answer only brought the moment, or reached a milestone a step requires, is still not excluded;
+  `ventoux check` now warns where an author may have meant otherwise.
 
 ### D40. Rules that stop steps: what a close does, to one step, through one place
 
@@ -3648,6 +3656,39 @@ decision C; findings 1a.1, 1a.2, 1a.5). Adds to D43, D48, D73 and D74, whose tex
 - **Set aside:** carrying steering into a child case and back (a later decision may loosen the
   limit, with its own fixpoint across the step); and warning about a person's absent work while
   allowing it (a warning is read or not, and the case would still close with nobody in it).
+
+### D87. "Someone else" crosses a plan step and a case step; a required milestone warns
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision D; findings 1b.1, 1b.7, 1b.8). Adds to D11, D28, D39 and D74, whose text is kept.*
+
+- **The bug it fixes.** Who may not approve is computed from provenance (D11), and the
+  computation stopped at a step that opens a plan or a child. A person who answered a wait inside
+  a plan decided its outcome, then approved the case step whose `when` read it; and the person a
+  step's own `when` read, refused as approver of a call step, approved the same payment once it
+  was written as a plan step or a case step.
+- **A plan's outcome carries who decided it.** Where a person's answer inside the plan decided
+  its outcome, or a value it gives, that outcome or value carries `person:<answerer>` beside
+  `system:<plan>`, as a child a person closed already gives `person:<closer>, case:repair` (D74).
+  So that person approves nothing it decides (D11). A plan no person's answer decided gives
+  `system:<plan>` alone, as before.
+- **Whoever a step's `when` read is carried in.** A plan step and a case step carry, with the
+  opener and the proposer (D28, D74), every person whose answer the step's own `when` read, or
+  the `when` of the rule that started it (D39): each is excluded from every approval inside the
+  plan or the child the step opens, the inbox saying why as for any exclusion. They cross
+  continue-as-new with what the step already carries.
+- **A required milestone still excludes no one, and now warns.** D39 stands: a person whose
+  answer only brought a moment, or reached a milestone a step `requires`, is not excluded: a
+  milestone says that something happened, a `when` reads what was decided. But two definitions
+  an author may take for the same differ here, so `ventoux check` warns
+  (`REQUIRES_EXCLUDES_NO_ONE`) on a step with an approval that requires a milestone only one
+  task's answers reach: naming the step, the milestone and the task, and saying that reading the
+  task's outcome in `when` is what keeps its answerer from approving. The cases guide says the
+  same.
+- **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3.
+- **Set aside:** excluding whoever reached a required milestone (it would exclude everyone who
+  moved a case forward, and D39 left it as one decision covering moments too); and explaining
+  the difference in the guide alone (nothing would tell an author which they wrote).
 
 ## Concepts
 
