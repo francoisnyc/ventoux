@@ -55,6 +55,9 @@ from ventoux.temporal.cases import (
 )
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import (
+    NOT_A_CASE,
+    UNREAD,
+    CaseEnded,
     CaseLookup,
     CaseOpener,
     ForgetActivities,
@@ -62,6 +65,7 @@ from ventoux.temporal.forget import (
     ForgetWorkflow,
     answer_forget,
     closed_first,
+    ending_refusal,
     forget_report,
     lookup_refusal,
     opener_refusal,
@@ -935,6 +939,15 @@ def refusal(when: str, tmp: Path) -> str:
         ),
         "the case's definition can't be read any more": lambda: lookup_refusal(
             "claim-7", CaseLookup("kept", False, "")
+        ),
+        "the case's definition can't be read by the worker's code": lambda: lookup_refusal(
+            "claim-7", CaseLookup("kept", True, "", unreadable=UNREAD)
+        ),
+        "the ID is a plan's run, not a case": lambda: lookup_refusal(
+            "run-1", CaseLookup("kept", False, "", unreadable=NOT_A_CASE)
+        ),
+        "the case ended on a definition that never forgets": lambda: ending_refusal(
+            "claim-7", CaseEnded("closed: duplicate, by ana", [], "never")
         ),
         "a forgotten case's history is read or replayed": lambda: destroyed_key(tmp),
     }
