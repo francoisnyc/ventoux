@@ -3582,6 +3582,10 @@ whose key provider or audit store is for development, or that doesn't say, so th
 *Amended 2026-11-10, by D83* (the text above stands; this changes the bound): contracts no longer
 hash from pydantic's rendering, so pydantic is bounded below its next major (`>=2.13.5,<3`).
 
+*Amended 2026-11-11, by D93* (the text above stands; this adds to it): a name a document tells a
+team to use is supported or not taught, the list gains the names the guides and the quickstart
+already teach, and the test that guards it reads calls and the quickstart too.
+
 ### D83. A contract's promise is written by Ventoux, never by pydantic
 
 *Decided 2026-11-10, in the contract rendering fix (`docs/layers/fix-contract-rendering.md`).
@@ -3877,6 +3881,41 @@ text is kept.*
   recorded history holds such a message.
 - **Set aside:** leaving the four inside the caller's boundary, listed by `ventoux doctor` as
   unchecked (each fix is small and reads a fact the workflow already has).
+
+### D93. A name a document teaches is supported, or it isn't taught
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision J; findings 5.3, 6b.1). Adds to D79 and D82, whose text is kept.*
+
+- **The gap it closes.** The supported imports are a committed list (`src/ventoux/public.json`,
+  D82), and the test guarding it read only `from ventoux… import …` lines in the guides and
+  examples. Thirteen names the documents tell a team to use were told in prose, in a snippet
+  with no import, or in the quickstart, and weren't on the list: `run_case`, which the guides
+  call twenty times, was "unsupported, free to change".
+- **One rule:** a name a document tells a team to use is supported, or the document stops
+  teaching it. Each name the widened test finds is added to the list, or leaves the document.
+- **Added to the list:**
+  - `ventoux.testing`: `run_case`, `CATALOG`, and the script helpers the guides teach
+    (`propose`, `retry`, `close`, `edit`, `skip`, `assign`, `claim`, `later`, `migrate`), since
+    `ventoux.testing` ships for teams' tests (D82);
+  - `ventoux.core.catalog`: `Catalog`, and the activities guide shows how one is made;
+  - `ventoux.temporal.cases`: every client function the trusted caller uses (D79's "and the
+    others"): `propose`, `claim`, `assign`, `unassign`, `give_back`, `retry`, `close`,
+    `propose_change`, `propose_migration`, `preview_migrations`, `send_event`, `view`, `shown`,
+    `approval_sheet`;
+  - `ventoux.temporal.registry`: `registry_worker`, `open_cases`;
+  - `ventoux.temporal.sandbox`: `SANDBOX`, for a deployment that builds its own worker.
+- **Not added without a reason:** `ventoux.tooling.audit.same`, an audit store's own comparison.
+  If an implementer of `AuditStore` must call it, it joins the list; otherwise the audit guide
+  stops naming it. The fix says which, and why.
+- **The test reads what teaches:** the quickstart as well as the guides, the README and the
+  examples; calls in Python blocks to a name a Ventoux module defines, not only import lines;
+  and a module path written as text (`"ventoux.testing:CATALOG"`). A name in a sentence alone
+  can't be read reliably, so where a guide names one that way it gains a snippet with its
+  import, which the test sees.
+- **Each listed name is a promise,** as before (D82): one that disappears fails a test, and
+  removing one is a decision. The list grows by about thirty names.
+- **No behaviour changes,** so no engine version is in question.
 
 ## Concepts
 
