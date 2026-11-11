@@ -3547,6 +3547,35 @@ Adds to D5, D50 and D82, whose text is kept.*
   would change what a promise covers, and migrate the lockfile, release records and manifests;
   that is a decision of its own, and method 2 stays free for it.
 
+### D84. Before the first release, a fix owes no old branch
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision A, on the branch `review-2026-11`). Adds to D51, whose text is kept; makes for every fix
+the exception D68 made for one shape.*
+
+- **Until 0.1.0 is published, a fix that decides a recorded path differently stays on engine
+  version 3:** no old branch kept behind the case's version, no new version, so no new schema
+  `$id` (D60). D51 asks for an old branch so that a case already running replays; no case outside
+  the tests was ever opened on engine 3, as the maintainer said on 2026-11-11, so no history
+  outside the repository can fail to replay.
+- **It ends at the commit 0.1.0 is tagged from.** From that commit on, D51 holds in full: a change
+  that decides a recorded path differently is the next version, its old branch kept, a fixture
+  recorded under the old version replays, and a line here. The release guide says so for the
+  first release, and 0.1.0's changelog entry says engine 3 is the first anyone is owed replay for.
+- **0.1.0 waits for the review's serious fixes:** forgetting and sealing (its fixes 2 to 7) and
+  the trust model (its fixes 8 to 11) are merged before 0.1.0 is tagged, so the first engine
+  anyone is owed replay for doesn't keep the paths they close.
+- **A recorded history a fix changes is recorded again, never deleted:** under the fixed code, in
+  the fix's own pull request, its note saying which history, which path, and why (this decision).
+  A history a fix didn't mean to change keeps replaying as it is: a fix that breaks one is wrong,
+  never re-recorded to pass.
+- **What stays:** the old branches for engine versions 1 and 2, and their histories. They cost
+  nothing new; removing them is a change of its own.
+- **Fail closed:** if a case outside the tests is ever found opened on engine 3 before 0.1.0, the
+  exception stops for every fix not yet merged, and each takes a new engine version.
+- **Set aside: engine version 4 for these fixes** (the review's option (i)). Its old branches would
+  keep, for cases that don't exist, the paths the review shows break promises.
+
 ## Concepts
 
 | Term | Meaning |
