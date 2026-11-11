@@ -41,6 +41,7 @@ type ActKind = Literal[
     # the case has ended, its key destroyed.
     "forget proposed",
     "key destroyed",
+    "key kept",  # the case, as it ended, said it keeps its records: nothing was destroyed
 ]
 
 # What the engine decided, as an auditor asks about it (brief, D76).

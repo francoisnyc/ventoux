@@ -1048,6 +1048,25 @@ be erased on request), has size limits, and a second copy of business records go
   destroy. The case writes every record, sealed, before it ends, so all are sealed before the key
   goes; with the store down the case stays closing and the request waits, saying why. The request
   writes its own stream to the export, before the key is destroyed.
+- **Amended 2026-11-11, by the forget fix** (`docs/layers/fix-forget-on-the-cases-word.md`; the
+  text above stands, this makes it exact): closed is the case's own word, never Temporal's. A
+  case that has closed runs on until its records are written (D77), so the request no longer
+  takes "its workflow runs" for "it is open". Before it destroys the key it reads the report the
+  case returned as it ended: what its family's definitions say of forgetting then, and whether
+  the case took the request. A case that took it is forgotten; one that didn't was closed
+  already, and is forgotten unless its definition, as it ended, keeps its records (`while_open`
+  or `never`), in which case the request ends refused and the key stays, the last record of
+  its stream (D77) saying why, as an act of its own, `key kept`. So a migration to a
+  release that keeps its records, made after the proposal, is honoured too. A case that returned
+  no report (terminated, failed) is forgotten as before.
+- **Amended 2026-11-11, by the same fix** (this adds to "twice, or a case that never existed, is
+  refused before anyone approves"): a start that doesn't read as a case's is said before anyone
+  answers, never waited on. A case refused as it opened, for a definition that doesn't read,
+  never opened and keeps no records: it can be forgotten, so the sealed values in its start go
+  with its key. A case that opened and whose definition the worker's code can no longer read is
+  refused, saying to deploy code that reads it (fail closed). A plan's run on its own, which has
+  a key as a case has (D31), is refused: forgetting one is not decided yet, and is a decision
+  of its own.
 - **Amended 2026-11-11, by D89** (the text above stands; this says what it covers): "every form
   value in the answers people sent" is the answer as sent, sealed whole. A value the case file
   then holds follows its field: it goes with forgetting only if its field is sensitive.

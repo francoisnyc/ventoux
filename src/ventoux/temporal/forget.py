@@ -24,7 +24,7 @@ from temporalio.service import RPCError, RPCStatusCode
 # deterministic and passed through, imported once and shared (as in `cases.py`).
 with workflow.unsafe.imports_passed_through():
     from ventoux.case.audit import Act, ActKind, AuditRecord, Decision
-    from ventoux.case.definition import parse_case
+    from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.engine import ENGINE
     from ventoux.case.forgetting import (
         approval_refusal,
@@ -99,6 +99,22 @@ class CaseLookup:
     # Why the key service couldn't say where its key stands, if it couldn't: never read as a key
     # destroyed or never made (brief, D78). Empty in a lookup recorded before 19c.
     unavailable: str = ""
+    # Why its start doesn't read as a case's, if it doesn't: said at once, never waited on
+    # (brief, D32). Empty in a lookup recorded before the fix.
+    unreadable: str = ""
+
+
+# What a request says of a workflow whose start isn't a case's, or whose definition this
+# worker can't read: each ends `<case> <reason>`.
+NOT_A_CASE = "is not a case: it is a plan's run, and a request forgets a case"
+UNREAD = (
+    "holds a definition this worker can't read, so whether it keeps its records is unknown: "
+    "deploy code that reads it, then propose again"
+)
+
+
+class NotACase(Exception):
+    """A workflow's start that isn't a case's."""
 
 
 def child_refusal(case: str) -> str | None:
@@ -120,6 +136,9 @@ def lookup_refusal(case: str, found: CaseLookup) -> str | None:
         return f"there is no case {case}: no key was ever made for it"
     if found.key == "destroyed":
         return f"{case} was already forgotten: its key was destroyed"
+    if found.unreadable:
+        # Fail closed, and said: a request never waits on what it can't read (brief, D17).
+        return f"{case} {found.unreadable}"
     if found.forgetting == "":
         # Fail closed: a case whose definition can't be read might keep its records.
         return (
@@ -160,6 +179,11 @@ class CaseEnded:
     # `terminated`, `timed out`, `canceled`.
     last: str
     flags: list[str]  # what completed after its close was requested, if it completed
+    # The case's own word, from the report it returned: what its family's definitions say of
+    # forgetting as it ended, and whether it took this request (brief, D32). Empty if it returned
+    # no report, or its worker predates the fix: the request then goes on as it did.
+    forgetting: str = ""
+    took: bool = False
 
 
 @dataclass
@@ -170,6 +194,21 @@ class ForgetReport:
     # waiting for the case's workflow to end; forgotten: its key was destroyed.
     status: str
     history: list[str] = field(default_factory=list[str])  # what happened, one line each
+
+
+def ending_refusal(case: str, ended: CaseEnded) -> str | None:
+    """Why the key of `case` is kept though its forgetting was approved, read from the case's own
+    word as it ended; None if the key may go. A case that took the request is forgotten. One
+    that didn't was closed already when it was asked: a closed case can be forgotten unless its
+    definition keeps its records (brief, D32). Temporal saying "running" never meant "open": a
+    closed case runs on until its records are written (brief, D77)."""
+    if ended.took:
+        return None
+    if ended.forgetting == "never":
+        return f"{case} keeps its records (forgetting: never): it can't be forgotten"
+    if ended.forgetting == "while_open":
+        return closed_first(case)
+    return None
 
 
 def closed_first(case: str) -> str:
@@ -321,7 +360,9 @@ class ForgetWorkflow:
                 self.record("answered", sent.by, sent.roles, approved, self.refused(start, refused))
                 return self.report
             self.record("answered", sent.by, sent.roles, approved)
-            await self.destroy_once_ended(start.case)
+            if (refused := await self.destroy_once_ended(start.case)) is not None:
+                self.record("key kept", None, [], self.refused(start, refused))
+                return self.report
             # Its last record, written after the key is gone: it holds no sensitive value.
             self.record("key destroyed", None, [], Decision("forgotten", target=start.case))
             return self.report
@@ -353,9 +394,10 @@ class ForgetWorkflow:
         self.report.status = "closing the case"
         return None
 
-    async def destroy_once_ended(self, case: str) -> None:
+    async def destroy_once_ended(self, case: str) -> str | None:
         """Wait until the case's workflow has ended, then destroy its key: work still running
-        needs the key to read its own values (brief, D32)."""
+        needs the key to read its own values (brief, D32). Why the key is kept, if the case's own
+        word as it ended says so; None once it is destroyed."""
         ended = await workflow.execute_activity_method(
             ForgetActivities.case_ended,
             case,
@@ -364,11 +406,19 @@ class ForgetWorkflow:
         )
         self.report.history.append(f"{case} ended: {ended.last}")
         self.report.history += [f"{case} flagged: {flag}" for flag in ended.flags]
+        # No patch marker: this reads only what the look at the case's end recorded, and one
+        # recorded before the fix holds no word of the case's, so it replays as it was
+        # (brief, D51).
+        if (kept := ending_refusal(case, ended)) is not None:
+            self.report.status = "refused"
+            self.report.history.append(f"refused: {kept}")
+            return kept
         await workflow.execute_activity_method(
             ForgetActivities.destroy_key, case, start_to_close_timeout=KEY_CALL
         )
         self.report.history.append(f"the key of {case} was destroyed")
         self.report.status = "forgotten"
+        return None
 
     def refusal(self, start: ForgetStart, sent: ForgetAnswer) -> str | None:
         """Why `sent` can't answer the request; None if it may."""
@@ -401,7 +451,18 @@ class ForgetActivities:
             return CaseLookup("", False, "", unavailable=str(down))
         if key != "kept":
             return CaseLookup(key, False, "")
-        return CaseLookup(key, await self.still_running(case), await self.forgetting(case))
+        running = await self.still_running(case)
+        try:
+            return CaseLookup(key, running, await self.forgetting(case))
+        except NotACase:
+            return CaseLookup(key, running, "", unreadable=NOT_A_CASE)
+        except CaseInvalid:
+            # A case refused as it opened never opened: it decided nothing and keeps no records,
+            # whatever its definition would have said, and its start holds sealed values, so its
+            # key may go. Any other case whose definition doesn't read might keep its records.
+            if await self.ended_as(case) == WorkflowExecutionStatus.FAILED:
+                return CaseLookup(key, running, "allowed")
+            return CaseLookup(key, running, "", unreadable=UNREAD)
 
     async def forgetting(self, case: str) -> str:
         """What the case's family says about forgetting, read from the start of its latest run
@@ -434,8 +495,13 @@ class ForgetActivities:
         converter = self.client.data_converter.with_context(
             WorkflowSerializationContext(self.client.namespace, case)
         )
-        [opening] = await converter.decode(started.input.payloads, [CaseStart])
-        assert isinstance(opening, CaseStart)
+        try:
+            [opening] = await converter.decode(started.input.payloads, [CaseStart])
+        except (TypeError, ValueError, KeyError) as other:
+            # Not a case's start: another workflow's, such as a plan's run (brief, D31).
+            raise NotACase(case) from other
+        if not isinstance(opening, CaseStart):
+            raise NotACase(case)
         return opening
 
     @activity.defn(name="ventoux.forget.case_ended")
@@ -453,7 +519,12 @@ class ForgetActivities:
         if status == WorkflowExecutionStatus.COMPLETED:
             handle = self.client.get_workflow_handle(case, result_type=CaseReport)
             returned = await handle.result()
-            return CaseEnded(returned.history[-1], list(returned.flags))
+            return CaseEnded(
+                returned.history[-1],
+                list(returned.flags),
+                returned.forgetting,
+                returned.forget_taken,
+            )
         how = "no longer held by Temporal" if status is None else status.name.lower()
         return CaseEnded(how.replace("_", " "), [])
 

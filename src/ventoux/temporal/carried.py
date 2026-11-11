@@ -95,6 +95,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "opened_by": state.opened_by,
         "phase": state.phase,
         "closed_because": state.closed_because,
+        "forget_taken": state.forget_taken,
         "closed_as": state.closed_as,  # the close reason a person used, or None (brief, D74)
         "closed_by": state.closed_by,  # who used it, or None (brief, D74)
         "cases": dict(state.cases),  # the children its release pins, as stored data (brief, D74)
@@ -340,6 +341,8 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
         opened_by=data["opened_by"],
         phase=data["phase"],
         closed_because=data["closed_because"],
+        # False in a state carried from before the fix: it then decides as it did.
+        forget_taken=data.get("forget_taken", False),
         # None in a state from before layer 18c: no close reason was kept, and no child pinned.
         closed_as=data.get("closed_as"),
         closed_by=data.get("closed_by"),

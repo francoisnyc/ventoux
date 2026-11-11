@@ -47,7 +47,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.definition import CaseInvalid, CaseStep, PlanStep, parse_case
     from ventoux.case.ending import ending_of
     from ventoux.case.engine import ENGINE, KNOWN, OPENING, opening_engine
-    from ventoux.case.forgetting import ForgetRefused
+    from ventoux.case.forgetting import ForgetRefused, family_says
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.migrations import all_plans, migration_of
     from ventoux.case.owing import attention, waiting_for
@@ -227,6 +227,12 @@ class CaseReport:
     ending: ChildEnding | None = None
     # How many of its audit records are not yet written to its store (brief, D77).
     unwritten: int = 0
+    # What its family's definitions say of forgetting, as it is now (the strictest of its own
+    # and its pinned children's: allowed, while_open or never), and whether it took an approved
+    # request to forget it. A request reads both from the report the case returns as it ends,
+    # never from Temporal's word that it runs (brief, D32). Empty from a worker before the fix.
+    forgetting: str = ""
+    forget_taken: bool = False
 
 
 @dataclass
@@ -628,6 +634,8 @@ class CaseWorkflow:
             state.engine,
             assignees(state),
             unwritten=len(state.audit) if state.engine >= RECORDS_FROM else 0,
+            forgetting="" if self.case is None else family_says(self.case, state),
+            forget_taken=state.forget_taken,
         )
 
     @workflow.query(name="view")

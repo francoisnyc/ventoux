@@ -268,6 +268,9 @@ class CaseState:
     # open; closing: nothing new starts, running activities finish; closed (brief, D10).
     phase: Literal["open", "closing", "closed"] = "open"
     closed_because: str = ""  # why it is closing, as the closed line will say
+    # Whether it took an approved request to forget it: its key may go once it has ended, even
+    # if it was closing for a reason of its own (brief, D32).
+    forget_taken: bool = False
     # The close reason a person closed it with, or None: it closed by itself. A child's report
     # gives it to its parent as the step's outcome (brief, D74).
     closed_as: str | None = None
