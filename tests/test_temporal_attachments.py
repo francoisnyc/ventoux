@@ -5,6 +5,7 @@ history replays without asking either system again.
 See docs/layers/16-field-types.md (16c) and brief D68.
 """
 
+from pathlib import Path
 from typing import Any
 
 from temporalio import workflow
@@ -16,7 +17,7 @@ from test_options import OPEN_BRANCHES
 from test_temporal_case import QUEUE, on_temporal, replay, reported
 
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow, answer, start_case
-from ventoux.testing import development_converter
+from ventoux.testing import development_converter, fixture_converter
 
 ASKED: list[str] = []  # each value a system was asked about, in order
 
@@ -126,3 +127,19 @@ def test_a_sensitive_option_and_attachment_never_cross_temporal_in_plain_text() 
     raw = History(events=history.events).SerializeToString()
     for value in ("BR-0142", "doc-7f3a"):
         assert value.encode() not in raw, value
+
+
+# Recorded under main at `830ed3f`, before this fix: the same claim, its two checks asked in
+# plain text. No new engine version: the case decides nothing differently, only how one input of
+# an activity crosses, and Temporal reads a recorded activity's result back, never its input.
+BEFORE_FIX = Path(__file__).parent / "histories" / "before_fix_sensitive_check.json"
+
+
+def test_a_history_recorded_before_the_fix_replays_and_keeps_what_it_held() -> None:
+    history = WorkflowHistory.from_json("claim-2", BEFORE_FIX.read_text())
+    ASKED.clear()
+    replay(history, CasesWithStores, fixture_converter(BEFORE_FIX))
+    assert ASKED == []  # no check is made again
+    # What was written in plain text stays so: no fix reaches a history already recorded.
+    raw = History(events=history.events).SerializeToString()
+    assert b"BR-0142" in raw and b"doc-7f3a" in raw

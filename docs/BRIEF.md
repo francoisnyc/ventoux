@@ -2840,6 +2840,9 @@ D9, D16, D18, D19 and D30, whose text is kept.*
   holds an option: a wait's answer sets a plan's fields, and nothing in a plan checks one, so
   validation refuses an option among a plan's fields (`CHECKED_IN_A_PLAN`); a plan takes a
   reference, which a case's option fits.
+- **Amended 2026-11-11, by the sensitive check fix** (the text above stands; this adds to it): a
+  sensitive option's check is asked with the value still wrapped, as D68's amendment of the same
+  day says for an attachment.
 
 ### D68. An attachment: the ID a document store issued, checked when a person gives it
 
@@ -2888,6 +2891,14 @@ D16, D30, D52 and D67, whose text is kept.*
 - **Left out:** uploading, which is the inbox's; several files in one field, and an attachment in
   a list's fields (refused); events carrying attachments; a file's name, media type or size in
   the case; scanning; asking the store to erase on forgetting.
+- **Amended 2026-11-11, by the sensitive check fix** (`docs/layers/fix-sensitive-check.md`; the
+  text above stands, this adds to it): the store's check, and an option's (D67), is asked with a
+  sensitive field's value still wrapped, so it crosses Temporal sealed under the case's key as
+  any sensitive input does (D31), and the check's code is given the plain value. Until this fix
+  the check was asked in plain text, written into the case's history as the activity's input,
+  where destroying the key didn't reach it. No new engine version (D51): the case decides
+  nothing differently, and a history recorded before replays as it was. A history already
+  recorded keeps what it held in plain text: nothing reaches it.
 
 ### D69. Claiming a task: the holder is asked, never allowed; only the holder answers
 
