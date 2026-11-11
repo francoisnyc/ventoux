@@ -231,5 +231,15 @@ class ExportActivities:
         restricted = {name: tuple(roles) for name, roles in sent.restricted.items()}
         self.store.append(exported(sent.stream, records, sensitive, restricted, self.keys))
 
+    @activity.defn(name="ventoux.audit.last_number")
+    def last_number(self, stream: str) -> int:
+        """The number of the last record the store holds of `stream` itself, never of a stream
+        under it; 0 if it holds none. A case's requests to forget share one stream, so each asks
+        where it stands before its first write (brief, D77)."""
+        held = [
+            record["number"] for record in self.store.read(stream) if record["stream"] == stream
+        ]
+        return max(held, default=0)
+
     def all(self) -> list[Any]:
-        return [self.append]
+        return [self.append, self.last_number]
