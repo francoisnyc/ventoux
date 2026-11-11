@@ -6,25 +6,31 @@ whether the case took the request, are read from the report the case returns (br
 """
 
 import asyncio
+import contextlib
 from pathlib import Path
 from typing import Any
 
-from temporalio.client import Client
+from temporalio.client import Client, WorkflowFailureError
 from test_audit_export import DownAudit, QuicklyFailingExports
 from test_sensitive import FILE, claim
 from test_temporal_forget import QUEUE, on_temporal, reported
 from test_temporal_sensitive import reported as reported_case
 
+from ventoux.core.provenance import sourced
 from ventoux.temporal.cases import CaseReport, answer, retry_export, start_case
+from ventoux.temporal.client import start_plan
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import (
+    UNREAD,
     CaseEnded,
+    CaseLookup,
     ForgetReport,
     answer_forget,
     ending_refusal,
+    lookup_refusal,
     propose_forget,
 )
-from ventoux.testing import DevelopmentForget, as_json
+from ventoux.testing import DevelopmentCases, DevelopmentForget, DevelopmentPlans, as_json
 from ventoux.tooling.keys import KeyState
 
 Ended = tuple[CaseReport, ForgetReport, KeyState]
@@ -132,3 +138,90 @@ def test_the_cases_word_as_it_ended_decides_whether_its_key_goes() -> None:
     # No word: the case returned no report (terminated, failed at its opening), or its worker
     # predates this. Its key goes, as before.
     assert ending_refusal("claim-1", ended("")) is None
+
+
+# --- A start that doesn't read as a case's: said at once, never waited on in silence ---
+
+
+def unreadable() -> dict[str, Any]:
+    """The claim with a step of a kind that doesn't exist: refused as the case opens, after the
+    client sealed its national ID into its start."""
+    definition = claim()
+    definition["steps"]["assess"] = {"kind": "ritual", "display": {"title": "Assess"}}
+    return definition
+
+
+def test_a_case_refused_at_its_opening_for_its_definition_can_be_forgotten() -> None:
+    # Its workflow failed as it opened: it never opened, decided nothing and keeps no records,
+    # whatever its definition would have said. Its start still holds sealed values under its
+    # key, so the key can go (brief, D31, D32).
+    async def scenario(client: Client) -> tuple[ForgetReport, KeyState]:
+        case = await start_case(
+            client, DevelopmentCases, unreadable(), as_json(FILE), "claim-3", QUEUE
+        )
+        with contextlib.suppress(WorkflowFailureError):  # its opening was refused
+            await case.result()
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-3", "pia", ["privacy"], QUEUE
+        )
+        await reported(request, lambda now: bool(now.history))
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        told = await asyncio.wait_for(request.result(), timeout=20)
+        return told, keys_of(client).state("claim-3")
+
+    told, key = on_temporal(scenario)
+    assert told.status == "forgotten"
+    assert told.history[0] == "pia proposed forgetting claim-3, as privacy"
+    assert key == "destroyed"
+
+
+PLAN = {
+    "plan": "check-order",
+    "version": 1,
+    "display": {"title": "Check an order"},
+    "fields": {"order": {"type": "string"}},
+    "initial": "check",
+    "states": {
+        "check": {
+            "activity": "orders.lookup@1",
+            "inputs": {"order_id": {"var": "order"}},
+            "on": {"done": "checked"},
+        },
+        "checked": {"final": "succeeded"},
+    },
+}
+
+
+def test_a_plans_run_is_refused_at_once_saying_it_isnt_a_case() -> None:
+    # A plan run on its own has a key, as a case has (brief, D31), and no definition that says
+    # what it keeps. Forgetting one is not decided yet: the request says so before anyone
+    # answers, and the key stays (fail closed).
+    async def scenario(client: Client) -> tuple[ForgetReport, KeyState]:
+        fields = {"order": sourced("ord-1", "system:opener")}
+        run = await start_plan(client, DevelopmentPlans, PLAN, fields, "run-1", QUEUE)
+        await run.result()
+        request = await propose_forget(
+            client, DevelopmentForget, "run-1", "pia", ["privacy"], QUEUE
+        )
+        told = await asyncio.wait_for(request.result(), timeout=10)
+        return told, keys_of(client).state("run-1")
+
+    told, key = on_temporal(scenario)
+    assert told.status == "refused"
+    assert told.history == [
+        (
+            "refused pia's proposal: run-1 is not a case: it is a plan's run, and a request "
+            "forgets a case"
+        )
+    ]
+    assert key == "kept"
+
+
+def test_a_definition_this_worker_cant_read_refuses_the_proposal_saying_what_to_do() -> None:
+    # A case that opened, whose definition no longer reads (the code changed under it), might
+    # keep its records: refused before anyone answers, never read as allowed (fail closed).
+    found = CaseLookup("kept", True, "", unreadable=UNREAD)
+    assert lookup_refusal("claim-4", found) == (
+        "claim-4 holds a definition this worker can't read, so whether it keeps its records is "
+        "unknown: deploy code that reads it, then propose again"
+    )

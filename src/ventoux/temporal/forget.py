@@ -24,7 +24,7 @@ from temporalio.service import RPCError, RPCStatusCode
 # deterministic and passed through, imported once and shared (as in `cases.py`).
 with workflow.unsafe.imports_passed_through():
     from ventoux.case.audit import Act, ActKind, AuditRecord, Decision
-    from ventoux.case.definition import parse_case
+    from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.engine import ENGINE
     from ventoux.case.forgetting import (
         approval_refusal,
@@ -58,9 +58,6 @@ LONGEST_PAUSE = timedelta(seconds=10)  # and at most, well within ALIVE
 # A request writes its own audit stream behind this patch: one recorded before 19b replays as it
 # was, writing nothing (brief, D51) (brief, D77).
 EXPORT_PATCH = "ventoux-forget-export"
-# Before it destroys a key, a request reads the case's own word as it ended, behind this patch:
-# one recorded before the fix replays as it was (brief, D32) (brief, D51).
-ENDING_PATCH = "ventoux-forget-ending"
 # A store that is down is retried for as long as it takes, never given up on: the request's
 # records hold nothing sensitive, so its key never waits for them, but none is dropped. A store
 # that refuses them (a gap, other content) fails the request (brief, D77).
@@ -102,6 +99,22 @@ class CaseLookup:
     # Why the key service couldn't say where its key stands, if it couldn't: never read as a key
     # destroyed or never made (brief, D78). Empty in a lookup recorded before 19c.
     unavailable: str = ""
+    # Why its start doesn't read as a case's, if it doesn't: said at once, never waited on
+    # (brief, D32). Empty in a lookup recorded before the fix.
+    unreadable: str = ""
+
+
+# What a request says of a workflow whose start isn't a case's, or whose definition this
+# worker can't read: each ends `<case> <reason>`.
+NOT_A_CASE = "is not a case: it is a plan's run, and a request forgets a case"
+UNREAD = (
+    "holds a definition this worker can't read, so whether it keeps its records is unknown: "
+    "deploy code that reads it, then propose again"
+)
+
+
+class NotACase(Exception):
+    """A workflow's start that isn't a case's."""
 
 
 def child_refusal(case: str) -> str | None:
@@ -123,6 +136,9 @@ def lookup_refusal(case: str, found: CaseLookup) -> str | None:
         return f"there is no case {case}: no key was ever made for it"
     if found.key == "destroyed":
         return f"{case} was already forgotten: its key was destroyed"
+    if found.unreadable:
+        # Fail closed, and said: a request never waits on what it can't read (brief, D17).
+        return f"{case} {found.unreadable}"
     if found.forgetting == "":
         # Fail closed: a case whose definition can't be read might keep its records.
         return (
@@ -390,8 +406,10 @@ class ForgetWorkflow:
         )
         self.report.history.append(f"{case} ended: {ended.last}")
         self.report.history += [f"{case} flagged: {flag}" for flag in ended.flags]
-        # Behind a patch: a request recorded before the fix replays as it was (brief, D51).
-        if workflow.patched(ENDING_PATCH) and (kept := ending_refusal(case, ended)) is not None:
+        # No patch marker: this reads only what the look at the case's end recorded, and one
+        # recorded before the fix holds no word of the case's, so it replays as it was
+        # (brief, D51).
+        if (kept := ending_refusal(case, ended)) is not None:
             self.report.status = "refused"
             self.report.history.append(f"refused: {kept}")
             return kept
@@ -433,7 +451,18 @@ class ForgetActivities:
             return CaseLookup("", False, "", unavailable=str(down))
         if key != "kept":
             return CaseLookup(key, False, "")
-        return CaseLookup(key, await self.still_running(case), await self.forgetting(case))
+        running = await self.still_running(case)
+        try:
+            return CaseLookup(key, running, await self.forgetting(case))
+        except NotACase:
+            return CaseLookup(key, running, "", unreadable=NOT_A_CASE)
+        except CaseInvalid:
+            # A case refused as it opened never opened: it decided nothing and keeps no records,
+            # whatever its definition would have said, and its start holds sealed values, so its
+            # key may go. Any other case whose definition doesn't read might keep its records.
+            if await self.ended_as(case) == WorkflowExecutionStatus.FAILED:
+                return CaseLookup(key, running, "allowed")
+            return CaseLookup(key, running, "", unreadable=UNREAD)
 
     async def forgetting(self, case: str) -> str:
         """What the case's family says about forgetting, read from the start of its latest run
@@ -466,8 +495,13 @@ class ForgetActivities:
         converter = self.client.data_converter.with_context(
             WorkflowSerializationContext(self.client.namespace, case)
         )
-        [opening] = await converter.decode(started.input.payloads, [CaseStart])
-        assert isinstance(opening, CaseStart)
+        try:
+            [opening] = await converter.decode(started.input.payloads, [CaseStart])
+        except (TypeError, ValueError, KeyError) as other:
+            # Not a case's start: another workflow's, such as a plan's run (brief, D31).
+            raise NotACase(case) from other
+        if not isinstance(opening, CaseStart):
+            raise NotACase(case)
         return opening
 
     @activity.defn(name="ventoux.forget.case_ended")
