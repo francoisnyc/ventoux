@@ -519,6 +519,12 @@ says so:
 | `"while_open"` | accepted while the case is open, refused once it is closed |
 | `"never"` | always refused |
 
+Closed is the case's own word, and so is what it keeps: the request reads both from the report the
+case returns as it ends, before it destroys anything. A case that has closed and is still writing
+its audit records runs on in Temporal, and is closed all the same. And if a migration moved the
+case to a release that keeps its records after the request was proposed, the release it ended on
+decides.
+
 **After forgetting:**
 
 - `report(case)` still works: it reads the report the case made when it closed, which holds
@@ -550,6 +556,9 @@ says so:
 | the case is never forgotten | `claim-7 keeps its records (forgetting: never): it can't be forgotten` |
 | the case closed before the approval reached it, and keeps closed cases | `claim-7 closed before forgetting was approved, and its definition keeps closed cases (forgetting: while_open)` |
 | the case's definition can't be read any more | `claim-7's definition can't be read: Temporal holds no history of it, so whether it keeps its records is unknown` |
+| the case's definition can't be read by the worker's code | `claim-7 holds a definition this worker can't read, so whether it keeps its records is unknown: deploy code that reads it, then propose again` |
+| the ID is a plan's run, not a case | `run-1 is not a case: it is a plan's run, and a request forgets a case` |
+| the case ended on a definition that never forgets | `claim-7 keeps its records (forgetting: never): it can't be forgotten` |
 | the case's file is viewed after forgetting | `claim-7 was forgotten: its case file can't be read` |
 | a forgotten case's history is read or replayed | `the key of claim-7 was destroyed when it was forgotten: its sensitive values can't be read or written` |
 
