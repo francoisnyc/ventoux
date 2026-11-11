@@ -1045,7 +1045,8 @@ be erased on request), has size limits, and a second copy of business records go
   case returned as it ended: what its family's definitions say of forgetting then, and whether
   the case took the request. A case that took it is forgotten; one that didn't was closed
   already, and is forgotten unless its definition, as it ended, keeps its records (`while_open`
-  or `never`), in which case the request ends refused and the key stays. So a migration to a
+  or `never`), in which case the request ends refused and the key stays, the last record of
+  its stream (D77) saying why, as an act of its own, `key kept`. So a migration to a
   release that keeps its records, made after the proposal, is honoured too. A case that returned
   no report (terminated, failed) is forgotten as before.
 - **Amended 2026-11-11, by the same fix** (this adds to "twice, or a case that never existed, is
