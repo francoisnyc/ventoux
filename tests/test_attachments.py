@@ -15,6 +15,8 @@ from test_case import contract
 
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered, Schedule
 from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract_hash import contract_hash
@@ -36,6 +38,7 @@ from ventoux.core.sensitive import Sensitive
 from ventoux.core.validate import validate
 from ventoux.testing import (
     CATALOG,
+    START,
     CaseRefused,
     ChangeRefused,
     DocumentAsked,
@@ -696,6 +699,30 @@ def test_a_sensitive_attachment_keeps_its_id_wrapped() -> None:
     asked: list[tuple[str, Viewer]] = []
     store_resolvers(asked).show(run.view(roles=ADJUSTER.roles), "receipt", ADJUSTER)
     assert asked == [("doc-7f3a", ADJUSTER)]
+
+
+def test_a_sensitive_attachments_check_is_asked_with_the_id_still_wrapped() -> None:
+    # The store's check is an activity, and on Temporal an activity's input is written into the
+    # case's history. Wrapped, the ID is sealed under the case's key, and goes with it; in clear
+    # it would stay readable after the case is forgotten (brief, D31) (brief, D68).
+    definition = claim()
+    definition["fields"]["receipt"] |= {"sensitive": True, "visible_to": ["adjuster"]}
+    opened = run_case(definition, file={}, answers=[], people=ADJUSTERS, catalog=stored())
+    # The answer as the client sends it: every form value wrapped (brief, D31).
+    answer = Answered(
+        "assess",
+        "accept",
+        "ana",
+        frozenset({"adjuster"}),
+        {"receipt": Sensitive("doc-7f3a")},
+        at=START,
+    )
+    _, commands = decide(parse_case(definition), stored(), opened.state, answer)
+    [check] = commands
+    assert isinstance(check, Schedule) and check.activity == "documents.issued@1"
+    asked = check.inputs["attachment"]
+    assert isinstance(asked, Sensitive)
+    assert asked.value == "doc-7f3a"
 
 
 # --- Slice 10: an answer is decided once every check is back, whichever answers first ---
