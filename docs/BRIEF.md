@@ -1045,6 +1045,9 @@ be erased on request), has size limits, and a second copy of business records go
   destroy. The case writes every record, sealed, before it ends, so all are sealed before the key
   goes; with the store down the case stays closing and the request waits, saying why. The request
   writes its own stream to the export, before the key is destroyed.
+- **Amended 2026-11-11, by D89** (the text above stands; this says what it covers): "every form
+  value in the answers people sent" is the answer as sent, sealed whole. A value the case file
+  then holds follows its field: it goes with forgetting only if its field is sensitive.
 
 ### D33. Fresh facts: time on events, refreshing a read, and a given approval's lapse
 
@@ -3297,6 +3300,8 @@ D15, D27, D30, D31 and D51, whose text is kept.*
   record is never renamed by a later migration. *From the tutor's review of 19a:* until then no
   case moves to version 3 on Temporal either: a migration there is refused when proposed, saying
   that this code knows the version but doesn't run cases at it yet.
+- **Amended 2026-11-11, by D89** (the text above stands; this adds to it): a form value under a
+  name that is no field is in no record: its refusal says the name, never the value.
 
 ### D77. The audit export: written by the case, sealed, in order, and never ahead of what it wrote
 
@@ -3729,6 +3734,33 @@ decision E; findings 1b.5, 1c.4). Adds to D30, D42, D74 and D77, whose text is k
 - **No new engine version** (D84): the fixes land before 0.1.0, so they keep engine 3.
 - **Known limit, kept:** what a plan's activities give after reading a hidden input is as visible
   as their step's outputs are, as in one case (D42, as amended by D48).
+
+### D89. A form value follows its field; under a name that is no field, it is never kept
+
+*Decided 2026-11-11, before the fixes of the November 2026 review (`reviews/2026-11/FIXES.md`,
+decision F; finding 1c.7). Adds to D31, D32 and D76, whose text is kept.*
+
+- **Two texts, read together.** D32 says forgetting takes "every form value in the answers people
+  sent"; D76 says a form value is in the record "as the case file holds it: sensitive only if
+  its field is". Both stand, about two things. The answer as sent is sealed whole by the client,
+  which can't tell which fields are sensitive (D31), and that sealed answer goes with forgetting.
+  Once the answer is accepted, each value lands in its field and follows that field's rule:
+  sealed if the field is sensitive, in clear if not, in the state and in the audit store.
+- **So a form value in a field that isn't sensitive outlives forgetting,** and the forgetting
+  guide says so: a field that may hold personal data is declared sensitive. Treating every form
+  value as sensitive for good is set aside: every field a person fills in would be hidden in
+  views and unreadable where a sensitive value is.
+- **The bug it fixes.** An answer giving a value under a name its task doesn't set was refused,
+  rightly, and to record the refusal the value was unwrapped and kept in clear: in the history,
+  in the audit store for every role and for none, and after forgetting. A name the engine didn't
+  recognise was read as "not sensitive", a permissive default.
+- **A value under a name that is no field is never kept** (fail closed). The answer is refused as
+  before, the line saying the name and never the value (`the answer gives scratch, which accept
+  doesn't set`). The value is dropped unopened: not in the state, not in the refusal's record or
+  the export's input, not across continue-as-new. There is nothing left to forget.
+- **No new engine version** (D84): the fix lands before 0.1.0, so it keeps engine 3.
+- **Set aside:** keeping such a value sealed as if sensitive (nobody may ever need it, and it is
+  one more sealed thing to account for).
 
 ## Concepts
 
