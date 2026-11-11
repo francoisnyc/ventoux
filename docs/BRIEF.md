@@ -355,6 +355,10 @@ be erased on request), has size limits, and a second copy of business records go
   validator warns when an approval's condition reads none of the fields its step uses.
 - Replaces untyped signal payloads (the prototype's `wait: {signals}` plus `update` expressions):
   in a task, outcomes are the signals and their forms are the payload schemas.
+- **Amended 2026-11-11, after the whole-project review of November 2026**
+  (`docs/layers/fix-review-decisions.md`, F; the text above stands, this adds to it): an answer
+  giving a value under a name its task doesn't set is refused, as an undeclared answer is, and the
+  refusal never keeps the value in clear. Not built on 2026-11-11 (the review's finding 1c.7).
 
 ### D10. A case closes when nothing is left to do
 
@@ -418,6 +422,10 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-24, by D55** (the text above stands; this adds to it): the semantic diff
   reads "someone else" from the definition: which tasks' answers can reach a step's inputs or
   `when`, so a release that stops a step reading a field says who may now approve it, as looser.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds to it): the person whose answer
+  inside a plan chose the plan's outcome approves nothing that outcome decides, and the person
+  whose answer a step's own `when` read approves nothing inside its plan or its child. Not built on
+  2026-11-11.
 
 ### D12. A small vocabulary of sources
 
@@ -831,6 +839,9 @@ be erased on request), has size limits, and a second copy of business records go
   the case's release (its name, number, digest and plans) and its engine version.
 - **Amended 2026-11-07, by D76** (the text above stands; this adds to it): what crosses includes
   the case's audit records not yet exported, in order, and the number its next record takes.
+- **Amended 2026-11-11, by D89** (the text above stands; this adds to it): the class settings
+  `events_per_run` and `audit_bound` are carried by the run that started under them, so a replay
+  switches and holds where it did. Not built on 2026-11-11.
 
 ### D28. A plan step runs as a child workflow of its case
 
@@ -874,6 +885,9 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-22, by D51** (the text above stands; this adds to it): a case opened on a
   release runs the plans of its release, carried in its start; the plans the deployment supplies
   serve drafts.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds to it): a third exclusion
+  crosses into the plan, the person whose answer the step's own `when` read; and the plan's outcome
+  carries the person whose answer inside the plan chose it. Not built on 2026-11-11.
 
 ### D29. Outputs carry their contract's sources; workflow steps are bound children
 
@@ -1385,6 +1399,9 @@ text is kept.*
 - **Amended 2026-10-22, by D49** (the text above stands; this narrows it): a plan's own
   transitions are no longer left open. A transition whose condition reads untrusted data stops the
   plan, and the plan step needs attention.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds to it): the gap recorded above
+  stands (a person whose answer only brought the moment, or whose run a step `requires`, is not
+  excluded), and `ventoux check` warns where a definition relies on it. Not built on 2026-11-11.
 
 ### D40. Rules that stop steps: what a close does, to one step, through one place
 
@@ -1571,6 +1588,9 @@ text is kept.*
 - **Amended 2026-10-22, by D48** (the text above stands; this adds to it): the known limit above is
   recorded as a deliberate limit, and is wider than milestones: `visible_to` narrows who sees a
   value, never what the case did (D30, as amended).
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): "a view may hide more
+  than its source, never less" holds at three joins too: a parent's value given to a child's field,
+  a child's reported field, and a plan step's input in the audit record. Not built on 2026-11-11.
 
 ### D43. A run carries what steered it, and passes it on
 
@@ -1615,6 +1635,10 @@ Adds to D29, D38, D39, D40, D41 and D42, whose text is kept.*
 - **Cases already open** on a path the fix decides differently replay differently, and wait until
   the code is fixed (D17), as 11b's did: carried to layer 12. A later moment a run brings (11f's
   timers `since` a start) carries what steered the run too.
+- **Amended 2026-11-11, by D85** (the text above stands; this adds to it): a case step keeps what
+  steered it, as every kind of step does, and its child's opening carries it; a step repeated over
+  a list is steered by the list's sources; the absence of a person's work carries what steered it.
+  Not built on 2026-11-11.
 
 ### D44. Timers: time passing after a moment, set on it, fired as an event at its own time
 
@@ -1902,6 +1926,9 @@ D30, D38, D40, D42 and D46, whose text is kept.*
   under open cases) is listed in the checkpoint's note, not decided here.
 - **Amended 2026-10-25, by D59** (the text above stands; this adds to it): the warning is built,
   `KEPT_FROM_STARTING`, said by `ventoux check`, `ventoux release` and CI's summary.
+- **Amended 2026-11-11, by D85** (the text above stands; this narrows it): untrusted data may still
+  keep something from happening, and the case may close with nothing left to do; a milestone is
+  never reached by it. Not built on 2026-11-11.
 
 ### D49. A plan's path is never chosen by untrusted data
 
@@ -2061,6 +2088,9 @@ D27, D28 and D50, whose text is kept.*
 - **Amended 2026-11-07, by D76** (the text above stands; this adds to it): version 3 makes audit
   records. A case opened at 3 records the marker `ventoux-engine-3` and exports; a case opened
   before decides and replays as it did, and exports nothing, saying so.
+- **Amended 2026-11-11, by D84** (the text above stands; this adds to it): until the first
+  published release, a fix that decides a recorded path differently changes engine 3 in place, with
+  no new version and no old branch; after it, this decision applies in full.
 
 ### D52. Change requests: proposed, approved by someone else, checked again, applied
 
@@ -2174,6 +2204,9 @@ D5, D44, D51 and D52, whose text is kept.*
   case also asks its registry, as the approval would apply the migration, that the target was
   activated there and isn't retired; the cohort of a release is its open cases, as the registry
   lists them.
+- **Amended 2026-11-11, by D89** (the text above stands; this adds to it): when a migration is
+  refused for an engine version the code doesn't know, the versions it knew are kept in the state,
+  so a replay by later code refuses the same. Not built on 2026-11-11.
 
 ### D54. Activation: worker manifests, the environment registry, and the release a case checks
 
@@ -2373,6 +2406,8 @@ D55, whose text is kept.*
 - **Amended 2026-10-25, by D59** (the text above stands; this changes one thing): "against the
   development catalog until `ventoux check` brings the deployment's" ends: every command takes the
   deployment's catalog, named in configuration, and refuses to run with none named.
+- **Amended 2026-11-11, by D88** (the text above stands; this adds to it): "drafts, never sends"
+  may be said by the sheet once the engine checks it, as D88 decides. Not built on 2026-11-11.
 
 ### D57. Release notes in the record, and a contract's readable diff
 
@@ -2899,6 +2934,9 @@ D16, D30, D52 and D67, whose text is kept.*
   where destroying the key didn't reach it. No new engine version (D51): the case decides
   nothing differently, and a history recorded before replays as it was. A history already
   recorded keeps what it held in plain text: nothing reaches it.
+- **Amended 2026-11-11, by D84** (the text above stands; this adds to it): the exception made above
+  for one shape, in code never released, covers every fix merged after `main` at `830ed3f` until
+  the first published release.
 
 ### D69. Claiming a task: the holder is asked, never allowed; only the holder answers
 
@@ -3106,6 +3144,9 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
   changes, so it would fail again; a person closes the case.
 - **No new engine version (D51):** no definition readable before holds `for_each`, and no case
   could hold a list value.
+- **Amended 2026-11-11, by D85** (the text above stands; this adds to it): each run of a repeated
+  step is steered by its list's sources; and an empty untrusted list meeting `requires` at once
+  carries those sources, so what requires it reaches no milestone. Not built on 2026-11-11.
 
 ### D74. Child cases: a whole case opened from a step, pinned by its parent, reporting back
 
@@ -3176,6 +3217,23 @@ child asking as it opens. Until then a case step on Temporal fails, needing atte
 - **A child its case doesn't hold fails the step** (fail closed): the step's start never guesses a
   definition, and waits for a person (D17).
 - **No new engine version (D51):** no definition readable before has a case step.
+- **Amended 2026-11-11, after the whole-project review of November 2026**
+  (`docs/layers/fix-review-decisions.md`, B; the text above stands, this narrows it): a child case
+  holding a failed run holds its parent's automatic close (`closes_when`), and refuses a rule's
+  stop of its case step, as a failed run does inside one case (D17, D26, D40). A person's close of
+  the parent still closes both. "A close never waits for a person" was written of open tasks; a
+  failed run waits for one. Not built on 2026-11-11: until its fix, both cancel the child's failed
+  run (the review's finding 1b.6).
+- **Amended 2026-11-11, by D85** (the text above stands; this adds to it): a case step keeps what
+  steered it, its child's opening carries it, and a field the child declares `untrusted:` keeps its
+  mark when its parent gives the value. Not built on 2026-11-11.
+- **Amended 2026-11-11, by D86** (the text above stands; this adds to it): the person whose answer
+  the case step's own `when` read approves nothing in the child, with the opener and the proposer.
+  Not built on 2026-11-11.
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): what this decision says
+  of a sensitive value holds for one hidden by `visible_to`: it enters a child only into a field no
+  more roles may see, and a reported field is read in the parent by no more roles than see it in
+  the child. Not built on 2026-11-11.
 
 ### D75. Child cases on Temporal: a child workflow abandoned to itself, a doorbell, a report read
 
@@ -3269,6 +3327,11 @@ D15, D27, D30, D31 and D51, whose text is kept.*
   record is never renamed by a later migration. *From the tutor's review of 19a:* until then no
   case moves to version 3 on Temporal either: a migration there is refused when proposed, saying
   that this code knows the version but doesn't run cases at it yet.
+- **Amended 2026-11-11, after the whole-project review of November 2026**
+  (`docs/layers/fix-review-decisions.md`, F; the text above stands, this narrows one sentence): D32
+  stands, "every form value in the answers people sent" goes with forgetting. So the values an act
+  gave stay sealed in its record, whatever their field; what a decision wrote is recorded as the
+  case file holds it, sensitive only if its field is. Not built on 2026-11-11.
 
 ### D77. The audit export: written by the case, sealed, in order, and never ahead of what it wrote
 
@@ -3316,6 +3379,12 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   written, and forgetting it then destroys the key; while a case holds, each act sent to it waits
   as a signal in its run's history; a plan whose workflow itself fails returns no report, so its
   events stay in its own history.
+- **Amended 2026-11-11, by D87** (the text above stands; this adds to it): a plan step's input is
+  never shown by the audit record to more roles than see the value in the case, under whatever name
+  the plan gives it. Not built on 2026-11-11.
+- **Amended 2026-11-11, by D89** (the text above stands; this adds to it): the forget request's
+  records carry the engine version the request learned once and carried, never the code's constant.
+  Not built on 2026-11-11.
 
 ### D78. The production key provider: Vault's transit engine, a mark that outlives the key
 
@@ -3392,6 +3461,9 @@ D19 and D22, whose text is kept, and to "Out of scope for v1.0", amended below.*
   given only its own kind of call by Temporal's authorization.
 - **What is left for after v1.0:** the API and the reference inbox (an HTTP service, people's
   sign-in, roles from an identity provider, an inbox drawing task forms from field types).
+- **Amended 2026-11-11, by D90** (the text above stands; this adds to it): the engine is hardened
+  against four messages sent with Temporal's client directly, and the deployment guide says that
+  direct access to the namespace is inside the trusted caller's boundary. Not built on 2026-11-11.
 
 ### D80. The conformance suite: validation results as data, the catalog generated, every change recorded
 
@@ -3525,6 +3597,13 @@ whose key provider or audit store is for development, or that doesn't say, so th
 *Amended 2026-11-10, by D83* (the text above stands; this changes the bound): contracts no longer
 hash from pydantic's rendering, so pydantic is bounded below its next major (`>=2.13.5,<3`).
 
+*Amended 2026-11-11, after the whole-project review of November 2026*
+(`docs/layers/fix-review-decisions.md`, J; the text above stands, this adds to it): every name a
+guide tells a team to use is supported: it is in `public.json`, or the guide stops using it. The
+guard test reads the calls in the guides' Python blocks and the quickstart, not only import lines.
+Not built on 2026-11-11 (the review's findings 5.3 and 6b.1); the fix's note says, name by name,
+which was listed and which a guide stopped using.
+
 ### D83. A contract's promise is written by Ventoux, never by pydantic
 
 *Decided 2026-11-10, in the contract rendering fix (`docs/layers/fix-contract-rendering.md`).
@@ -3546,6 +3625,111 @@ Adds to D5, D50 and D82, whose text is kept.*
 - **Set aside: a hash method 2,** a description Ventoux designs (no titles, no class name). It
   would change what a promise covers, and migrate the lockfile, release records and manifests;
   that is a decision of its own, and method 2 stays free for it.
+
+### D84. Until the first published release, a fix changes engine 3 in place
+
+*Decided 2026-11-11, after the whole-project review of November 2026
+(`docs/layers/fix-review-decisions.md`, A). Adds to D51 and D68, whose text is kept.*
+
+- **Nothing before the first published release is owed an old branch.** Until `ventoux` 0.1.0 is
+  published (D82), a fix that decides a recorded path differently changes engine 3 in place: no new
+  engine version, and no old branch kept behind the case's version.
+- **It stands on one fact, confirmed by the maintainer on 2026-11-11:** no case outside the tests
+  runs on engine 3. D68 made this exception for one shape, in code "merged on 2026-11-02 and never
+  released (0.0.0)"; this extends it to every fix, for the same reason.
+- **What it covers:** fixes merged after `main` at `830ed3f`, until the first published release.
+- **Fixtures that replay a changed path are recorded again,** and the fix's note says which and
+  why. A fixture whose path a fix doesn't change still replays as it is.
+- **After the first published release, D51 applies in full:** a change that decides a recorded path
+  differently is the next version, with its old branch, its fixture and its line there.
+
+### D85. Steering crosses a case step, a list and an absence
+
+*Decided 2026-11-11, after the whole-project review of November 2026
+(`docs/layers/fix-review-decisions.md`, C). Adds to D43, D48, D73 and D74, whose text is kept.*
+
+- **A case step keeps what steered it, and its child's opening carries it,** as a plan step's does
+  (D39, D43). It is checked against each input's policy in the child, counted at the case step's
+  `reaches` and at rules on its start, and ends at a person's task (D43). A field the child
+  declares `untrusted:` keeps its mark whoever gives the value, its parent included (D12, D41).
+  `ventoux check` says the same.
+- **A step repeated over a list is steered by the list's sources:** each run exists because the
+  item was listed. A run over an untrusted list is a steered run, as D43 reads one.
+- **The absence of a person's work carries what steered it,** as an activity's unset output does. A
+  task kept from starting by untrusted data, or an empty untrusted list meeting `requires`, doesn't
+  reach a milestone. D48's limit stands as written: untrusted data may keep something from
+  happening, and the case may close with nothing left to do; it never reaches a milestone by it.
+- **Not built on 2026-11-11.** Until their fixes, `main` does none of the three (the review's
+  findings 1a.1, 1a.2, 1a.3 and 1a.5).
+
+### D86. Who is excluded across a plan step and a case step
+
+*Decided 2026-11-11, after the whole-project review of November 2026
+(`docs/layers/fix-review-decisions.md`, D). Adds to D11, D28, D39 and D74, whose text is kept.*
+
+- **A plan's outcome carries the person whose answer inside the plan chose it,** as a child's
+  outcome carries its closer (D74): `person:<answerer>, system:<plan>`. That person approves
+  nothing the outcome decides (D11).
+- **The person whose answer a step's own `when` read approves nothing inside its plan or its
+  child,** as on a call step. D28 and D74 name the opener and the proposer; this is the third.
+- **D39's recorded gap stands:** a person whose answer only brought the moment, or whose run a step
+  `requires`, is not excluded. `ventoux check` warns where a definition relies on it.
+- **Not built on 2026-11-11** (the review's findings 1b.1, 1b.8 and 1b.7).
+
+### D87. A value hidden by `visible_to` is never given to more roles at a join
+
+*Decided 2026-11-11, after the whole-project review of November 2026
+(`docs/layers/fix-review-decisions.md`, E). Adds to D42, D74 and D77, whose text is kept.*
+
+- **A view hides more than its source, never less, at every join,** as D42 says of a field a rule
+  sets and D74 of a sensitive value. Refused: a parent's value given to a child's field that more
+  roles may see; a child's reported field read by more roles than see it in the child; a plan
+  step's input that the audit record would show under another name.
+- **Validation refuses each, and the runtime refuses the same when validation didn't run** (D34).
+- **Not built on 2026-11-11** (the review's findings 1b.5 and 1c.4).
+
+### D88. "Drafts by default" is checked by the engine
+
+*Decided 2026-11-11, after the whole-project review of November 2026
+(`docs/layers/fix-review-decisions.md`, G). Adds to D56, whose text is kept, and to the
+non-negotiables.*
+
+- **A contract says it talks to people by its effect, `notify`,** which every contract already
+  declares and its hash already covers (D5): no new key. A contract that only drafts is `write`.
+- **In a case, a `notify` contract runs only on a step with an approval that has no `when`.**
+  Refused at validation, and at the start on nothing validation did (D34). So a person sees each
+  message before it goes.
+- **In a plan, a state calling a `notify` contract is the target of an approval state** (D23),
+  refused when the plan is read and when the run would enter it otherwise.
+- **What follows:** a repeated step takes no approval (D73), so it can't call one; a refresh never
+  runs one, being only a `read` (D33).
+- **Built before layer 21. Not built on 2026-11-11** (the review's finding 1b.9): until then
+  nothing checks the non-negotiable, and the "will never do" sheet doesn't say it (D56).
+
+### D89. A refusal that depends on what the code knew is recorded as data
+
+*Decided 2026-11-11, after the whole-project review of November 2026
+(`docs/layers/fix-review-decisions.md`, H). Adds to D27, D53 and D77, whose text is kept.*
+
+- **What the code knew is kept in the state when it refuses,** so a replay by later code refuses
+  the same: the engine versions a refused migration was judged against.
+- **The same goes for** the forget request's engine version, learned once and carried, never read
+  from a constant; and for the class settings `events_per_run` and `audit_bound`, carried by the
+  run that started under them.
+- **Not built on 2026-11-11** (the review's findings 2.1, 2.2 and 2.3).
+
+### D90. The engine is hardened against messages sent with Temporal's client directly
+
+*Decided 2026-11-11, after the whole-project review of November 2026
+(`docs/layers/fix-review-decisions.md`, I). Adds to D79, whose text is kept.*
+
+- **D79 forbids them and Temporal doesn't prevent them,** so the engine refuses what it can see: a
+  number that isn't finite is refused and recorded; a signal that can't be read is recorded as
+  refused, never dropped; a start claiming to have continued as new is checked against the run's
+  own history; a close by a parent is refused and recorded by a case whose start names no parent.
+- **The deployment guide says** that direct access to the namespace is inside the trusted caller's
+  boundary.
+- **Not built on 2026-11-11** (the review's findings 1c.8, 1c.9, 1c.11 and 1c.14).
 
 ## Concepts
 
@@ -3626,6 +3810,10 @@ inside a Temporal workflow alike.
   paid without approval).
 - Every feature ships with tests, including at least one negative test (a definition that must be
   rejected).
+
+*Amended 2026-11-11, by D88* (the list above stands; this adds to it): "anything that talks to
+people drafts by default" is to be checked by the engine, as D88 decides. Not built on 2026-11-11:
+until its fix, nothing checks it (the review's finding 1b.9).
 
 ## Out of scope for v1.0
 

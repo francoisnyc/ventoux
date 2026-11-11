@@ -6,8 +6,8 @@ questions, A to J, that need an answer in the brief before any code is written. 
 on 2026-11-11. This pull request records them in `docs/BRIEF.md` and changes nothing else: no
 source, no test, no guide.
 
-**Status of this note: a proposal.** It says where each answer goes and in which words. The brief
-is written only once this is agreed.
+The placements and the wording below were proposed here first, agreed on 2026-11-11, then
+written into the brief. The brief is the record; this note says how it was put together.
 
 ## How they are recorded
 
@@ -34,11 +34,10 @@ is written only once this is agreed.
 | I | Messages sent with Temporal's client directly | **D90** | D79 | 1c.8, 1c.9, 1c.11, 1c.14 |
 | J | Which names are supported | amendment under **D82** | | 5.3, 6b.1 |
 
-## The wording proposed
+## The wording, as proposed
 
 ### A. D84. Until the first published release, a fix changes engine 3 in place
 
-*Recorded only once the maintainer confirms that no case outside the tests runs on engine 3.*
 
 > *Decided 2026-11-11, after the whole-project review of November 2026
 > (`docs/layers/fix-review-decisions.md`, A). Adds to D51 and D68, whose text is kept.*
@@ -46,7 +45,7 @@ is written only once this is agreed.
 > - **Nothing before the first published release is owed an old branch.** Until `ventoux` 0.1.0 is
 >   published (D82), a fix that decides a recorded path differently changes engine 3 in place: no
 >   new engine version, no old branch kept behind the case's version.
-> - **It stands on one fact, stated by the maintainer on 2026-11-11:** no case outside the tests
+> - **It stands on one fact, confirmed by the maintainer on 2026-11-11:** no case outside the tests
 >   runs on engine 3. D68 made this exception for one shape, in code "merged on 2026-11-02 and
 >   never released (0.0.0)"; this extends it to every fix, for the same reason.
 > - **What it covers:** fixes merged after `main` at `830ed3f`, until the first published release.
@@ -104,7 +103,7 @@ full."
 
 ### E. D87. A value hidden by `visible_to` is never given to more roles at a join
 
-> *Adds to D30, D42, D74 and D77, whose text is kept.*
+> *Adds to D42, D74 and D77, whose text is kept.*
 >
 > - **Validation refuses each of these, and the runtime refuses the same when validation didn't
 >   run** (D34): a parent's value given to a child's field that more roles may see; a child's
@@ -126,13 +125,15 @@ full."
 
 ### G. D88. "Drafts by default" is checked by the engine
 
-> *Adds to D11, D35 and D56, whose text is kept, and to the non-negotiables.*
+> *Adds to D56, whose text is kept, and to the non-negotiables.*
 >
 > - **A contract says it talks to people by its effect, `notify`,** which every contract already
 >   declares and its hash already covers (D5): no new key. A contract that only drafts is `write`.
-> - **A `notify` contract runs only on a step with an approval that has no `when`.** Refused at
->   validation, and at the start on nothing validation did (D34). So a person sees each message
->   before it goes.
+> - **In a case, a `notify` contract runs only on a step with an approval that has no `when`.**
+>   Refused at validation, and at the start on nothing validation did (D34). So a person sees
+>   each message before it goes.
+> - **In a plan, a state calling a `notify` contract is the target of an approval state** (D23),
+>   refused when the plan is read and when the run would enter it otherwise.
 > - **What follows:** a repeated step takes no approval (D73), so it can't call one; a refresh
 >   never runs one (D33: only a `read`).
 > - **Built before layer 21.** Not built on 2026-11-11 (finding 1b.9). The "will never do" sheet
@@ -140,7 +141,7 @@ full."
 
 ### H. D89. A refusal that depends on what the code knew is recorded as data
 
-> *Adds to D27, D51, D53, D76 and D77, whose text is kept.*
+> *Adds to D27, D53 and D77, whose text is kept.*
 >
 > - **What the code knew is kept in the state when it refuses,** so a replay by later code
 >   refuses the same: the engine versions a refused migration was judged against. (2.1.)
@@ -151,12 +152,13 @@ full."
 
 ### I. D90. The engine is hardened against messages sent with Temporal's client directly
 
-> *Adds to D41, D51, D76 and D79, whose text is kept.*
+> *Adds to D79, whose text is kept.*
 >
 > - D79 forbids them and Temporal doesn't prevent them. So: **a number that isn't finite is
 >   refused and recorded** (1c.8); **a signal that can't be read is recorded as refused, never
 >   dropped** (1c.9); **a start claiming to have continued as new is checked against the run's
->   own history** (1c.11).
+>   own history** (1c.11); **a close by a parent is refused and recorded by a case whose start
+>   names no parent** (1c.14).
 > - **The deployment guide says** that direct access to the namespace is inside the trusted
 >   caller's boundary.
 > - Not built on 2026-11-11.
@@ -169,20 +171,23 @@ full."
 > built on 2026-11-11 (findings 5.3, 6b.1); the fix's note says, name by name, which was listed
 > and which a guide stopped using.
 
-## Open, for the maintainer
+## Asked, and answered on 2026-11-11
 
-1. **A:** is it so that no case outside the tests runs on engine 3 today?
-2. **A's commit:** `main` is at `d88e9d9`, not `830ed3f`: #100 (the sensitive check, fix 2) merged
-   after #99. Its note says it changes no recorded path. Proposed: D84 still says "after `main`
-   at `830ed3f`".
-3. **F:** is the D76 wording above the meaning intended (an act's values sealed whatever their
-   field; what a decision wrote as the case file holds it)?
-4. **G:** `effect: notify` as how a contract says it talks to people (proposed), or a new key?
-   And inside a plan, which has no step approval: an activity state calling a `notify` contract
-   must be the target of an approval state (D23), or `notify` is refused in a plan?
-5. **I:** finding 1c.14 (a case with no parent closes on a raw `close_by_parent`) is listed
-   under I and matches none of its three rules. Add "a close by a parent is refused and recorded
-   by a case whose start names no parent", or leave it out?
+1. **A stands on a fact:** no case outside the tests runs on engine 3 today. Confirmed by the
+   maintainer.
+2. **A's commit:** `main` was at `d88e9d9` when this was written, since #100 (the sensitive check)
+   merged after #99; its note says it changes no recorded path. D84 says "after `main` at
+   `830ed3f`", as settled.
+3. **F:** D76's amended sentence reads as above: an act's values sealed whatever their field;
+   what a decision wrote as the case file holds it.
+4. **G, how a contract says it talks to people:** by its effect, `notify`. Every contract already
+   declares an effect and its hash covers it, and the development catalog holds no `notify`
+   contract (its letters are drafted by a `write`), so no contract gains a version. A new key was
+   the other way, and would have been a new version of each contract gaining it.
+5. **G, inside a plan,** which has no step approval: a state calling a `notify` contract is the
+   target of an approval state (D23). Refusing `notify` in a plan was the other way.
+6. **I and finding 1c.14,** which matched none of I's three rules: D90 gains a fourth, a close by
+   a parent refused and recorded by a case whose start names no parent.
 
 ## What stays out
 
@@ -196,4 +201,4 @@ Nothing here is behaviour, so no test is added. The one claim that can be checke
 
 | The note says | What fails if it weren't true |
 |---|---|
-| No decision's earlier text is changed or renumbered: the brief only gains lines | `git diff origin/main -- docs/BRIEF.md` shows no removed line, quoted in the pull request; and the review's probe `p6_decisions_rewritten.py`, run on the branch |
+| No decision's earlier text is changed or renumbered: the brief only gains lines | `git diff --numstat origin/main -- docs/BRIEF.md` gives `188 0`: 188 lines added, none removed. Run before the pull request was opened and quoted in it |
