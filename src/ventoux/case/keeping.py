@@ -11,8 +11,9 @@ from ventoux.core.sensitive import Sensitive, plain
 def kept(case: CaseDefinition, name: str, value: object) -> object:
     """A form's value as the case file keeps it: wrapped for a sensitive field, plain otherwise.
     The client wraps every value of a form, since it can't tell which are sensitive."""
-    if name not in case.fields:
-        return plain(value)
+    # Fail closed: `name` is a declared field. A name that is none has no rule to follow, so its
+    # value is never unwrapped here: asking is an error (KeyError), never "not sensitive"
+    # (brief, D89).
     field = case.fields[name]
     # A date's text is read into the day it names, by the field's type (brief, D66); a sensitive
     # one inside its wrapper, which holds the plain value of the field's type (brief, D31).
