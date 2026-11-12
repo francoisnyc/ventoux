@@ -56,6 +56,10 @@ field, was found while reproducing it.
 - **A case continuing as new on Temporal is not driven here.** A refused act's record is
   carried only while it isn't exported yet, which a test can't time reliably; the carried state
   is read directly instead.
+- **A refused edit's value is still unwrapped for one line.** `kept` in `case/requests.py`
+  unwraps it into a local variable, and the next check refuses the edit: the value is kept
+  nowhere, so no test could see a change there. D89 says "dropped unopened"; for an edit it is
+  opened for a moment and then dropped.
 
 ## Found, not fixed
 
