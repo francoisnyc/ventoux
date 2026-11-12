@@ -22,18 +22,18 @@ team already operates, self-hosted or Temporal Cloud:
 
 ## Status
 
-Design stage. There is no code yet: Ventoux is being built in Python, one layer at a time, starting
-from the design documents below. Nothing here is ready to use.
+In development, not released: the package builds as `0.1.0`, and has never been published.
+Ventoux is built in Python, one layer at a time. Layers 0 to 20 are built: the engine in memory and
+on Temporal, people and approvals, case data, rules, releases, the semantic diff, the Python
+builder, AI authoring, more field types, task assignment, required and repeated steps and child
+cases, the audit export with a Vault key provider, and the deployment checks (`ventoux doctor` and
+the conformance suite). Layer 21, the AgentDojo benchmark, completes v1.0 (see
+[`docs/CURRICULUM.md`](docs/CURRICULUM.md)).
 
 ## Read
 
-- [`docs/BRIEF.md`](docs/BRIEF.md): what we are building and why, and every design decision so far.
-- [`docs/QUICKSTART.md`](docs/QUICKSTART.md): a first case in 15 minutes, written before the code
-  as the test of how easy Ventoux is to adopt.
-- [`docs/guides/case-data.md`](docs/guides/case-data.md): what goes in a case file, and what doesn't.
-- [`docs/CURRICULUM.md`](docs/CURRICULUM.md): the order the layers are built in.
-- [`docs/README-draft.md`](docs/README-draft.md): the README this one will grow into. It still
-  describes the TypeScript prototype.
+Start with [`docs/README.md`](docs/README.md): a reading path for each reader, beginning with
+[the quickstart](docs/QUICKSTART.md), a first case in 15 minutes.
 
 ## Develop
 
