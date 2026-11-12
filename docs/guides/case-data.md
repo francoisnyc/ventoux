@@ -537,6 +537,10 @@ decides.
   definition (its rules and release), and every value that wasn't sensitive where it was used.
   Where a sensitive value was, there is ciphertext no one can open. So is every form value in
   the answers people sent, and every failure's message: they crossed encrypted too.
+- A form value the case accepted is kept as its field says: one in a field that isn't
+  `sensitive` stays readable after forgetting. So declare `sensitive` every field that may hold
+  personal data. A value given under a name that is no field of the case is never kept at all:
+  the answer is refused, saying the name, and the value is dropped.
 - People's identifiers (`ana`, `pia`) stay: forgetting is about the case's subject, whose
   personal data is in its sensitive fields.
 - The case's ID can never open a case again: its key is never made twice.

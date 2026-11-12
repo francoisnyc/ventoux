@@ -3837,6 +3837,12 @@ decision F; finding 1c.7). Adds to D31, D32 and D76, whose text is kept.*
   clear, and after forgetting; the reading of D32 with D76 is what `main` does already. The review's
   probes for 1c.7 still show it, run again that day. The fix adds its own dated line here when it
   lands.
+- **Built 2026-11-12** (`docs/layers/fix-form-value-no-field.md`; the text above stands): a
+  refused act's record keeps a value only under a name that is a field of the case, so a value
+  under any other name is dropped still wrapped. The same holds for a proposed edit of a name
+  that is no field, a second door the review didn't name: its value was kept in clear the same
+  way. A refusal still says the first problem it finds, so of two such names it says one; both
+  values are dropped.
 
 ### D90. A step that notifies needs a person's approval on every path
 
