@@ -21,7 +21,7 @@ class Silent(AssertionError):
     """A decision left a pending item that nothing shows: the invariant's failure, and no other."""
 
 
-def unshown(case: CaseDefinition, state: CaseState) -> list[str]:
+def unshown(case: CaseDefinition, state: CaseState) -> list[str]:  # noqa: C901
     """Each pending item of an open case that nothing shows, said in a line; empty if none."""
     if state.phase != "open":
         return []

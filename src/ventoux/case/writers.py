@@ -235,7 +235,7 @@ def starts_said(case: CaseDefinition) -> dict[str, list[str]]:
     return said
 
 
-def stamped(
+def stamped(  # noqa: C901
     case: CaseDefinition,
     contracts: Mapping[str, Contract],
     opener: str,

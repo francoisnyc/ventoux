@@ -137,7 +137,7 @@ class PlanRun:
     history: list[Event] = field(default_factory=list[Event])  # every event, in order
 
 
-async def interpret(
+async def interpret(  # noqa: C901
     plan: Plan,
     fields: Mapping[str, Sourced],
     catalog: Catalog,

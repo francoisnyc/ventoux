@@ -29,7 +29,7 @@ from ventoux.core.expressions.model import (
 )
 
 
-def render(expression: Expression) -> str:
+def render(expression: Expression) -> str:  # noqa: C901
     """`expression` on one line, for diffs and reviews: `review.outcome = "approve"`.
 
     FEEL-style, the expression language of DMN and Camunda 8, which business readers know: `=` for

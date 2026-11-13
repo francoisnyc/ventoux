@@ -74,7 +74,7 @@ def kind_role(catalog: Catalog, kind: str, roles: frozenset[str]) -> str | None:
     return role_that_counts(tuple(who_may(catalog, kind)), roles, catalog.roles)
 
 
-def propose_change(
+def propose_change(  # noqa: C901
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: ChangeProposed
 ) -> None:
     """Record the proposed change as an entry waiting for someone else's approval, once it is

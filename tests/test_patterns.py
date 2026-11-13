@@ -520,8 +520,13 @@ def test_a_timer_on_a_first_start_warns() -> None:
     run = run_case(
         first_start(),
         file=SMALL,
-        answers=[later("1d"), ("review", "reject", "ana"), later("12h"), propose("review", "ana")]
-        + [later("12h")],
+        answers=[
+            later("1d"),
+            ("review", "reject", "ana"),
+            later("12h"),
+            propose("review", "ana"),
+            later("12h"),
+        ],
         people=PEOPLE,
     )
     assert "chase_review#1 on 2d after reached review_begun: starting chase" in run.history

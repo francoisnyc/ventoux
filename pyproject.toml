@@ -44,8 +44,47 @@ line-length = 100
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
-# TID252: relative imports. Every import names its layer, so the boundary test can check it.
-extend-select = ["TID252"]
+# The DSL spike is kept as it was written, a record and not code that runs here.
+exclude = ["docs/layers/spike-dsl/*"]
+# Beside ruff's defaults (pycodestyle's errors and pyflakes):
+extend-select = [
+    "TID252",  # relative imports: every import names its layer, so the boundary test can check it
+    "B",  # flake8-bugbear: likely bugs
+    "UP",  # pyupgrade: the idioms of the Python this project requires
+    "I",  # isort: imports sorted
+    "SIM",  # flake8-simplify
+    "RET",  # flake8-return: every path of a function returns the same way
+    "RUF",  # ruff's own rules; RUF100 fails an unused `noqa`
+    "C4",  # flake8-comprehensions
+    "PIE",  # flake8-pie: needless code
+    "PTH",  # pathlib, never os.path
+    "ERA",  # no commented-out code
+    "N",  # pep8-naming
+    "C901",  # a function with more than `max-complexity` branches
+    # The rules the code's own `noqa` comments name, each with its reason beside it. This
+    # version of ruff has them on by default; named here so each comment stays real whatever
+    # a later version's defaults are.
+    "S102",  # exec: only on the guides' own examples, in tests
+    "BLE001",  # catching Exception
+    "ASYNC251",  # time.sleep in an async function
+    "DTZ001",  # a datetime with no time zone
+    "TRY004",  # a type check that raises something other than TypeError
+]
+ignore = [
+    # The typographic characters in messages and documents (‹ ›, ’, …) are meant.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # A refusal is named `...Refused` or `...Invalid`, never `...Error`, on purpose.
+    "N818",
+    # `pytest.raises(match=...)` patterns hold unescaped regex characters: left for a pull
+    # request of its own (docs/layers/lint-bar.md).
+    "RUF043",
+]
+
+[tool.ruff.lint.mccabe]
+# A function over this is marked where it is defined; a new one fails (docs/layers/lint-bar.md).
+max-complexity = 10
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"

@@ -465,7 +465,7 @@ async def finding_of(rule: Rule, context: Context) -> Finding:
 def said(findings: Sequence[Finding], environment: str) -> list[str]:
     """The lines doctor prints: one per finding, then the count of each verdict."""
     lines = [f"{finding.verdict:<10} {finding.rule}: {finding.said}" for finding in findings]
-    counts = {verdict: 0 for verdict in ("passed", "FAILED", "unchecked")}
+    counts = dict.fromkeys(("passed", "FAILED", "unchecked"), 0)
     for finding in findings:
         counts[finding.verdict] += 1
     lines.append(

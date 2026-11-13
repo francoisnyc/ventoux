@@ -83,7 +83,7 @@ def item_outside(node: object) -> bool:
     return False
 
 
-def parse(data: object) -> Expression:
+def parse(data: object) -> Expression:  # noqa: C901
     """`data` parsed recursively; `parse_expression` then checks where `item` is used."""
     # `bool` first: in Python `True` is also an `int`, and it must never become the number 1.
     if isinstance(data, bool | str):

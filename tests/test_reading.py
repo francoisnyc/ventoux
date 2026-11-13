@@ -710,7 +710,7 @@ def test_a_set_value_on_a_rule_that_reaches_still_reads_as_carrying_what_it_read
 
 def test_every_clause_has_a_witness() -> None:
     # A clause can't be added without a run showing the engine does what it says (brief, D45).
-    assert WITNESSED == set(CLAUSES)
+    assert set(CLAUSES) == WITNESSED
 
 
 # --- Slice 5: the guide, and what a reading is given ---

@@ -344,7 +344,7 @@ def test_whoever_proposes_a_run_never_approves_it() -> None:
 
 
 def test_every_entry_clause_has_a_witness() -> None:
-    assert ENTRY_WITNESSED == set(ENTRY_CLAUSES)
+    assert set(ENTRY_CLAUSES) == ENTRY_WITNESSED
 
 
 # --- Slice 2: the plain form renders the one change list ----------------------------------------

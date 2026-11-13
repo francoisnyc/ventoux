@@ -272,7 +272,7 @@ def test_a_role_nobody_registered_counts_for_nothing() -> None:
         "registered: it gives nobody anything)"
     ) in found
     # Nor does it see anything: a field without visible_to is seen by the registered roles the
-    # case names (fixed in 13b: 13a counted every name).
+    # case names. Layer 13b fixed this; 13a counted every name.
     assert not any("visible_to" in line for line in found)
 
 

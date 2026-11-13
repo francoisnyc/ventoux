@@ -21,7 +21,11 @@ def one_object(answer: str) -> dict[str, Any]:
         read = json.loads(unfenced(answer), object_pairs_hook=no_key_twice, parse_float=Decimal)
     except json.JSONDecodeError as error:
         # The decoder's position only: its message never quotes the text.
-        raise NotOneObject(f"not JSON: {error.msg} at line {error.lineno}, column {error.colno}")
+        # Python: `from None` leaves the decoder's own error, which holds the whole text, out
+        # of what a traceback prints.
+        raise NotOneObject(
+            f"not JSON: {error.msg} at line {error.lineno}, column {error.colno}"
+        ) from None
     except RecursionError:
         # Python's reader recurses once per bracket: an answer nested deeper fails closed, as
         # anything else that isn't one object does (brief, D63).

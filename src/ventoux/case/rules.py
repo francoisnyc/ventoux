@@ -50,7 +50,7 @@ def said(moment: object) -> str:
         return f"event {moment.event}"
     if moment == "opened":
         return "opened"
-    unknown_moment(moment)
+    return unknown_moment(moment)
 
 
 def unknown_moment(moment: object) -> NoReturn:
@@ -172,7 +172,7 @@ def computed(case: CaseDefinition, values: dict[str, object], name: str, field: 
     return value
 
 
-def act(
+def act(  # noqa: C901
     case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,

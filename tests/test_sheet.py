@@ -309,7 +309,7 @@ def test_a_forgetting_line_is_the_requests_refusal() -> None:
 
 
 def test_every_kind_of_line_has_a_witness() -> None:
-    assert NEVER_WITNESSED == set(NEVERS)
+    assert set(NEVERS) == NEVER_WITNESSED
 
 
 CASES_GUIDE = ROOT / "docs" / "guides" / "cases.md"

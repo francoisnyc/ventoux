@@ -37,7 +37,7 @@ from ventoux.core.validate import Issue
 RECORD = TypeAdapter(Record)
 
 
-def read_package(folder: Path) -> Package:
+def read_package(folder: Path) -> Package:  # noqa: C901
     """The package in `folder`: `case.json`, each plan in `plans/` as a `.json` file, and each
     child case it pins in `cases/`, a package of its own named by its reference (`repair@3`). Any
     other file is refused, never ignored (brief, D50) (brief, D74)."""

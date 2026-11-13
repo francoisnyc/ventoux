@@ -63,7 +63,8 @@ class Parent:
             if await_start:
                 await start
             else:
-                asyncio.ensure_future(start)
+                # Temporal's workflow loop keeps the task until it is done: no reference needed.
+                asyncio.ensure_future(start)  # noqa: RUF006
                 await asyncio.sleep(0)  # the start command is issued, not awaited
             workflow.continue_as_new(args=[1, await_start])
         await workflow.wait_condition(lambda: False)

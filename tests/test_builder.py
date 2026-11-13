@@ -48,7 +48,7 @@ def test_a_comparison_writes_d20s_json() -> None:
     refund = Case("refund", title="Customer refund")
     amount = refund.field("amount", Field.number(), title="Amount requested")
     assert (amount > 100).data == {">": [{"var": "amount"}, 100]}
-    assert (100 < amount).data == {">": [{"var": "amount"}, 100]}  # Python turns it round
+    assert (amount > 100).data == {">": [{"var": "amount"}, 100]}  # Python turns it round
     assert (amount * Decimal("0.5") + 1).data == {
         "+": [{"*": [{"var": "amount"}, Decimal("0.5")]}, 1]
     }

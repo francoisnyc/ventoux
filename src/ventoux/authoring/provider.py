@@ -99,7 +99,10 @@ def difference(recorded: Request, asked: Request) -> str | None:
     """Where `asked` first differs from `recorded`, in words, or None if it doesn't."""
     if asked.system != recorded.system:
         return "in its system text"
-    for number, (was, now) in enumerate(zip(recorded.messages, asked.messages), start=1):
+    # Python: `strict=False` stops at the shorter list, on purpose: the messages they share are
+    # compared first, and a different number of them is said just below.
+    pairs = zip(recorded.messages, asked.messages, strict=False)
+    for number, (was, now) in enumerate(pairs, start=1):
         if was != now:
             return f"at message {number}"
     if len(asked.messages) != len(recorded.messages):

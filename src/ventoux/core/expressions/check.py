@@ -48,7 +48,7 @@ def check(expression: Expression, fields: Mapping[str, FieldType]) -> FieldType:
     return type_of(expression, fields, "")
 
 
-def type_of(
+def type_of(  # noqa: C901
     expression: Expression,
     fields: Mapping[str, FieldType],
     path: str,
