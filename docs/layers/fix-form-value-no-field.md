@@ -29,7 +29,13 @@ field, was found while reproducing it.
   kept"). One small function, `given_for_fields` in `case/recording.py`, says so for an
   opening, an answer and a proposed edit. A value under any other name is dropped still wrapped.
 - **`kept` has no permissive branch any more.** Asked about a name that is no field it fails
-  (`KeyError`) instead of unwrapping. Nothing calls it that way; no test asks it to.
+  (`KeyError`) instead of unwrapping. Nothing calls it that way.
+- **An edit's value is unwrapped only once its name is known to be a field** (`kept` in
+  `case/requests.py`). It was unwrapped for one line before the edit was refused, and kept
+  nowhere: no test can see this change, so it is no promise below (from the tutor's review of
+  #106).
+- **The opening goes through the same function, and nothing changes there:** an opening with a
+  name that is no field is refused before any record is made (from the tutor's review of #106).
 - **A real field the outcome doesn't set is unchanged:** its value is recorded as its field
   says, wrapped if sensitive, plain if not (D76, D89).
 - **The refusal's line is unchanged:** it already said the name and never the value.
@@ -56,10 +62,6 @@ field, was found while reproducing it.
 - **A case continuing as new on Temporal is not driven here.** A refused act's record is
   carried only while it isn't exported yet, which a test can't time reliably; the carried state
   is read directly instead.
-- **A refused edit's value is still unwrapped for one line.** `kept` in `case/requests.py`
-  unwraps it into a local variable, and the next check refuses the edit: the value is kept
-  nowhere, so no test could see a change there. D89 says "dropped unopened"; for an edit it is
-  opened for a moment and then dropped.
 
 ## Found, not fixed
 
@@ -75,6 +77,7 @@ Read in the code, not run: whether such a payload can hold anything sensitive wa
 | The same for a refused edit | `tests/test_audit_records.py::test_a_refused_edit_keeps_no_value_under_a_name_that_is_no_field` |
 | A refused answer's value for a real field is recorded as its field says | `tests/test_audit_records.py::test_a_refused_answers_value_for_a_real_field_follows_that_field` |
 | On Temporal neither value is in the history, the store's files or what `read_audit` shows, before forgetting or after; the case went on waiting, then closed as forgotten | `tests/test_temporal_stray_values.py::test_a_value_under_a_name_that_is_no_field_is_kept_nowhere` |
+| Asked how to keep a value under a name that is no field, `kept` fails, never unwraps | `tests/test_audit_records.py::test_how_a_value_is_kept_is_never_asked_of_a_name_that_is_no_field` |
 | Every recorded history replays as it is | the replay tests, unchanged |
 
 Seen failing: the first, second and fourth with each door opened again (the answer's, then the

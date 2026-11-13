@@ -30,6 +30,7 @@ from test_set import PEOPLE as SET_PEOPLE
 
 from ventoux.case.admission import ProposalRefused
 from ventoux.case.audit import Act, Decision, Fact
+from ventoux.case.keeping import kept
 from ventoux.case.memory import CaseRun
 from ventoux.case.recording import record_refused
 from ventoux.case.requests import ChangeRefused
@@ -310,6 +311,14 @@ def test_a_refused_answers_value_for_a_real_field_follows_that_field() -> None:
         "national_id": Sensitive(NATIONAL_ID),
         "policy_id": "pol-9",
     }
+
+
+def test_how_a_value_is_kept_is_never_asked_of_a_name_that_is_no_field() -> None:
+    # Fail closed: a name that is no field has no rule, so asking how its value is kept is an
+    # error, never "plain" (brief, D89).
+    run = run_case(claim(), OPENING, [], {"ana": ["adjuster"]}, engine=3)
+    with pytest.raises(KeyError, match="scratch"):
+        kept(run.definition, "scratch", Sensitive(STRAY))
 
 
 def owed_and_known() -> dict[str, Any]:
