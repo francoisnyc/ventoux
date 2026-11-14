@@ -34,8 +34,8 @@ from ventoux.case.keeping import kept
 from ventoux.case.memory import CaseRun
 from ventoux.case.recording import record_refused
 from ventoux.case.requests import ChangeRefused
-from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, ChangeProposed, Proposed
+from ventoux.case.runtime import EventRefused, decide
+from ventoux.case.state import Answered, ChangeProposed, Proposed, Sent
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
@@ -311,6 +311,34 @@ def test_a_refused_answers_value_for_a_real_field_follows_that_field() -> None:
         "national_id": Sensitive(NATIONAL_ID),
         "policy_id": "pol-9",
     }
+
+
+def test_a_refused_event_keeps_no_value_under_a_name_its_payload_doesnt_declare() -> None:
+    # The third door: a system forwarding a whole body sends names the event doesn't declare.
+    # The event is refused, saying the name; its record keeps what the payload declares, and
+    # nothing under any other name (brief, D89).
+    reviewed = [("review", "approve", "ana", {"approved_amount": 40})]
+    run = run_case(
+        waiting_for_a_receipt(), {"order_id": "ord-1", "amount": 40}, reviewed, PEOPLE, engine=3
+    )
+    payload = {"receipt": "doc-7", "scratch": STRAY}
+    act = Sent("receipt_sent", payload, "system:portal", frozenset(), at=LATER)
+    with pytest.raises(EventRefused) as refused:
+        decide(run.definition, CATALOG, run.state, act)
+
+    after = record_refused(run.definition, run.state, act, refused.value)
+
+    assert str(refused.value) == (
+        "receipt_sent's payload has no field scratch: its fields are receipt"
+    )
+    assert after.audit[-1].act.values == {"receipt": "doc-7"}
+    assert STRAY not in str(state_as_data(after))
+    # An event the case doesn't declare has no payload to go by: nothing it carries is kept.
+    unknown = Sent("refunded", {"scratch": STRAY}, "system:portal", frozenset(), at=LATER)
+    with pytest.raises(EventRefused) as refused:
+        decide(run.definition, CATALOG, run.state, unknown)
+    after = record_refused(run.definition, run.state, unknown, refused.value)
+    assert after.audit[-1].act.values == {}
 
 
 def test_how_a_value_is_kept_is_never_asked_of_a_name_that_is_no_field() -> None:

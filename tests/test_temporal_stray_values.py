@@ -3,17 +3,26 @@
 or after (brief, D89). That it isn't in the state a case continues as new with is shown in
 `test_audit_records.py`, on the state as it is carried."""
 
+import copy
 from pathlib import Path
 from typing import Any
 
+from temporalio.api.enums.v1 import EventType
 from temporalio.client import Client
+from test_events import RECEIPT_SENT
 from test_sensitive import FILE, claim
 from test_temporal_forget import QUEUE, on_temporal
 from test_temporal_forget_stream import ended, proposed
 from test_temporal_sensitive import as_stored, every_run
 from test_temporal_sensitive import reported as reported_case
 
-from ventoux.temporal.cases import CaseReport, answer, propose_change, start_case
+from ventoux.temporal.cases import (
+    CaseReport,
+    answer,
+    propose_change,
+    send_event,
+    start_case,
+)
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import answer_forget
 from ventoux.testing import DevelopmentCases, as_json
@@ -81,3 +90,70 @@ def test_a_value_under_a_name_that_is_no_field_is_kept_nowhere(tmp_path: Path) -
     for value in (IN_AN_ANSWER, IN_AN_EDIT):
         assert value.encode() not in before, f"{value} is kept before forgetting"
         assert value.encode() not in after, f"{value} is kept after forgetting"
+
+
+IN_AN_EVENT = "STRAY-EVENT-1985-05-17"  # in a body a system forwarded whole
+EVENT_REFUSAL = (
+    "refused receipt_sent from system:portal: receipt_sent's payload has no field scratch: its "
+    "fields are receipt"
+)
+
+
+def kinds_holding(histories: list[Any], value: str) -> set[str]:
+    """The kinds of history event that hold `value`, in any run, as Temporal stores them."""
+    return {
+        EventType.Name(event.event_type)
+        for history in histories
+        for event in history.events
+        if value.encode() in event.SerializeToString()
+    }
+
+
+def in_the_store(folder: Path, shown: list[Any]) -> bytes:
+    """The audit store's files and what `read_audit` shows, as bytes to search."""
+    files = [file.read_bytes() for file in sorted(folder.rglob("*")) if file.is_file()]
+    return b"\n".join([*files, repr(shown).encode()])
+
+
+def test_an_events_value_under_a_name_it_doesnt_declare_reaches_no_record(tmp_path: Path) -> None:
+    # A system sends the receipt's event with one more name than its payload declares. The event
+    # is refused and recorded, saying the name. The value is in no record: not in the store, for
+    # any role, and not in what the case asks its export to write. It is in the signal the
+    # caller sent, as every event's payload is: that is the caller's sending, which no record
+    # can take back (brief, D41) (brief, D89).
+    store = FileAudit(tmp_path / "audit")
+    definition = claim()
+    definition["events"] = {"receipt_sent": copy.deepcopy(RECEIPT_SENT)}
+
+    async def scenario(client: Client) -> tuple[CaseReport, set[str], bytes, list[str], bytes]:
+        case = await start_case(
+            client, DevelopmentCases, definition, as_json(FILE), "claim-1", QUEUE
+        )
+        await reported_case(case, lambda now: now.waiting_at == ["assess#1"])
+        payload = {"receipt": "doc-7", "scratch": IN_AN_EVENT}
+        await send_event(case, "receipt_sent", payload, "system:portal")
+        told = await reported_case(
+            case, lambda now: EVENT_REFUSAL in now.history and not now.unwritten
+        )
+        keys = keys_of(client)
+
+        def shown() -> list[Any]:
+            return [read_audit(store, "claim-1", roles, keys) for roles in ([], ["adjuster"])]
+
+        held = kinds_holding(await every_run(client, "claim-1"), IN_AN_EVENT)
+        before = in_the_store(tmp_path, shown())
+        # Read by query once the request is over, never by a `result()` (the tutor's review of
+        # #104).
+        request = await proposed(client, "claim-1", "pia")
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        forgotten = (await ended(request)).history
+        return told, held, before, forgotten, in_the_store(tmp_path, shown())
+
+    told, held, before, forgotten, after = on_temporal(scenario, audit=store)
+    assert told.waiting_at == ["assess#1"]
+    assert b"doc-7" in before  # the declared part of the payload is recorded
+    assert "claim-1 ended: closed: forgotten" in forgotten
+    assert IN_AN_EVENT.encode() not in before, "kept in the store before forgetting"
+    assert IN_AN_EVENT.encode() not in after, "kept in the store after forgetting"
+    # Only the signal itself holds it: never an activity the case scheduled.
+    assert held == {"EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"}

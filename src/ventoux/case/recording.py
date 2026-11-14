@@ -226,7 +226,8 @@ def act_of(case: CaseDefinition, event: Event) -> Act:
             )
         case Sent():
             # What the event carries, as it carried it: its sender is its source (brief, D41).
-            return Act("event", by=event.by, roles=roles, entry=event.event, values=event.payload)
+            values = given_as_declared(case, event)
+            return Act("event", by=event.by, roles=roles, entry=event.event, values=values)
         case TimerDue():
             return Act("timer", entry=event.rule)
         case Claimed():
@@ -250,6 +251,14 @@ def given_for_fields(case: CaseDefinition, given: Mapping[str, object]) -> dict[
     is no field is never kept: it is dropped still wrapped, never read as "not sensitive". The
     act is refused, and its refusal says the name (brief, D89)."""
     return {name: kept(case, name, value) for name, value in given.items() if name in case.fields}
+
+
+def given_as_declared(case: CaseDefinition, event: Sent) -> dict[str, object]:
+    """What an event carried under the names its payload declares. A value under any other name
+    is never kept, nor anything an event the case doesn't declare carries: the event is refused,
+    and its refusal says the name (brief, D89)."""
+    declared = case.events[event.event].payload if event.event in case.events else {}
+    return {name: value for name, value in event.payload.items() if name in declared}
 
 
 def roles_of(event: ForgetApproved) -> tuple[str, ...]:
