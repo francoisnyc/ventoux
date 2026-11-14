@@ -46,7 +46,8 @@ extend-exclude = ["*.md"]
 [tool.ruff.lint]
 # The DSL spike is kept as it was written, a record and not code that runs here.
 exclude = ["docs/layers/spike-dsl/*"]
-# Beside ruff's defaults (pycodestyle's errors and pyflakes):
+# Beside ruff's defaults, which the version this project locks makes wide (414 rules at
+# 0.16.10): `uv run ruff check --show-settings` lists every rule that is on.
 extend-select = [
     "TID252",  # relative imports: every import names its layer, so the boundary test can check it
     "B",  # flake8-bugbear: likely bugs
