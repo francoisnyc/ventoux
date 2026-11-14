@@ -685,7 +685,7 @@ def child_runner(
     return run
 
 
-def script_events(
+def script_events(  # noqa: C901
     answers: Sequence[Any], people: Mapping[str, Iterable[str]], at: int
 ) -> list[Event | Finish | Advance]:
     """The events a script plays after the opening at `at`, as the Ventoux API would send them:

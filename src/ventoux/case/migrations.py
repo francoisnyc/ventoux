@@ -256,7 +256,7 @@ def renumbered(
     return problems
 
 
-def depending(
+def depending(  # noqa: C901
     case: CaseDefinition,
     target: CaseDefinition,
     catalog: Catalog,
@@ -389,7 +389,7 @@ def unfinished(
     return []
 
 
-def value_problems(
+def value_problems(  # noqa: C901
     case: CaseDefinition,
     target: CaseDefinition,
     catalog: Catalog,
@@ -539,7 +539,7 @@ def apply(
     return target
 
 
-def rename(
+def rename(  # noqa: C901
     case: CaseDefinition, target: CaseDefinition, state: CaseState, migration: Migration
 ) -> None:
     """Every name the case holds, as the target names it; a run keeps its entry, so its key. A

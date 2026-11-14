@@ -149,7 +149,7 @@ def as_said(wanted: FieldType) -> str:
     return a_type(wanted)
 
 
-def type_issues(
+def type_issues(  # noqa: C901
     case: CaseDefinition,
     catalog: Catalog,
     contracts: Mapping[str, Contract],

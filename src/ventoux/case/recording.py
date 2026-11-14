@@ -156,7 +156,7 @@ def record(
     )
 
 
-def act_of(case: CaseDefinition, event: Event) -> Act:
+def act_of(case: CaseDefinition, event: Event) -> Act:  # noqa: C901
     """`event` as an act: who, with which roles, what it names, giving what. A value given for a
     field of the case file is as the case file keeps it: the client wraps every value of a form,
     since it can't tell which are sensitive; the record keeps wrapped only the sensitive ones
@@ -266,7 +266,7 @@ def roles_of(event: ForgetApproved) -> tuple[str, ...]:
     return tuple(sorted(event.approver_roles))
 
 
-def asked(event: Event) -> str:
+def asked(event: Event) -> str:  # noqa: C901
     """What a person asked, as a refusal names it: `sam's answer approve to review#1`."""
     if isinstance(event, Answered):
         return f"{event.by}'s answer {event.outcome} to {event.entry}"

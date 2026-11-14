@@ -300,7 +300,7 @@ class Marked(BaseModel):
 class Named(BaseModel):
     address_2nd: str
     URL_v2: str
-    camelCase: str
+    camelCase: str  # noqa: N815 -- a name as a team may write it: the titles' test reads it
     a: str
 
 

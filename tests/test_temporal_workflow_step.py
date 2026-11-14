@@ -118,7 +118,7 @@ class KycCheck:
         self.reviewed = True
 
     @workflow.run
-    async def run(self, inputs: dict[str, Any]) -> dict[str, Any]:
+    async def run(self, inputs: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
         if inputs["customer_id"] == "c-fails":
             raise ApplicationError("documents unreadable")
         if inputs["customer_id"] == "c-waits":

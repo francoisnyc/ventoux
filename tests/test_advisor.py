@@ -37,8 +37,7 @@ PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 def claim() -> dict[str, Any]:
     """The quickstart's refund, with a goodwill refund a person proposes once the review is
     done, a customer's note (untrusted), a sensitive date of birth and a lead-only score."""
-    with open("examples/refund/refund.json") as file:
-        definition: dict[str, Any] = json.load(file)
+    definition: dict[str, Any] = json.loads(Path("examples/refund/refund.json").read_text())
     definition["fields"] |= {
         "note": {
             "type": "string",
@@ -263,6 +262,15 @@ def test_a_recording_replays_only_the_requests_it_recorded(tmp_path: Path) -> No
     with pytest.raises(ReplayRefused) as refused:
         asyncio.run(replayed.complete(changed))
     assert str(refused.value) == "request 1 differs from the one recorded, at message 1"
+    # One message more, the first ones the same: refused for its number of messages. The
+    # comparison stops at the shorter conversation and never fails on the length itself.
+    longer = Request(ASKED.system, (*ASKED.messages, Message("user", "And then?")))
+    with pytest.raises(ReplayRefused) as refused:
+        asyncio.run(Recorded.read(tmp_path / "session.json").complete(longer))
+    assert str(refused.value) == (
+        f"request 1 differs from the one recorded, in its number of messages: "
+        f"{len(longer.messages)}, not {len(ASKED.messages)}"
+    )
     assert asyncio.run(Recorded.read(tmp_path / "session.json").complete(ASKED)) == (
         '{"step": "goodwill"}'
     )

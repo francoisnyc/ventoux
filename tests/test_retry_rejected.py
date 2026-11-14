@@ -1571,7 +1571,7 @@ def test_a_retry_of_a_run_its_step_has_run_again_since_is_refused() -> None:
     assert run.state == before
 
 
-def generated_held_case(seed: int, refusals: list[str]) -> CaseState:
+def generated_held_case(seed: int, refusals: list[str]) -> CaseState:  # noqa: C901
     """A second family of generated cases, its own seeds: the refund with the order looked up,
     the lookup held until a turn lets it finish, and `recheck`, a rule that stops the lookup
     on the hold's answer, so refreshes can be stopped, fail and be superseded across a person's

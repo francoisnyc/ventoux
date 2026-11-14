@@ -189,7 +189,7 @@ def at_moment(reading: Reading, on: object) -> Known:
         return Known(present=frozenset(f"{on.event}.{field}" for field in payload))
     if on == "opened":
         return Known()  # nothing has run
-    unknown_moment(on)  # fail closed: never read as the opening
+    return unknown_moment(on)  # fail closed: never read as the opening
 
 
 def outcome_issues(
@@ -246,7 +246,7 @@ def read_outcomes(case: CaseDefinition, field: str) -> set[str]:
     return {outcome for expression in expressions for outcome in told_apart(expression, field)}
 
 
-def told_apart(expression: Expression, field: str) -> set[str]:
+def told_apart(expression: Expression, field: str) -> set[str]:  # noqa: C901
     """The outcomes of `field` that `expression` tells from the others: those it compares the
     field with (`==`, `!=`, `in`). Comparing it with `done` tells every outcome from `done`, and so
     does reading it any other way, since the check never guesses: `done` then stands for all."""
@@ -491,7 +491,7 @@ def when_stale(case: CaseDefinition, name: str) -> str:
     return f"{name} needs attention"
 
 
-def never_fetched(
+def never_fetched(  # noqa: C901
     case: CaseDefinition, contracts: Mapping[str, Contract], value: str
 ) -> str | None:
     """Why `value` can never be fetched again, as the runtime's `refreshable` says; None if it

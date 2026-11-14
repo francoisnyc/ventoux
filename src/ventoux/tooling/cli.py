@@ -87,7 +87,7 @@ class Unreadable(Exception):
         super().__init__("\n".join(f"{path}: {line}" for line in problems.splitlines()))
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901
     """Run `ventoux` with `argv` (the command line's own when None), and say how it ended."""
     # argparse: the standard library's command-line parser; it prints `--help` and refuses an
     # unknown command by itself.
@@ -387,7 +387,7 @@ def releases_folder(flag: Path | None, found: Configuration) -> Path:
     return root / found.releases
 
 
-def check_files(
+def check_files(  # noqa: C901
     files: Sequence[Path], found: Configuration, catalog: Catalog, unchanged: bool = False
 ) -> int:
     """Run the builder files, check every package, and write them all, or nothing (brief, D59).

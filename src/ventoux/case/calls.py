@@ -237,7 +237,7 @@ def plan_input_issues(case: CaseDefinition, plans: Mapping[str, Plan]) -> list[I
     return issues
 
 
-def expression_issues(
+def expression_issues(  # noqa: C901
     case: CaseDefinition, types: dict[str, FieldType], missing: set[str]
 ) -> list[Issue]:
     """Each expression a step or a rule reads, type-checked over the case's values. One that reads what a

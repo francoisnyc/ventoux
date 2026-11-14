@@ -47,7 +47,7 @@ DONE = "done"  # how every run that succeeds ends
 FAILED = "failed"  # how a plan ending in a failed final state ends (brief, D28)
 
 
-def case_types(
+def case_types(  # noqa: C901
     case: CaseDefinition, catalog: Catalog, cases: Mapping[str, object] | None = None
 ) -> dict[str, FieldType]:
     """Every value `case` holds, by the name an expression reads it with, and its type: each field;
