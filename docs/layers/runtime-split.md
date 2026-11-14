@@ -1,9 +1,9 @@
 # The split of `case/runtime.py`: the list, to agree before anything moves
 
 Not a layer and not a fix: no rule of the product changes (the maintainer's walkthrough,
-2026-11-13). **This pull request holds only this list.** Nothing has moved. The list was agreed
-in the review of #108 on 2026-11-14, with one change, the folder below. The move starts once the
-lint bar (#107) is merged, since #107 touches `case/runtime.py`.
+2026-11-13). The list below was agreed in the review of #108 on 2026-11-14, with one change, the
+folder. The move was made once the lint bar (#107) was merged, on `main` at `9aad27a`; its proof
+is at the end.
 
 ## Why
 
@@ -59,12 +59,12 @@ definitions alone, before imports and the file's docstring.
 
 ## The order the files import each other
 
-Worked out from the call graph between the 95 names. Each file imports only files below it in
-this list, so there is no import cycle and no import inside a function:
+Read from the files as moved. Each file imports only files below it in this list, so there is
+no import cycle and no import inside a function:
 
 ```
 deciding     -> receiving, opening, answering, proposing, completing, retrying, admitting
-completing   -> answering, starting, outcomes, runs
+completing   -> answering, outcomes, runs
 retrying     -> items, runs
 proposing    -> admitting, refreshing, starting, runs
 receiving    -> runs
@@ -117,20 +117,99 @@ name of `runtime.py` is in `src/ventoux/public.json`.
   written, and the learning log is the maintainer's. This note is the pointer to where each
   group went.
 
-## The proof the move will carry
+## The proof
 
-In this note, once the move is made:
+All on this branch after the move, against `main` at `9aad27a` (which has #106 and #107).
 
-- the suite's count unchanged, before and after;
-- the recorded histories replay;
-- a script showing each moved function's body is the same before and after (compared as
-  parsed code, so a comment or a blank line that moved is seen too);
-- `tests/test_layers.py` passes;
-- the 8 `# noqa: C901` marks `runtime.py` holds after #107 travel with their functions:
-  `ruff check` passing shows none was lost or left behind;
-- `src/ventoux/public.json` unchanged;
-- which files in `case` are still over 1,000 lines afterwards, and why. Today that would be
-  `definition.py` alone (1,244 lines), which this doesn't touch.
+**Every definition's text is the same.** The script below reads each top-level function, class
+and constant of the old file and of the new ones, with the comment lines just above it, its
+decorators, signature and body, and compares the text exactly:
+
+```
+$ git show 9aad27a:src/ventoux/case/runtime.py > before.py
+$ python same_bodies.py before.py src/ventoux/case/runtime
+before: 95 definitions; after: 95
+missing: []; added: []; changed: []
+```
+
+Seen failing twice: with one space added inside `listed`'s docstring (`changed: ['listed']`),
+and with the comment above `DONE` dropped (`changed: ['DONE']`). The script:
+
+```python
+"""Each top-level definition of the old `case/runtime.py` is in `case/runtime/`, once, with the
+same text: the comment lines just above it, its decorators, signature and body. Usage:
+    git show 9aad27a:src/ventoux/case/runtime.py > before.py
+    python same_bodies.py before.py src/ventoux/case/runtime
+"""
+
+import ast
+import sys
+from pathlib import Path
+
+
+def definitions(path: Path) -> dict[str, str]:
+    """Each top-level function, class or constant's text, with its comment lines, by name."""
+    text = path.read_text()
+    lines = text.splitlines(keepends=True)
+    found: dict[str, str] = {}
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = node.name
+        else:
+            continue
+        start = min([node.lineno, *(d.lineno for d in getattr(node, "decorator_list", []))]) - 1
+        while start > 0 and lines[start - 1].startswith("#"):
+            start -= 1  # the comment lines directly above it are its own
+        found[name] = "".join(lines[start : node.end_lineno])
+    return found
+
+
+before = definitions(Path(sys.argv[1]))
+after: dict[str, str] = {}
+for file in sorted(Path(sys.argv[2]).glob("*.py")):
+    if file.name == "__init__.py":
+        continue  # imports and `__all__` only
+    for name, text in definitions(file).items():
+        assert name not in after, f"{name} is defined twice"
+        after[name] = text
+missing = sorted(set(before) - set(after))
+added = sorted(set(after) - set(before))
+changed = sorted(name for name in before if name in after and before[name] != after[name])
+print(f"before: {len(before)} definitions; after: {len(after)}")
+print(f"missing: {missing}; added: {added}; changed: {changed}")
+sys.exit(1 if missing or added or changed else 0)
+```
+
+**What else changed, outside the moved text:**
+
+- each new file's docstring, and its imports: the old file's whole import block was copied into
+  each, with the sibling names it uses, and `ruff check --fix --select F401,I001` removed what
+  each file doesn't use and sorted the rest;
+- `__init__.py`: imports and `__all__` only;
+- `case/validate.py` and `case/warnings.py`: `listed` from `ventoux.case.runtime.runs`.
+
+One correction to the list: `completing.py` doesn't import `starting.py`. The call graph had
+counted `steering`, the name of a variable in `complete`'s comprehension, as the function of that
+name; the table above is now read from the files. The tutor's review found the same kind of
+false edge (`failed`, in `held_close_refusal`).
+
+**The checks:**
+
+| Check | Result |
+|---|---|
+| the suite, on `main` at `9aad27a` | 4720 passed, 3 skipped |
+| the suite, on this branch | 4720 passed, 3 skipped: the same |
+| the recorded histories replay (`pytest -k "replay or histories or history"`) | 54 passed |
+| `tests/test_layers.py` (`case` stays pure, walking the folder too) | 76 passed |
+| `ruff check`, with the 8 `# noqa: C901` marks moved with their functions (none lost: a function over 10 without its mark fails; none left behind: an unused mark fails) | clean |
+| `ruff format --check`, mypy strict | clean |
+| `src/ventoux/public.json` | unchanged |
+
+**Files in `case` still over 1,000 lines:** `definition.py` alone (1,244), which this doesn't
+touch: it holds the definition's schema, one Pydantic model per part of a case, and its checks.
+The largest file in `case/runtime/` is `answering.py`, 462 lines with its imports.
 
 ## Not part of this
 
