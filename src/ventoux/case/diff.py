@@ -148,7 +148,7 @@ def child_changes(before: Package, after: Package, catalog: Catalog) -> list[Cha
 # --- Walking the two versions --------------------------------------------------------------------
 
 
-def leaves(before: object, after: object, path: str) -> list[Leaf]:
+def leaves(before: object, after: object, path: str) -> list[Leaf]:  # noqa: C901
     """Every place `before` and `after` behave differently, named as 12a's release notes name
     them (`changed`) (brief, D50), in the new version's order, a removed entry where it was."""
     if before is MISSING or after is MISSING:
@@ -312,10 +312,13 @@ def roles_compared(path: str) -> str | None:
 def at(path: str, pattern: Sequence[str]) -> bool:
     """Whether `path` is written as `pattern`: `fields.amount.source` is `fields.*.source`."""
     parts = path.split(".")
-    return len(parts) == len(pattern) and all(p in ("*", part) for part, p in zip(parts, pattern))
+    if len(parts) != len(pattern):
+        return False
+    # Python: `strict=True` raises if the lengths differ, which the line above rules out.
+    return all(p in ("*", part) for part, p in zip(parts, pattern, strict=True))
 
 
-def judged(
+def judged(  # noqa: C901
     found: list[Leaf], versions: Versions, peers: list[Leaf] | None = None
 ) -> Iterator[Change | Rewritten]:
     """Each leaf as changes: judged by its comparison where one applies, else said, not proven.

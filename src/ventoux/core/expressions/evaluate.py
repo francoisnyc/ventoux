@@ -49,7 +49,7 @@ class Element:
     label: str  # "element 2 of items", for messages
 
 
-def evaluate(
+def evaluate(  # noqa: C901
     expression: Expression, values: Mapping[str, object], element: Element | None = None
 ) -> Value:
     """The value of `expression` against the case file's `values`, or `ExpressionError`.

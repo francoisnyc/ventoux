@@ -4,6 +4,7 @@ See `ventoux.case.audit` for what a record holds, and docs/layers/19-audit-keys.
 """
 
 import copy
+from collections.abc import Mapping
 from typing import assert_never
 
 from ventoux.case.audit import Act, AuditRecord, Decision, Fact
@@ -155,7 +156,7 @@ def record(
     )
 
 
-def act_of(case: CaseDefinition, event: Event) -> Act:
+def act_of(case: CaseDefinition, event: Event) -> Act:  # noqa: C901
     """`event` as an act: who, with which roles, what it names, giving what. A value given for a
     field of the case file is as the case file keeps it: the client wraps every value of a form,
     since it can't tell which are sensitive; the record keeps wrapped only the sensitive ones
@@ -163,10 +164,10 @@ def act_of(case: CaseDefinition, event: Event) -> Act:
     roles = tuple(sorted(getattr(event, "roles", ())))  # as the trusted caller stated them
     match event:
         case Opened():
-            values = {name: kept(case, name, value) for name, value in event.file.items()}
+            values = given_for_fields(case, event.file)
             return Act("opened", by=event.by, roles=roles, values=values)
         case Answered():
-            values = {name: kept(case, name, value) for name, value in (event.form or {}).items()}
+            values = given_for_fields(case, event.form or {})
             return Act(
                 "answered",
                 by=event.by,
@@ -213,7 +214,7 @@ def act_of(case: CaseDefinition, event: Event) -> Act:
             # Who approved it is the act's; who proposed it, the forgotten decision's.
             return Act("forget approved", by=event.approved_by, roles=roles_of(event))
         case ChangeProposed():
-            given = {event.target: kept(case, event.target, event.value)}
+            given = given_for_fields(case, {event.target: event.value})
             values = given if event.kind == "edit" else {}  # a skip or a migration gives none
             return Act(
                 "change proposed",
@@ -225,7 +226,8 @@ def act_of(case: CaseDefinition, event: Event) -> Act:
             )
         case Sent():
             # What the event carries, as it carried it: its sender is its source (brief, D41).
-            return Act("event", by=event.by, roles=roles, entry=event.event, values=event.payload)
+            values = given_as_declared(case, event)
+            return Act("event", by=event.by, roles=roles, entry=event.event, values=values)
         case TimerDue():
             return Act("timer", entry=event.rule)
         case Claimed():
@@ -244,12 +246,27 @@ def act_of(case: CaseDefinition, event: Event) -> Act:
             return Act("export retried", by=event.by, roles=roles)
 
 
+def given_for_fields(case: CaseDefinition, given: Mapping[str, object]) -> dict[str, object]:
+    """What an act gave, each value as the case file keeps its field. A value under a name that
+    is no field is never kept: it is dropped still wrapped, never read as "not sensitive". The
+    act is refused, and its refusal says the name (brief, D89)."""
+    return {name: kept(case, name, value) for name, value in given.items() if name in case.fields}
+
+
+def given_as_declared(case: CaseDefinition, event: Sent) -> dict[str, object]:
+    """What an event carried under the names its payload declares. A value under any other name
+    is never kept, nor anything an event the case doesn't declare carries: the event is refused,
+    and its refusal says the name (brief, D89)."""
+    declared = case.events[event.event].payload if event.event in case.events else {}
+    return {name: value for name, value in event.payload.items() if name in declared}
+
+
 def roles_of(event: ForgetApproved) -> tuple[str, ...]:
     """The approver's roles, sorted: the proposer's are the forgotten decision's."""
     return tuple(sorted(event.approver_roles))
 
 
-def asked(event: Event) -> str:
+def asked(event: Event) -> str:  # noqa: C901
     """What a person asked, as a refusal names it: `sam's answer approve to review#1`."""
     if isinstance(event, Answered):
         return f"{event.by}'s answer {event.outcome} to {event.entry}"

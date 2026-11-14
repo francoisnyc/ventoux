@@ -62,6 +62,14 @@ deliberately in Python, smaller and clearer.
 - Python 3.12+, managed with `uv`. Schemas with Pydantic (v2); the definition format is also
   published as JSON Schema generated from it. Tests with pytest. Lint and format with ruff. Strict
   type checking (pyright or mypy in strict mode) on all code.
+- The lint bar (`pyproject.toml`, `docs/layers/lint-bar.md`): beside ruff's defaults, the rule
+  families B, UP, I, SIM, RET, RUF, C4, PIE, PTH, ERA and N, relative imports (TID252), and a
+  function of more than 10 branches (C901). The deliberate exceptions: the typographic
+  characters in messages and documents (RUF001 to RUF003); refusals named `...Refused` and
+  `...Invalid`, never `...Error` (N818); `match=` patterns in tests (RUF043, until its own pull
+  request). A `noqa` names its rule and says why on the same line or the one above; an unused
+  one fails. A function already over 10 branches is marked `# noqa: C901` where it is defined:
+  never add the mark to a new function, split it.
 - Keep `ventoux.core` and `ventoux.case` free of Temporal and LLM dependencies; adapters live in
   `ventoux.temporal` and `ventoux.authoring`.
 - Every feature lands with tests, including at least one negative test (a definition that must be

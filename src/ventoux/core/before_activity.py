@@ -43,7 +43,7 @@ class Steering:
     sources: frozenset[str]  # the sources of that value the engine doesn't trust: never empty
 
 
-def checked_inputs(
+def checked_inputs(  # noqa: C901
     contract: Contract,
     inputs: Mapping[str, Expression],
     values: Mapping[str, object],

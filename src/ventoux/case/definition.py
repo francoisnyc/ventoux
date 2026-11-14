@@ -976,7 +976,7 @@ def report_problems(case: CaseDefinition) -> list[str]:
     return problems
 
 
-def step_problems(
+def step_problems(  # noqa: C901
     path: str,
     step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep,
     case: CaseDefinition,

@@ -74,7 +74,7 @@ def kind_role(catalog: Catalog, kind: str, roles: frozenset[str]) -> str | None:
     return role_that_counts(tuple(who_may(catalog, kind)), roles, catalog.roles)
 
 
-def propose_change(
+def propose_change(  # noqa: C901
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: ChangeProposed
 ) -> None:
     """Record the proposed change as an entry waiting for someone else's approval, once it is
@@ -143,8 +143,11 @@ def unseen(
 def kept(case: CaseDefinition, name: str, value: object) -> object:
     """An edit's value as the case file would keep it: sealed for a sensitive field, plain
     otherwise. The client seals every value, since it can't tell which fields are sensitive."""
-    sensitive = name in case.fields and case.fields[name].sensitive
-    return value if sensitive else plain(value)
+    # A name that is no field has no rule to follow: its value stays sealed, never read as "not
+    # sensitive". The edit is refused just after, saying the name (brief, D89).
+    if name not in case.fields:
+        return value
+    return value if case.fields[name].sensitive else plain(value)
 
 
 def edit_problem(case: CaseDefinition, state: CaseState, name: str, value: object) -> str | None:

@@ -282,7 +282,7 @@ def test_a_change_the_diff_doesnt_judge_is_said_not_proven() -> None:
     assert found.changes[0].comparison is None
 
 
-def edited(edit: str) -> tuple[Package, Package, Catalog]:
+def edited(edit: str) -> tuple[Package, Package, Catalog]:  # noqa: C901
     """The refund before and after `edit`, one of EDITS, and the catalog to compare them with."""
     case, plans = settling()
     quick = refund()
@@ -781,13 +781,12 @@ def identified(sensitive: bool) -> dict[str, Any]:
 
 def checks(case: dict[str, Any]) -> CaseRun:
     """The KYC workflow given the ID."""
-    run = run_case(
+    return run_case(
         case,
         file={"national_id": "1 85 05 78 006 084 36"},
         answers=[],
         people=SUPPORT,
     )
-    return run
 
 
 def sensitive_witness() -> tuple[dict[str, Any], dict[str, Any], Catalog, bool, bool]:

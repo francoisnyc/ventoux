@@ -4,6 +4,7 @@ See docs/layers/08-case.md (8c) and docs/guides/cases.md, "Running a case on Tem
 """
 
 import asyncio
+import contextlib
 import copy
 import dataclasses
 import json
@@ -1439,10 +1440,9 @@ def test_closing_a_case_stops_its_child_plan() -> None:
         plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
         await close(case, "duplicate", "ana", PEOPLE["ana"])
         await reported(case, lambda now: now.status != "open")
-        try:
+        # The child has ended: the answer can no longer be given.
+        with contextlib.suppress(RPCError):
             await plans.answer(plan, "approve_refund#1", "approve", "lee", PEOPLE["lee"])
-        except RPCError:
-            pass  # the child has ended: the answer can no longer be given
         return await case.result()
 
     ended = on_temporal(scenario, {**FAKES, "payments.refund@2": refund}, cases=CasesWithPlans)
@@ -1697,10 +1697,9 @@ def test_a_rule_stops_a_child_plan() -> None:
         plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
         await withdraw(case)
         ended = await case.result()
-        try:
+        # The child has ended: the answer can no longer be given.
+        with contextlib.suppress(RPCError):
             await plans.answer(plan, "approve_refund#1", "approve", "lee", PEOPLE["lee"])
-        except RPCError:
-            pass  # the child has ended: the answer can no longer be given
         return ended, await plan.result()
 
     ended, child = on_temporal(

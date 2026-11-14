@@ -151,7 +151,7 @@ def checked_field_issues(plan: Plan) -> list[Issue]:
     return issues
 
 
-def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
+def validate(plan: Plan, catalog: Catalog) -> list[Issue]:  # noqa: C901
     """Every problem in `plan`, a parsed plan, read against the activities in `catalog`."""
     # Fail closed: anything but a parsed plan is refused, never read as a plan with no problems.
     if not isinstance(plan, Plan):

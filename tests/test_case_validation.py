@@ -2601,10 +2601,10 @@ def test_only_a_read_needing_no_approval_is_fetched_again() -> None:
         return [
             f"{value} comes from {source}: whenever it is older than pay's max_age allows, pay "
             "needs attention: keep it only if a person should decide each time"
-            for source in WHY[value]
+            for source in sources_said[value]
         ]
 
-    WHY = {
+    sources_said = {
         "amount": ["the opening, and can't be fetched again"],
         "review.outcome": ["a person, in review, and can't be fetched again"],
         "draft.draft_id": ["draft, which has side effects (write), and can't be run again"],

@@ -201,7 +201,7 @@ class EventRefused(Exception):
     value it carries (brief, D41)."""
 
 
-def decide(
+def decide(  # noqa: C901
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
 ) -> tuple[CaseState, list[Command]]:
     """The case's state after `event`, and the activities to schedule. A refused event raises
@@ -695,7 +695,7 @@ def has_been_open(state: CaseState, entry: str) -> bool:
     return count.isdigit() and 1 <= int(count) <= state.asked.get(step, 0)
 
 
-def propose(
+def propose(  # noqa: C901
     case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,
@@ -1383,7 +1383,7 @@ def operating_role(catalog: Catalog, event: Retried) -> str:
     return counted[0]
 
 
-def retry(
+def retry(  # noqa: C901
     case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,
@@ -1487,7 +1487,7 @@ def reads_a_stale_fact(
     return any(stale.field in read for stale in stale_facts(step.max_age, state, at))
 
 
-def admit(
+def admit(  # noqa: C901
     case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command], at: int
 ) -> None:
     """Start every step that may start now, until no more can: no position, only admission.
@@ -1653,7 +1653,7 @@ def refresh_stale(
     return "fresh"
 
 
-def refreshable(
+def refreshable(  # noqa: C901
     case: CaseDefinition, catalog: Catalog, state: CaseState, stale: Stale
 ) -> tuple[str | None, str]:
     """The step whose run obtained the stale fact, if running it again is safe: an activity whose
@@ -1735,7 +1735,7 @@ def proposal_spent(state: CaseState, name: str) -> None:
     state.proposed_by_rules.pop(name, None)
 
 
-def start_from_rules(
+def start_from_rules(  # noqa: C901
     case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command], at: int
 ) -> bool:
     """Take each start the rules asked for, in order: the engine proposes, and admission decides,
@@ -1832,7 +1832,7 @@ def drop_waiting(state: CaseState, name: str, why: str) -> None:
         state.history.append(f"dropped {proposer}'s proposal of {name}: {why}")
 
 
-def start(
+def start(  # noqa: C901
     case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,
@@ -1902,7 +1902,7 @@ def start(
     proposal_spent(state, name)
 
 
-def start_items(
+def start_items(  # noqa: C901
     case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,

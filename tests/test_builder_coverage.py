@@ -131,7 +131,7 @@ def format_keys() -> tuple[set[Key], set[tuple[str, str, str]]]:
     return keys, values
 
 
-def given_keys(found: object, keys: set[Key], values: set[tuple[str, str, str]]) -> None:
+def given_keys(found: object, keys: set[Key], values: set[tuple[str, str, str]]) -> None:  # noqa: C901
     """Every key `found`, a parsed definition or a part of one, was given (never a default), and
     every shape-picking value it holds."""
     if isinstance(found, BaseModel):

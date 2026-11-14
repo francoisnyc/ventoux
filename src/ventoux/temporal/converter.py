@@ -37,7 +37,7 @@ with workflow.unsafe.imports_passed_through():
 MARK = PLACEHOLDER
 
 
-def exact_json(value: Any, parts: list[str]) -> str:
+def exact_json(value: Any, parts: list[str]) -> str:  # noqa: C901
     """`value` as JSON text, every number written exactly; anything else is refused. Each
     sensitive value is written as `{"‹sensitive›": n}`, and its own JSON added to `parts` as the
     `n`th: it crosses in its own part of the payload, which the codec encrypts (brief, D31)."""

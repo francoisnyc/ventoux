@@ -414,7 +414,7 @@ def test_a_probe_raising_what_its_rule_doesnt_expect_is_unchecked(
 
 def test_a_probe_that_never_answers_is_unchecked_naming_the_bound(tmp_path: Path) -> None:
     # Every probe bounded: one that never answers is unchecked, never a hang (#94).
-    never = Answering(**{field: FOREVER for field in PROBING.values()})
+    never = Answering(**dict.fromkeys(PROBING.values(), FOREVER))
     started = time.monotonic()
     seen = asyncio.run(
         asyncio.wait_for(diagnose(deployment(tmp_path), "production", never, 0.2), timeout=10)
@@ -699,7 +699,7 @@ def test_no_secret_is_said_a_failure_included(
         + IDENTITIES.format(cert=tmp_path / "operator.pem", key=tmp_path / "operator.key"),
     )
     leaking = RuntimeError(f"{token} {api_key} {SECRET}")  # what an error's message may hold
-    probes = Answering(**{field: leaking for field in PROBING.values()})
+    probes = Answering(**dict.fromkeys(PROBING.values(), leaking))
     text = "\n".join(said(findings(found, probes), "production"))
     assert "FAILED" in text and "unchecked" in text  # through failing branches
     for secret in (token, api_key, SECRET, "never-said"):

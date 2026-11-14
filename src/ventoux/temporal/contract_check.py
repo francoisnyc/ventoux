@@ -7,6 +7,7 @@ checked in its history, once it has been asked to cancel (brief, D40).
 """
 
 import asyncio
+import contextlib
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -153,10 +154,10 @@ async def cancellation_problems(
         await handle.cancel()
     except RPCError:
         return [unchecked(contract)]  # it ended in between: nothing left to cancel
-    try:
+    # Python: `suppress` lets the named error end the block quietly. It ended cancelled, or
+    # failed: the history says which.
+    with contextlib.suppress(WorkflowFailureError):
         await handle.result()
-    except WorkflowFailureError:
-        pass  # ended cancelled, or failed: the history says which
     events = list((await handle.fetch_history()).events)
     asked = next((e.event_id for e in events if e.event_type == CANCEL_REQUESTED), None)
     if asked is None:
@@ -172,7 +173,7 @@ def unchecked(contract: WorkflowContract) -> str:
     )
 
 
-def broken_parts(contract: WorkflowContract, events: list[HistoryEvent], asked: int) -> list[str]:
+def broken_parts(contract: WorkflowContract, events: list[HistoryEvent], asked: int) -> list[str]:  # noqa: C901
     """The parts of the promise the history breaks, after the cancellation `asked` (an event
     ID): it schedules nothing new; it ends only once all it started has ended; it ends
     cancelled only if nothing it started completed after the request. One cause, one problem:

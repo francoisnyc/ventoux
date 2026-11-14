@@ -30,10 +30,12 @@ from test_set import PEOPLE as SET_PEOPLE
 
 from ventoux.case.admission import ProposalRefused
 from ventoux.case.audit import Act, Decision, Fact
+from ventoux.case.keeping import kept
 from ventoux.case.memory import CaseRun
 from ventoux.case.recording import record_refused
-from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, Proposed
+from ventoux.case.requests import ChangeRefused
+from ventoux.case.runtime import EventRefused, decide
+from ventoux.case.state import Answered, ChangeProposed, Proposed, Sent
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
@@ -254,6 +256,97 @@ def test_a_form_value_is_recorded_as_the_case_file_keeps_it() -> None:
         "national_id": Sensitive(NATIONAL_ID),
         "estimated_damage": Decimal(900),
     }
+
+
+STRAY = "17 May 1985"  # typed into a box the task doesn't have
+
+
+def test_a_refused_answer_keeps_no_value_under_a_name_that_is_no_field() -> None:
+    # A name the case doesn't know is never read as "not sensitive": the answer is refused, its
+    # line says the name, and the value is dropped still wrapped (brief, D89).
+    run = run_case(claim(), OPENING, [], {"ana": ["adjuster"]}, engine=3)
+    form = {"scratch": Sensitive(STRAY)}  # wrapped, as the client sends every form value
+    act = Answered("assess#1", "accept", "ana", frozenset({"adjuster"}), form, at=LATER)
+    with pytest.raises(AnswerRefused) as refused:
+        decide(run.definition, CATALOG, run.state, act)
+
+    after = record_refused(run.definition, run.state, act, refused.value)
+
+    assert str(refused.value) == "the answer gives scratch, which accept doesn't set"
+    assert after.audit[-1].act.values == {}
+    # Nor is it in the state the case continues as new with, which carries each record not yet
+    # exported (brief, D27).
+    assert STRAY not in str(state_as_data(after))
+
+
+def test_a_refused_edit_keeps_no_value_under_a_name_that_is_no_field() -> None:
+    # The same door, by an edit: a proposal to edit a name the case doesn't have is refused, and
+    # its record holds nothing of the value (brief, D89).
+    run = run_case(claim(), OPENING, [], {"ana": ["adjuster"]}, engine=3)
+    roles = frozenset(CHANGERS["ana"])
+    act = ChangeProposed("edit", "scratch", Sensitive(STRAY), "ana", roles, at=LATER)
+    with pytest.raises(ChangeRefused) as refused:
+        decide(run.definition, CATALOG, run.state, act)
+
+    after = record_refused(run.definition, run.state, act, refused.value)
+
+    assert str(refused.value) == "scratch is not a field of claim: only a declared field is edited"
+    assert after.audit[-1].act.values == {}
+    assert STRAY not in str(state_as_data(after))
+
+
+def test_a_refused_answers_value_for_a_real_field_follows_that_field() -> None:
+    # Only a name that is no field is dropped. A field the outcome doesn't set is still a field:
+    # its value is recorded as the case file would keep it, wrapped if sensitive, plain if not
+    # (brief, D76) (brief, D89).
+    run = run_case(claim(), OPENING, [], {"ana": ["adjuster"]}, engine=3)
+    form = {"national_id": Sensitive(NATIONAL_ID), "policy_id": Sensitive("pol-9")}
+    act = Answered("assess#1", "accept", "ana", frozenset({"adjuster"}), form, at=LATER)
+    with pytest.raises(AnswerRefused) as refused:
+        decide(run.definition, CATALOG, run.state, act)
+
+    after = record_refused(run.definition, run.state, act, refused.value)
+
+    assert after.audit[-1].act.values == {
+        "national_id": Sensitive(NATIONAL_ID),
+        "policy_id": "pol-9",
+    }
+
+
+def test_a_refused_event_keeps_no_value_under_a_name_its_payload_doesnt_declare() -> None:
+    # The third door: a system forwarding a whole body sends names the event doesn't declare.
+    # The event is refused, saying the name; its record keeps what the payload declares, and
+    # nothing under any other name (brief, D89).
+    reviewed = [("review", "approve", "ana", {"approved_amount": 40})]
+    run = run_case(
+        waiting_for_a_receipt(), {"order_id": "ord-1", "amount": 40}, reviewed, PEOPLE, engine=3
+    )
+    payload = {"receipt": "doc-7", "scratch": STRAY}
+    act = Sent("receipt_sent", payload, "system:portal", frozenset(), at=LATER)
+    with pytest.raises(EventRefused) as refused:
+        decide(run.definition, CATALOG, run.state, act)
+
+    after = record_refused(run.definition, run.state, act, refused.value)
+
+    assert str(refused.value) == (
+        "receipt_sent's payload has no field scratch: its fields are receipt"
+    )
+    assert after.audit[-1].act.values == {"receipt": "doc-7"}
+    assert STRAY not in str(state_as_data(after))
+    # An event the case doesn't declare has no payload to go by: nothing it carries is kept.
+    unknown = Sent("refunded", {"scratch": STRAY}, "system:portal", frozenset(), at=LATER)
+    with pytest.raises(EventRefused) as refused:
+        decide(run.definition, CATALOG, run.state, unknown)
+    after = record_refused(run.definition, run.state, unknown, refused.value)
+    assert after.audit[-1].act.values == {}
+
+
+def test_how_a_value_is_kept_is_never_asked_of_a_name_that_is_no_field() -> None:
+    # Fail closed: a name that is no field has no rule, so asking how its value is kept is an
+    # error, never "plain" (brief, D89).
+    run = run_case(claim(), OPENING, [], {"ana": ["adjuster"]}, engine=3)
+    with pytest.raises(KeyError, match="scratch"):
+        kept(run.definition, "scratch", Sensitive(STRAY))
 
 
 def owed_and_known() -> dict[str, Any]:

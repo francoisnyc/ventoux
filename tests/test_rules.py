@@ -14,9 +14,12 @@ import pytest
 from pydantic import BaseModel
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.known import Reading
+from ventoux.case.reach import moment_can_come
 from ventoux.case.runtime import decide
 from ventoux.case.state import CaseState, Completed, Opened, StartWorkflow
 from ventoux.case.validate import validate_case
+from ventoux.case.warnings import at_moment
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.policy import only_from
@@ -1458,6 +1461,12 @@ def test_an_unknown_moment_fails_closed() -> None:
             CaseState("t"),
             Opened({**SMALL, "amount": Decimal(40)}, None, at=START),
         )
+    # And each reader of a moment refuses it on its own, whichever is asked first: whether it
+    # can come, and what has surely happened when it does.
+    with pytest.raises(ValueError, match=refused):
+        moment_can_come("closed", set())
+    with pytest.raises(ValueError, match=refused):
+        at_moment(Reading(case, {}, {}), "closed")
 
 
 def endless_rework() -> dict[str, Any]:

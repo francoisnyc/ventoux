@@ -7,6 +7,7 @@ clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-c
 """
 
 import asyncio
+import contextlib
 import json
 from collections.abc import Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -987,10 +988,10 @@ class CaseWorkflow:
         # Temporal: with a timeout, `wait_condition` starts a workflow timer, which history
         # records, and raises `TimeoutError` when it fires first; it is cancelled otherwise.
         timeout = None if due is None else due - workflow.now().timestamp()
-        try:
+        # Python: `suppress` lets the named error end the block quietly: the timer's time has
+        # come.
+        with contextlib.suppress(TimeoutError):
             await workflow.wait_condition(self.something_came, timeout=timeout)
-        except TimeoutError:
-            pass  # the timer's time has come
 
     def something_came(self) -> bool:
         """Whether the loop has something to do: an engine bug, an export ended, an event it may
@@ -1104,7 +1105,11 @@ class CaseWorkflow:
         for the loop to raise, never left in the task, where nobody would retrieve it and
         Temporal's SDK would log the task's description, quoting it (layer 9c)."""
         # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
-        asyncio.create_task(self.watched(work))
+        # No reference is kept here, and none is needed: Temporal's workflow loop keeps every
+        # task it creates until it is done (`_register_task` in the SDK's workflow instance),
+        # so this one can't be collected part-way. A set of our own would be workflow state
+        # that decides nothing.
+        asyncio.create_task(self.watched(work))  # noqa: RUF006
 
     async def watched(self, work: Coroutine[Any, Any, None]) -> None:
         try:

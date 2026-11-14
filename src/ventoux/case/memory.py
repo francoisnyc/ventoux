@@ -218,7 +218,7 @@ class Driver:
             state = self.carry(state, due)
         return state
 
-    def carry(self, state: CaseState, event: Event) -> CaseState:
+    def carry(self, state: CaseState, event: Event) -> CaseState:  # noqa: C901
         """Decide on `event`, then run each activity it asks for, feeding back what it gave. In
         memory a run is instant: what it gives arrives at the time of the event that started it."""
         at = event.at

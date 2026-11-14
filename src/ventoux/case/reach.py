@@ -78,7 +78,7 @@ def moment_can_come(moment: object, can: set[str]) -> bool:
         return moment.answered in can
     if moment == "opened" or isinstance(moment, EventArrived):
         return True
-    unknown_moment(moment)  # fail closed: never one that can come
+    return unknown_moment(moment)  # fail closed: never one that can come
 
 
 def acts_after_close(case: CaseDefinition, name: str) -> bool:
