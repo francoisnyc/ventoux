@@ -64,7 +64,7 @@ from ventoux.case.reach import (
 )
 from ventoux.case.registered import role_issues_of, source_issues_of, system_issues_of
 from ventoux.case.rules import said
-from ventoux.case.runtime import listed
+from ventoux.case.runtime.runs import listed
 from ventoux.case.sequence import requirements
 from ventoux.case.stranding import may_strand_issues
 from ventoux.case.types import case_types
