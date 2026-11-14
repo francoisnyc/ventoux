@@ -3843,6 +3843,10 @@ decision F; finding 1c.7). Adds to D31, D32 and D76, whose text is kept.*
   that is no field, a second door the review didn't name: its value was kept in clear the same
   way. A refusal still says the first problem it finds, so of two such names it says one; both
   values are dropped.
+  And for an event from outside, a third door (the tutor's review of #106): a refused event's
+  record keeps a value only under a name its payload declares, and nothing an undeclared event
+  carries. The signal the caller sent still holds the whole payload in Temporal's history, as
+  for every event (D41): that is the caller's sending, and no record takes it back.
 
 ### D90. A step that notifies needs a person's approval on every path
 

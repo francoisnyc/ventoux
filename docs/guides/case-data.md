@@ -541,6 +541,10 @@ decides.
   `sensitive` stays readable after forgetting. So declare `sensitive` every field that may hold
   personal data. A value given under a name that is no field of the case is never kept at all:
   the answer is refused, saying the name, and the value is dropped.
+- An event's payload under a name the event doesn't declare is refused the same way, and no
+  record of the case keeps the value. But an event is sent as it is given, not encrypted as a
+  form is, so the signal in Temporal's history holds all of it: a system sends only what the
+  event declares, never a whole body forwarded as it came.
 - People's identifiers (`ana`, `pia`) stay: forgetting is about the case's subject, whose
   personal data is in its sensitive fields.
 - The case's ID can never open a case again: its key is never made twice.

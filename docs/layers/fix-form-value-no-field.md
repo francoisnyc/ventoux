@@ -36,6 +36,12 @@ field, was found while reproducing it.
   #106).
 - **The opening goes through the same function, and nothing changes there:** an opening with a
   name that is no field is refused before any record is made (from the tutor's review of #106).
+- **An event from outside, the third door** (from the tutor's review of #106, which ran what
+  this note had only read). A refused event's record kept its whole payload, so a value under
+  a name the event doesn't declare was written to the store in clear, for every role. A system
+  forwarding a whole webhook body is the likelier way to meet this. `given_as_declared` keeps
+  only the names the event's payload declares, and nothing of an event the case doesn't
+  declare.
 - **A real field the outcome doesn't set is unchanged:** its value is recorded as its field
   says, wrapped if sensitive, plain if not (D76, D89).
 - **The refusal's line is unchanged:** it already said the name and never the value.
@@ -65,9 +71,16 @@ field, was found while reproducing it.
 
 ## Found, not fixed
 
-A refused event's record keeps its payload as it was carried (`act_of`, the `Sent` case),
-including under a name the event doesn't declare. Events come from systems, never from a form.
-Read in the code, not run: whether such a payload can hold anything sensitive wasn't checked.
+- **An event's payload is in the signal the caller sent.** `send_event` sends a payload as it
+  is given, not wrapped as a form's values are, so Temporal's history holds all of it in the
+  signal, a name the event doesn't declare included. No record can take that back. The
+  Temporal test shows the value there and nowhere else. Sealing an event's payload, or
+  refusing an undeclared name in the client before anything is sent, is a decision about
+  events (D41), not this fix.
+- **An opening's value under a name that is no field is in the start's input,** which the
+  client sent, and the case fails at its opening; nothing reaches the store. The client holds
+  the definition, so it could refuse before it starts anything. Shown by the tutor's review of
+  #106; it sits with what `start_case` takes (the review's fix 29).
 
 ## Promises
 
@@ -75,11 +88,14 @@ Read in the code, not run: whether such a payload can hold anything sensitive wa
 |---|---|
 | A refused answer's record holds no value under a name that is no field, and the carried state doesn't either; the refusal says the name | `tests/test_audit_records.py::test_a_refused_answer_keeps_no_value_under_a_name_that_is_no_field` |
 | The same for a refused edit | `tests/test_audit_records.py::test_a_refused_edit_keeps_no_value_under_a_name_that_is_no_field` |
+| A refused event's record keeps what its payload declares and nothing under any other name; an event the case doesn't declare keeps nothing | `tests/test_audit_records.py::test_a_refused_event_keeps_no_value_under_a_name_its_payload_doesnt_declare` |
+| On Temporal such an event's value is in no record: not in the store's files or what `read_audit` shows, before forgetting or after, and in the history only in the signal the caller sent | `tests/test_temporal_stray_values.py::test_an_events_value_under_a_name_it_doesnt_declare_reaches_no_record` |
 | A refused answer's value for a real field is recorded as its field says | `tests/test_audit_records.py::test_a_refused_answers_value_for_a_real_field_follows_that_field` |
 | On Temporal neither value is in the history, the store's files or what `read_audit` shows, before forgetting or after; the case went on waiting, then closed as forgotten | `tests/test_temporal_stray_values.py::test_a_value_under_a_name_that_is_no_field_is_kept_nowhere` |
 | Asked how to keep a value under a name that is no field, `kept` fails, never unwraps | `tests/test_audit_records.py::test_how_a_value_is_kept_is_never_asked_of_a_name_that_is_no_field` |
 | Every recorded history replays as it is | the replay tests, unchanged |
 
-Seen failing: the first, second and fourth with each door opened again (the answer's, then the
-edit's); the third with the rule over-applied (every value of a refused act dropped). The
-Temporal test was run 10 times in a row, all passing.
+Seen failing: each "kept nowhere" test with its door opened again (the answer's, the edit's,
+the event's), in memory and on Temporal; the real-field test with the rule over-applied (every
+value of a refused act dropped); `kept`'s test with its permissive branch put back. The two
+Temporal tests were run 10 times in a row, all passing.
